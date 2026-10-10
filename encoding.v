@@ -1,0 +1,549 @@
+module vgui
+
+// ═══════════════════════════════════════════════════════
+// Text encoding conversion utilities
+//
+// Supported encodings:
+//   utf-8 (default, passthrough)
+//   latin1 / iso-8859-1
+//   cp1251 / windows-1251
+//   cp1252 / windows-1252
+//   koi8-r
+//
+// V strings are always UTF-8 internally. These functions
+// convert between raw file bytes and V strings.
+// ═══════════════════════════════════════════════════════
+
+pub enum TextEncoding {
+	utf8
+	latin1 // ISO 8859-1
+	cp1251 // Windows-1251 (Cyrillic)
+	cp1252 // Windows-1252 (Western European)
+	koi8r  // KOI8-R (Cyrillic)
+}
+
+// Parse encoding name string → enum
+pub fn parse_encoding(name string) TextEncoding {
+	n := name.to_lower().trim_space().replace('-', '').replace('_', '')
+	return match n {
+		'utf8', 'utf-8', '' { .utf8 }
+		'latin1', 'iso88591', 'iso8859-1' { .latin1 }
+		'cp1251', 'windows1251', 'win1251' { .cp1251 }
+		'cp1252', 'windows1252', 'win1252' { .cp1252 }
+		'koi8r', 'koi8-r' { .koi8r }
+		else { .utf8 }
+	}
+}
+
+pub fn encoding_name(enc TextEncoding) string {
+	return match enc {
+		.utf8 { 'utf-8' }
+		.latin1 { 'latin1' }
+		.cp1251 { 'cp1251' }
+		.cp1252 { 'cp1252' }
+		.koi8r { 'koi8-r' }
+	}
+}
+
+// ─── Decode: raw bytes → UTF-8 string ──────────────────
+
+pub fn decode_bytes(data []u8, enc TextEncoding) string {
+	if data.len == 0 {
+		return ''
+	}
+	match enc {
+		.utf8 { return strip_bom(data.bytestr()) }
+		.latin1 { return decode_single_byte(data, latin1_table) }
+		.cp1251 { return decode_single_byte(data, cp1251_table) }
+		.cp1252 { return decode_single_byte(data, cp1252_table) }
+		.koi8r { return decode_single_byte(data, koi8r_table) }
+	}
+}
+
+// ─── Encode: UTF-8 string → raw bytes ──────────────────
+
+pub fn encode_string(text string, enc TextEncoding) []u8 {
+	if text.len == 0 {
+		return []
+	}
+	match enc {
+		.utf8 { return text.bytes() }
+		.latin1 { return encode_single_byte(text, latin1_reverse) }
+		.cp1251 { return encode_single_byte(text, cp1251_reverse) }
+		.cp1252 { return encode_single_byte(text, cp1252_reverse) }
+		.koi8r { return encode_single_byte(text, koi8r_reverse) }
+	}
+}
+
+// ─── BOM handling ──────────────────────────────────────
+
+fn strip_bom(s string) string {
+	if s.len >= 3 && s[0] == 0xEF && s[1] == 0xBB && s[2] == 0xBF {
+		return s[3..]
+	}
+	return s
+}
+
+// ─── Single-byte codec engine ──────────────────────────
+
+fn decode_single_byte(data []u8, table []rune) string {
+	mut result := []rune{cap: data.len}
+	for b in data {
+		if b < 0x80 {
+			result << rune(b)
+		} else {
+			idx := int(b) - 0x80
+			if idx < table.len {
+				result << table[idx]
+			} else {
+				result << rune(0xFFFD) // replacement char
+			}
+		}
+	}
+	return result.string()
+}
+
+fn encode_single_byte(text string, reverse map[rune]u8) []u8 {
+	runes := text.runes()
+	mut result := []u8{cap: runes.len}
+	for r in runes {
+		if r < 0x80 {
+			result << u8(r)
+		} else {
+			b := reverse[r] or { u8(`?`) }
+			result << b
+		}
+	}
+	return result
+}
+
+// ─── Rune → byte reverse maps (built from tables) ─────
+
+fn build_reverse(table []rune) map[rune]u8 {
+	mut m := map[rune]u8{}
+	for i, r in table {
+		if r != 0xFFFD {
+			m[r] = u8(i + 0x80)
+		}
+	}
+	return m
+}
+
+// ═══════════════════════════════════════════════════════
+// Encoding tables (0x80..0xFF → Unicode codepoint)
+// ═══════════════════════════════════════════════════════
+
+// Latin1 / ISO 8859-1: 0x80-0xFF maps directly to U+0080-U+00FF
+const latin1_table = build_latin1_table()
+
+fn build_latin1_table() []rune {
+	mut t := []rune{cap: 128}
+	for i in 0 .. 128 {
+		t << rune(0x80 + i)
+	}
+	return t
+}
+
+const latin1_reverse = build_reverse(latin1_table)
+
+// Windows-1251 (Cyrillic)
+const cp1251_table = [
+	rune(0x0402),
+	rune(0x0403),
+	rune(0x201A),
+	rune(0x0453),
+	rune(0x201E),
+	rune(0x2026),
+	rune(0x2020),
+	rune(0x2021), // 80-87
+	rune(0x20AC),
+	rune(0x2030),
+	rune(0x0409),
+	rune(0x2039),
+	rune(0x040A),
+	rune(0x040C),
+	rune(0x040B),
+	rune(0x040F), // 88-8F
+	rune(0x0452),
+	rune(0x2018),
+	rune(0x2019),
+	rune(0x201C),
+	rune(0x201D),
+	rune(0x2022),
+	rune(0x2013),
+	rune(0x2014), // 90-97
+	rune(0xFFFD),
+	rune(0x2122),
+	rune(0x0459),
+	rune(0x203A),
+	rune(0x045A),
+	rune(0x045C),
+	rune(0x045B),
+	rune(0x045F), // 98-9F
+	rune(0x00A0),
+	rune(0x040E),
+	rune(0x045E),
+	rune(0x0408),
+	rune(0x00A4),
+	rune(0x0490),
+	rune(0x00A6),
+	rune(0x00A7), // A0-A7
+	rune(0x0401),
+	rune(0x00A9),
+	rune(0x0404),
+	rune(0x00AB),
+	rune(0x00AC),
+	rune(0x00AD),
+	rune(0x00AE),
+	rune(0x0407), // A8-AF
+	rune(0x00B0),
+	rune(0x00B1),
+	rune(0x0406),
+	rune(0x0456),
+	rune(0x0491),
+	rune(0x00B5),
+	rune(0x00B6),
+	rune(0x00B7), // B0-B7
+	rune(0x0451),
+	rune(0x2116),
+	rune(0x0454),
+	rune(0x00BB),
+	rune(0x0458),
+	rune(0x0405),
+	rune(0x0455),
+	rune(0x0457), // B8-BF
+	rune(0x0410),
+	rune(0x0411),
+	rune(0x0412),
+	rune(0x0413),
+	rune(0x0414),
+	rune(0x0415),
+	rune(0x0416),
+	rune(0x0417), // C0-C7
+	rune(0x0418),
+	rune(0x0419),
+	rune(0x041A),
+	rune(0x041B),
+	rune(0x041C),
+	rune(0x041D),
+	rune(0x041E),
+	rune(0x041F), // C8-CF
+	rune(0x0420),
+	rune(0x0421),
+	rune(0x0422),
+	rune(0x0423),
+	rune(0x0424),
+	rune(0x0425),
+	rune(0x0426),
+	rune(0x0427), // D0-D7
+	rune(0x0428),
+	rune(0x0429),
+	rune(0x042A),
+	rune(0x042B),
+	rune(0x042C),
+	rune(0x042D),
+	rune(0x042E),
+	rune(0x042F), // D8-DF
+	rune(0x0430),
+	rune(0x0431),
+	rune(0x0432),
+	rune(0x0433),
+	rune(0x0434),
+	rune(0x0435),
+	rune(0x0436),
+	rune(0x0437), // E0-E7
+	rune(0x0438),
+	rune(0x0439),
+	rune(0x043A),
+	rune(0x043B),
+	rune(0x043C),
+	rune(0x043D),
+	rune(0x043E),
+	rune(0x043F), // E8-EF
+	rune(0x0440),
+	rune(0x0441),
+	rune(0x0442),
+	rune(0x0443),
+	rune(0x0444),
+	rune(0x0445),
+	rune(0x0446),
+	rune(0x0447), // F0-F7
+	rune(0x0448),
+	rune(0x0449),
+	rune(0x044A),
+	rune(0x044B),
+	rune(0x044C),
+	rune(0x044D),
+	rune(0x044E),
+	rune(0x044F), // F8-FF
+]
+
+const cp1251_reverse = build_reverse(cp1251_table)
+
+// Windows-1252 (Western European)
+const cp1252_table = [
+	rune(0x20AC),
+	rune(0xFFFD),
+	rune(0x201A),
+	rune(0x0192),
+	rune(0x201E),
+	rune(0x2026),
+	rune(0x2020),
+	rune(0x2021),
+	rune(0x02C6),
+	rune(0x2030),
+	rune(0x0160),
+	rune(0x2039),
+	rune(0x0152),
+	rune(0xFFFD),
+	rune(0x017D),
+	rune(0xFFFD),
+	rune(0xFFFD),
+	rune(0x2018),
+	rune(0x2019),
+	rune(0x201C),
+	rune(0x201D),
+	rune(0x2022),
+	rune(0x2013),
+	rune(0x2014),
+	rune(0x02DC),
+	rune(0x2122),
+	rune(0x0161),
+	rune(0x203A),
+	rune(0x0153),
+	rune(0xFFFD),
+	rune(0x017E),
+	rune(0x0178),
+	rune(0x00A0),
+	rune(0x00A1),
+	rune(0x00A2),
+	rune(0x00A3),
+	rune(0x00A4),
+	rune(0x00A5),
+	rune(0x00A6),
+	rune(0x00A7),
+	rune(0x00A8),
+	rune(0x00A9),
+	rune(0x00AA),
+	rune(0x00AB),
+	rune(0x00AC),
+	rune(0x00AD),
+	rune(0x00AE),
+	rune(0x00AF),
+	rune(0x00B0),
+	rune(0x00B1),
+	rune(0x00B2),
+	rune(0x00B3),
+	rune(0x00B4),
+	rune(0x00B5),
+	rune(0x00B6),
+	rune(0x00B7),
+	rune(0x00B8),
+	rune(0x00B9),
+	rune(0x00BA),
+	rune(0x00BB),
+	rune(0x00BC),
+	rune(0x00BD),
+	rune(0x00BE),
+	rune(0x00BF),
+	rune(0x00C0),
+	rune(0x00C1),
+	rune(0x00C2),
+	rune(0x00C3),
+	rune(0x00C4),
+	rune(0x00C5),
+	rune(0x00C6),
+	rune(0x00C7),
+	rune(0x00C8),
+	rune(0x00C9),
+	rune(0x00CA),
+	rune(0x00CB),
+	rune(0x00CC),
+	rune(0x00CD),
+	rune(0x00CE),
+	rune(0x00CF),
+	rune(0x00D0),
+	rune(0x00D1),
+	rune(0x00D2),
+	rune(0x00D3),
+	rune(0x00D4),
+	rune(0x00D5),
+	rune(0x00D6),
+	rune(0x00D7),
+	rune(0x00D8),
+	rune(0x00D9),
+	rune(0x00DA),
+	rune(0x00DB),
+	rune(0x00DC),
+	rune(0x00DD),
+	rune(0x00DE),
+	rune(0x00DF),
+	rune(0x00E0),
+	rune(0x00E1),
+	rune(0x00E2),
+	rune(0x00E3),
+	rune(0x00E4),
+	rune(0x00E5),
+	rune(0x00E6),
+	rune(0x00E7),
+	rune(0x00E8),
+	rune(0x00E9),
+	rune(0x00EA),
+	rune(0x00EB),
+	rune(0x00EC),
+	rune(0x00ED),
+	rune(0x00EE),
+	rune(0x00EF),
+	rune(0x00F0),
+	rune(0x00F1),
+	rune(0x00F2),
+	rune(0x00F3),
+	rune(0x00F4),
+	rune(0x00F5),
+	rune(0x00F6),
+	rune(0x00F7),
+	rune(0x00F8),
+	rune(0x00F9),
+	rune(0x00FA),
+	rune(0x00FB),
+	rune(0x00FC),
+	rune(0x00FD),
+	rune(0x00FE),
+	rune(0x00FF),
+]
+
+const cp1252_reverse = build_reverse(cp1252_table)
+
+// KOI8-R (Russian Cyrillic)
+const koi8r_table = [
+	rune(0x2500),
+	rune(0x2502),
+	rune(0x250C),
+	rune(0x2510),
+	rune(0x2514),
+	rune(0x2518),
+	rune(0x251C),
+	rune(0x2524),
+	rune(0x252C),
+	rune(0x2534),
+	rune(0x253C),
+	rune(0x2580),
+	rune(0x2584),
+	rune(0x2588),
+	rune(0x258C),
+	rune(0x2590),
+	rune(0x2591),
+	rune(0x2592),
+	rune(0x2593),
+	rune(0x2320),
+	rune(0x25A0),
+	rune(0x2219),
+	rune(0x221A),
+	rune(0x2248),
+	rune(0x2264),
+	rune(0x2265),
+	rune(0x00A0),
+	rune(0x2321),
+	rune(0x00B0),
+	rune(0x00B2),
+	rune(0x00B7),
+	rune(0x00F7),
+	rune(0x2550),
+	rune(0x2551),
+	rune(0x2552),
+	rune(0x0451),
+	rune(0x2553),
+	rune(0x2554),
+	rune(0x2555),
+	rune(0x2556),
+	rune(0x2557),
+	rune(0x2558),
+	rune(0x2559),
+	rune(0x255A),
+	rune(0x255B),
+	rune(0x255C),
+	rune(0x255D),
+	rune(0x255E),
+	rune(0x255F),
+	rune(0x2560),
+	rune(0x2561),
+	rune(0x0401),
+	rune(0x2562),
+	rune(0x2563),
+	rune(0x2564),
+	rune(0x2565),
+	rune(0x2566),
+	rune(0x2567),
+	rune(0x2568),
+	rune(0x2569),
+	rune(0x256A),
+	rune(0x256B),
+	rune(0x256C),
+	rune(0x00A9),
+	rune(0x044E),
+	rune(0x0430),
+	rune(0x0431),
+	rune(0x0446),
+	rune(0x0434),
+	rune(0x0435),
+	rune(0x0444),
+	rune(0x0433),
+	rune(0x0445),
+	rune(0x0438),
+	rune(0x0439),
+	rune(0x043A),
+	rune(0x043B),
+	rune(0x043C),
+	rune(0x043D),
+	rune(0x043E),
+	rune(0x043F),
+	rune(0x044F),
+	rune(0x0440),
+	rune(0x0441),
+	rune(0x0442),
+	rune(0x0443),
+	rune(0x0436),
+	rune(0x0432),
+	rune(0x044C),
+	rune(0x044B),
+	rune(0x0437),
+	rune(0x0448),
+	rune(0x044D),
+	rune(0x0449),
+	rune(0x0447),
+	rune(0x044A),
+	rune(0x042E),
+	rune(0x0410),
+	rune(0x0411),
+	rune(0x0426),
+	rune(0x0414),
+	rune(0x0415),
+	rune(0x0424),
+	rune(0x0413),
+	rune(0x0425),
+	rune(0x0418),
+	rune(0x0419),
+	rune(0x041A),
+	rune(0x041B),
+	rune(0x041C),
+	rune(0x041D),
+	rune(0x041E),
+	rune(0x041F),
+	rune(0x042F),
+	rune(0x0420),
+	rune(0x0421),
+	rune(0x0422),
+	rune(0x0423),
+	rune(0x0416),
+	rune(0x0412),
+	rune(0x042C),
+	rune(0x042B),
+	rune(0x0417),
+	rune(0x0428),
+	rune(0x042D),
+	rune(0x0429),
+	rune(0x0427),
+	rune(0x042A),
+]
+
+const koi8r_reverse = build_reverse(koi8r_table)

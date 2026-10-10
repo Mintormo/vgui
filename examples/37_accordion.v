@@ -1,0 +1,49 @@
+module main
+
+import vgui
+
+fn make_section(text string) &vgui.VBox {
+	mut box := vgui.create_vbox_fill()
+	box.set_padding(10)
+	box.set_spacing(6)
+	mut l := vgui.label_wrap(text)
+	box.add(l, flex: 1)
+	return box
+}
+
+fn main() {
+	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	mut win := vgui.create_window(title: 'Accordion - demo')!
+
+	// Аккордеон: разворачиваемые секции.
+	// accordion_single() — открыта только одна секция;
+	// accordion_multi()  — можно открыть несколько одновременно.
+	mut acc := vgui.accordion_single()
+
+	mut general := make_section('Общие настройки приложения.')
+	general.add(vgui.checkbox('Автозапуск'))
+	general.add(vgui.checkbox('Проверять обновления'))
+
+	mut appearance := make_section('Настройки внешнего вида.')
+	appearance.add(vgui.toggle_switch('Тёмная тема'))
+
+	about := make_section('vgui — GUI-библиотека на языке V. Этот пример показывает виджет Accordion в режиме single.')
+
+	acc.add_section_expanded('Общие', general)
+	acc.add_section('Внешний вид', appearance)
+	acc.add_section('О программе', about)
+	acc.on_change = fn (idx int, expanded bool) {
+		println('Секция ${idx}: expanded=${expanded}')
+	}
+
+	mut root := vgui.create_vbox_fill()
+	root.set_padding(16)
+	root.set_spacing(8)
+	root.add(vgui.label('Кликните по заголовку секции:'))
+	root.add(acc, flex: 1)
+
+	win.add_widget(root)
+	win.set_ui_scale(1.25)
+	app.add_window(win)
+	app.run()
+}

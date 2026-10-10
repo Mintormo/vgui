@@ -1,0 +1,9 @@
+__pycache__/
+bin/
+/todo.txt
+*.so*
+*.dylib
+*.dll
+build/
+dist/
+*.egg-info/

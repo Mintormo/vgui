@@ -1,0 +1,858 @@
+// Файл: ./combo_box.v
+module vgui
+
+// ═══════════════════════════════════════════════════════
+// ComboBox — drop-down select widget with overlay popup.
+// Items can be plain text OR arbitrary widgets (including
+// containers). Backward-compatible with the old text API.
+// ═══════════════════════════════════════════════════════
+
+enum DropDir {
+	down
+	up
+}
+
+pub struct ComboItem {
+pub mut:
+	text      string
+	widget    &Widget = unsafe { nil } // if set, drawn instead of text
+	height    f32 // 0 = use ComboBox.item_height
+	user_data voidptr = unsafe { nil }
+}
+
+@[heap]
+pub struct ComboBox {
+pub mut:
+	type_tag int = kind_combo_box // тег типа, см. widget_tag.v
+	bounds   Rect
+	entries  []ComboItem
+	// Legacy mirror — kept in sync with entries for back-compat
+	items        []string
+	selected     int = -1
+	open         bool
+	visible      bool = true
+	enabled      bool = true
+	focused      bool
+	hovered      bool
+	hover_index  int  = -1
+	focus_anim   Anim = anim_smooth(anim_tau_focus)
+	focus_group  int
+	item_height  f32 = 26
+	max_visible  int = 8
+	scroll_y     f32
+	scroll_speed f32              = 26
+	pad          f32              = 6
+	placeholder  string           = '— выберите —'
+	on_change    fn (int, string) = unsafe { nil }
+	// Internal: dropdown direction & scrollbar drag
+	drop_dir             DropDir = .down
+	sb_dragging          bool
+	sb_hovered           bool
+	sb_drag_start_y      f32
+	sb_drag_start_scroll f32
+}
+
+// ─── Constructors ──────────────────────────────────────
+
+pub fn combo_box() &ComboBox {
+	return &ComboBox{}
+}
+
+// ─── Item management (new widget-capable API) ──────────
+
+pub fn (mut cb ComboBox) add_entry(entry ComboItem) {
+	cb.entries << entry
+	cb.items << entry.text
+}
+
+pub fn (mut cb ComboBox) add_text_item(text string) {
+	cb.add_entry(ComboItem{ text: text })
+}
+
+pub fn (mut cb ComboBox) add_widget_item(text string, widget &Widget) {
+	cb.add_entry(ComboItem{ text: text, widget: unsafe { widget } })
+}
+
+pub fn (mut cb ComboBox) add_widget_item_sized(text string, widget &Widget, height f32) {
+	cb.add_entry(ComboItem{ text: text, widget: unsafe { widget }, height: height })
+}
+
+pub fn (mut cb ComboBox) set_item_widget(idx int, widget &Widget) {
+	if idx >= 0 && idx < cb.entries.len {
+		cb.entries[idx].widget = unsafe { widget }
+	}
+}
+
+pub fn (mut cb ComboBox) set_item_height(idx int, h f32) {
+	if idx >= 0 && idx < cb.entries.len {
+		cb.entries[idx].height = h
+	}
+}
+
+pub fn (mut cb ComboBox) set_item_data(idx int, data voidptr) {
+	if idx >= 0 && idx < cb.entries.len {
+		cb.entries[idx].user_data = data
+	}
+}
+
+pub fn (cb &ComboBox) get_item_data(idx int) voidptr {
+	if idx >= 0 && idx < cb.entries.len {
+		return cb.entries[idx].user_data
+	}
+	return unsafe { nil }
+}
+
+pub fn (cb &ComboBox) get_entry(idx int) ComboItem {
+	if idx >= 0 && idx < cb.entries.len {
+		return cb.entries[idx]
+	}
+	return ComboItem{}
+}
+
+// ─── Legacy text API (preserved) ───────────────────────
+
+pub fn (mut cb ComboBox) set_items(items []string) {
+	cb.entries.clear()
+	cb.items.clear()
+	for s in items {
+		cb.add_text_item(s)
+	}
+	cb.selected = -1
+	cb.scroll_y = 0
+}
+
+pub fn (mut cb ComboBox) add_item(text string) {
+	cb.add_text_item(text)
+}
+
+pub fn (mut cb ComboBox) add_items(items []string) {
+	for item in items {
+		cb.add_text_item(item)
+	}
+}
+
+pub fn (mut cb ComboBox) set_selected(idx int) {
+	if idx >= 0 && idx < cb.entries.len {
+		cb.selected = idx
+	}
+}
+
+pub fn (mut cb ComboBox) set_selected_text(text string) {
+	for i, e in cb.entries {
+		if e.text == text {
+			cb.selected = i
+			return
+		}
+	}
+}
+
+pub fn (cb &ComboBox) get_selected_text() string {
+	if cb.selected >= 0 && cb.selected < cb.entries.len {
+		return cb.entries[cb.selected].text
+	}
+	return ''
+}
+
+pub fn (mut cb ComboBox) clear() {
+	cb.entries.clear()
+	cb.items.clear()
+	cb.selected = -1
+	cb.scroll_y = 0
+	cb.open = false
+}
+
+// ─── Geometry helpers ──────────────────────────────────
+
+fn (cb &ComboBox) eff_item_h(idx int) f32 {
+	if idx >= 0 && idx < cb.entries.len && cb.entries[idx].height > 0 {
+		return cb.entries[idx].height
+	}
+	return cb.item_height
+}
+
+fn (cb &ComboBox) content_height() f32 {
+	mut h := f32(0)
+	for i in 0 .. cb.entries.len {
+		h += cb.eff_item_h(i)
+	}
+	return h
+}
+
+fn (cb &ComboBox) item_offset(idx int) f32 {
+	mut y := f32(0)
+	for i in 0 .. idx {
+		y += cb.eff_item_h(i)
+	}
+	return y
+}
+
+fn (cb &ComboBox) dropdown_height() f32 {
+	if cb.entries.len == 0 {
+		return cb.pad * 2
+	}
+	// Sum heights of up to max_visible items
+	count := min_int(cb.entries.len, cb.max_visible)
+	mut h := f32(0)
+	for i in 0 .. count {
+		h += cb.eff_item_h(i)
+	}
+	return h + cb.pad * 2
+}
+
+fn (cb &ComboBox) dropdown_rect() Rect {
+	dh := cb.dropdown_height()
+	match cb.drop_dir {
+		.down {
+			return Rect{cb.bounds.x, cb.bounds.y + cb.bounds.h + 2, cb.bounds.w, dh}
+		}
+		.up {
+			return Rect{cb.bounds.x, cb.bounds.y - dh - 2, cb.bounds.w, dh}
+		}
+	}
+}
+
+fn (cb &ComboBox) max_scroll() f32 {
+	dr := cb.dropdown_rect()
+	inner_h := dr.h - cb.pad * 2
+	return max_f32(0, cb.content_height() - inner_h)
+}
+
+fn (cb &ComboBox) hit_dropdown_item(my f32) int {
+	dr := cb.dropdown_rect()
+	rel_y := my - dr.y - cb.pad + cb.scroll_y
+	if rel_y < 0 {
+		return -1
+	}
+	mut acc := f32(0)
+	for i in 0 .. cb.entries.len {
+		h := cb.eff_item_h(i)
+		if rel_y >= acc && rel_y < acc + h {
+			return i
+		}
+		acc += h
+	}
+	return -1
+}
+
+fn (cb &ComboBox) has_dropdown_scrollbar() bool {
+	dr := cb.dropdown_rect()
+	inner_h := dr.h - cb.pad * 2
+	return cb.content_height() > inner_h
+}
+
+fn (cb &ComboBox) scrollbar_rects() (Rect, Rect) {
+	dr := cb.dropdown_rect()
+	inner := dr.shrunk(cb.pad)
+	ch := cb.content_height()
+	vis_h := inner.h
+
+	if ch <= vis_h {
+		return Rect{}, Rect{}
+	}
+
+	sb_w := f32(8)
+	track := Rect{
+		x: dr.x + dr.w - cb.pad - sb_w - 1
+		y: inner.y
+		w: sb_w
+		h: vis_h
+	}
+
+	thumb_h := max_f32(20, vis_h * (vis_h / ch))
+	ms := cb.max_scroll()
+	ratio := if ms > 0 { cb.scroll_y / ms } else { f32(0) }
+	thumb_y := track.y + ratio * (vis_h - thumb_h)
+
+	thumb := Rect{
+		x: track.x + 1
+		y: thumb_y
+		w: sb_w - 2
+		h: thumb_h
+	}
+
+	return track, thumb
+}
+
+fn (mut cb ComboBox) ensure_visible_in_dropdown() {
+	if cb.selected < 0 || cb.entries.len == 0 {
+		return
+	}
+	dr := cb.dropdown_rect()
+	inner_h := dr.h - cb.pad * 2
+	item_top := cb.item_offset(cb.selected)
+	item_bot := item_top + cb.eff_item_h(cb.selected)
+	if item_top < cb.scroll_y {
+		cb.scroll_y = item_top
+	}
+	if item_bot > cb.scroll_y + inner_h {
+		cb.scroll_y = item_bot - inner_h
+	}
+	cb.scroll_y = clamp_f32(cb.scroll_y, 0, cb.max_scroll())
+}
+
+fn (mut cb ComboBox) fire_change() {
+	if cb.on_change != unsafe { nil } && cb.selected >= 0 && cb.selected < cb.entries.len {
+		cb.on_change(cb.selected, cb.entries[cb.selected].text)
+	}
+}
+
+fn (mut cb ComboBox) close_dropdown(mut ctx RenderContext) {
+	cb.open = false
+	cb.sb_dragging = false
+	cb.sb_hovered = false
+	ctx.clear_overlay(voidptr(&cb))
+}
+
+fn (mut cb ComboBox) calc_drop_direction(ctx &RenderContext) {
+	dh := cb.dropdown_height()
+	space_below := ctx.screen_height - (cb.bounds.y + cb.bounds.h + 2)
+	space_above := cb.bounds.y - 2
+
+	if dh <= space_below {
+		cb.drop_dir = .down
+	} else if dh <= space_above {
+		cb.drop_dir = .up
+	} else {
+		cb.drop_dir = if space_below >= space_above { .down } else { .up }
+	}
+}
+
+// Dispatch an event to the visible cell widgets. Returns true if handled.
+fn (mut cb ComboBox) dispatch_to_item_widgets(event &GuiEvent, app &App) bool {
+	if cb.entries.len == 0 {
+		return false
+	}
+	dr := cb.dropdown_rect()
+	inner := dr.shrunk(cb.pad)
+	sb_w := if cb.has_dropdown_scrollbar() { f32(8) } else { f32(0) }
+	text_w := inner.w - (if sb_w > 0 { sb_w + 4 } else { f32(0) })
+
+	mut acc := f32(0)
+	for i in 0 .. cb.entries.len {
+		h := cb.eff_item_h(i)
+		iy := inner.y + acc - cb.scroll_y
+		acc += h
+		if unsafe { cb.entries[i].widget == nil } {
+			continue
+		}
+		if iy + h < inner.y || iy > inner.y + inner.h {
+			continue
+		}
+		r := Rect{inner.x, iy, text_w, h}
+		mut w := unsafe { cb.entries[i].widget }
+		set_widget_bounds(mut w, r)
+		if w.handle_event(event, app) {
+			return true
+		}
+	}
+	return false
+}
+
+fn (mut cb ComboBox) open_dropdown(mut ctx RenderContext) {
+	cb.open = true
+	cb.sb_dragging = false
+	cb.sb_hovered = false
+	cb.calc_drop_direction(ctx)
+	cb.ensure_visible_in_dropdown()
+
+	// ─── Overlay draw ─────────────────────────────────
+	draw := fn [mut cb] (mut ctx RenderContext) {
+		if !cb.open || cb.entries.len == 0 {
+			return
+		}
+		font := ctx.get_font(.regular, 0)
+		fh := ctx.font_height_of(font)
+		dr := cb.dropdown_rect()
+		rad := ctx.theme.border_radius
+
+		if ctx.theme.shadow_offset > 0 {
+			ctx.draw_shadow(dr, rad)
+		}
+		ctx.fill_rounded_rect(dr, ctx.theme.eff_cb_dropdown_bg(), rad)
+		ctx.draw_rounded_rect(dr, ctx.theme.eff_cb_dropdown_border(), rad)
+
+		inner := dr.shrunk(cb.pad)
+		sb_w := f32(8)
+		text_w := if cb.has_dropdown_scrollbar() { inner.w - sb_w - 4 } else { inner.w }
+
+		ctx.push_clip(inner)
+
+		mut acc := f32(0)
+		for i, entry in cb.entries {
+			h := cb.eff_item_h(i)
+			iy := inner.y + acc - cb.scroll_y
+			acc += h
+			if iy + h < inner.y {
+				continue
+			}
+			if iy > inner.y + inner.h {
+				break
+			}
+
+			item_r := Rect{inner.x, iy, text_w, h}
+
+			if i == cb.selected {
+				ctx.fill_rounded_rect(item_r, ctx.theme.eff_cb_item_selected().with_alpha(180), 3)
+			} else if i == cb.hover_index {
+				ctx.fill_rounded_rect(item_r, ctx.theme.eff_cb_item_hover().with_alpha(100), 3)
+			}
+
+			if unsafe { entry.widget != nil } {
+				mut w := unsafe { entry.widget }
+				set_widget_bounds(mut w, item_r)
+				ctx.push_clip(item_r)
+				w.draw(mut ctx)
+				ctx.pop_clip()
+			} else {
+				tc := if i == cb.selected {
+					ctx.theme.eff_cb_item_sel_text()
+				} else {
+					ctx.theme.eff_cb_item_text()
+				}
+				ty := iy + (h - fh) * 0.5
+				ctx.draw_text_with_font(entry.text, inner.x + 6, ty, tc, font)
+			}
+		}
+
+		ctx.pop_clip()
+
+		// ── Scrollbar ──
+		if cb.has_dropdown_scrollbar() {
+			track, thumb := cb.scrollbar_rects()
+			track_c := ctx.theme.scrollbar_bg
+			if track_c.a > 0 {
+				ctx.fill_rounded_rect(track, track_c, 3)
+			}
+			thumb_c := if cb.sb_dragging {
+				ctx.theme.scrollbar_drag
+			} else if cb.sb_hovered {
+				ctx.theme.scrollbar_hover
+			} else {
+				ctx.theme.scrollbar_thumb
+			}
+			ctx.fill_rounded_rect(thumb, thumb_c, 3)
+		}
+	}
+
+	// ─── Overlay event handler ────────────────────────
+	ev := fn [mut cb] (event &GuiEvent, app &App) bool {
+		if !cb.open {
+			return false
+		}
+
+		// ── Scrollbar drag in progress ──
+		if cb.sb_dragging {
+			match event.typ {
+				.mouse_move {
+					track, _ := cb.scrollbar_rects()
+					if track.h <= 0 {
+						return true
+					}
+					ch := cb.content_height()
+					vis_h := track.h
+					thumb_h := max_f32(20, vis_h * (vis_h / ch))
+					drag_range := vis_h - thumb_h
+					if drag_range <= 0 {
+						return true
+					}
+					dy := event.mouse_y - cb.sb_drag_start_y
+					ms := cb.max_scroll()
+					cb.scroll_y = clamp_f32(cb.sb_drag_start_scroll + dy * (ms / drag_range), 0, ms)
+					return true
+				}
+				.mouse_up {
+					if event.mouse_btn == .left {
+						cb.sb_dragging = false
+						return true
+					}
+				}
+				else {}
+			}
+
+			return true
+		}
+
+		dr := cb.dropdown_rect()
+
+		// ── Forward to cell widgets first (mouse move / up / wheel) ──
+		if event.typ == .mouse_move || event.typ == .mouse_up || event.typ == .mouse_wheel {
+			if cb.dispatch_to_item_widgets(event, app) {
+				return true
+			}
+		}
+
+		match event.typ {
+			.mouse_move {
+				if dr.contains(event.mouse_x, event.mouse_y) {
+					if cb.has_dropdown_scrollbar() {
+						track, _ := cb.scrollbar_rects()
+						if track.contains(event.mouse_x, event.mouse_y) {
+							cb.sb_hovered = true
+							cb.hover_index = -1
+							return true
+						} else {
+							cb.sb_hovered = false
+						}
+					}
+					cb.hover_index = cb.hit_dropdown_item(event.mouse_y)
+				} else {
+					cb.hover_index = -1
+					cb.sb_hovered = false
+				}
+				return true
+			}
+			.mouse_down {
+				if event.mouse_btn == .left {
+					if dr.contains(event.mouse_x, event.mouse_y) {
+						// Scrollbar thumb drag
+						if cb.has_dropdown_scrollbar() {
+							track, thumb := cb.scrollbar_rects()
+							if thumb.contains(event.mouse_x, event.mouse_y) {
+								cb.sb_dragging = true
+								cb.sb_drag_start_y = event.mouse_y
+								cb.sb_drag_start_scroll = cb.scroll_y
+								return true
+							}
+							if track.contains(event.mouse_x, event.mouse_y) {
+								vis_h := track.h
+								if event.mouse_y < thumb.y {
+									cb.scroll_y = max_f32(0, cb.scroll_y - vis_h)
+								} else {
+									cb.scroll_y = min_f32(cb.max_scroll(), cb.scroll_y + vis_h)
+								}
+								return true
+							}
+						}
+
+						// Try cell widget first — if it handles the click, don't select
+						if cb.dispatch_to_item_widgets(event, app) {
+							return true
+						}
+
+						idx := cb.hit_dropdown_item(event.mouse_y)
+						if idx >= 0 {
+							cb.selected = idx
+							cb.fire_change()
+						}
+						ctx_ptr := app.get_active_ctx()
+						if unsafe { ctx_ptr != nil } {
+							mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
+							cb.close_dropdown(mut ctx_mut)
+						}
+						return true
+					} else {
+						ctx_ptr := app.get_active_ctx()
+						if unsafe { ctx_ptr != nil } {
+							mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
+							cb.close_dropdown(mut ctx_mut)
+						}
+						return true
+					}
+				}
+			}
+			.mouse_wheel {
+				ctx_ptr := app.get_active_ctx()
+				mut mx := event.mouse_x
+				mut my := event.mouse_y
+				if unsafe { ctx_ptr != nil } {
+					mx = ctx_ptr.mouse_x
+					my = ctx_ptr.mouse_y
+				}
+				if dr.contains(mx, my) {
+					old := cb.scroll_y
+					cb.scroll_y -= event.wheel_y * cb.scroll_speed
+					cb.scroll_y = clamp_f32(cb.scroll_y, 0, cb.max_scroll())
+					if cb.scroll_y != old {
+						return true
+					}
+				}
+			}
+			.key_down {
+				if !cb.focused {
+					return false
+				}
+
+				if is_home_key(event.keycode, event.scancode) {
+					if cb.entries.len > 0 {
+						cb.selected = 0
+						cb.ensure_visible_in_dropdown()
+						cb.fire_change()
+					}
+					return true
+				}
+				if is_end_key(event.keycode, event.scancode) {
+					if cb.entries.len > 0 {
+						cb.selected = cb.entries.len - 1
+						cb.ensure_visible_in_dropdown()
+						cb.fire_change()
+					}
+					return true
+				}
+
+				if tv_is_pageup_key(event.keycode, event.scancode) {
+					if cb.entries.len > 0 {
+						step := max_int(1, cb.max_visible)
+						cb.selected = max_int(0, cb.selected - step)
+						cb.ensure_visible_in_dropdown()
+						cb.fire_change()
+					}
+					return true
+				}
+				if tv_is_pagedown_key(event.keycode, event.scancode) {
+					if cb.entries.len > 0 {
+						step := max_int(1, cb.max_visible)
+						cb.selected = min_int(cb.entries.len - 1, cb.selected + step)
+						cb.ensure_visible_in_dropdown()
+						cb.fire_change()
+					}
+					return true
+				}
+
+				match event.keycode {
+					sdl_k_escape {
+						ctx_ptr := app.get_active_ctx()
+						if unsafe { ctx_ptr != nil } {
+							mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
+							cb.close_dropdown(mut ctx_mut)
+						}
+						return true
+					}
+					sdl_k_return, sdl_k_space {
+						ctx_ptr := app.get_active_ctx()
+						if unsafe { ctx_ptr != nil } {
+							mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
+							cb.close_dropdown(mut ctx_mut)
+						}
+						return true
+					}
+					sdl_k_up {
+						if cb.entries.len > 0 {
+							if cb.selected <= 0 {
+								cb.selected = cb.entries.len - 1
+							} else {
+								cb.selected -= 1
+							}
+							cb.ensure_visible_in_dropdown()
+							cb.fire_change()
+						}
+						return true
+					}
+					sdl_k_down {
+						if cb.entries.len > 0 {
+							if cb.selected >= cb.entries.len - 1 {
+								cb.selected = 0
+							} else {
+								cb.selected += 1
+							}
+							cb.ensure_visible_in_dropdown()
+							cb.fire_change()
+						}
+						return true
+					}
+					sdl_k_tab {
+						ctx_ptr := app.get_active_ctx()
+						if unsafe { ctx_ptr != nil } {
+							mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
+							cb.close_dropdown(mut ctx_mut)
+						}
+						return false
+					}
+					else {}
+				}
+			}
+			else {}
+		}
+
+		return false
+	}
+
+	ctx.set_overlay(voidptr(&cb), draw, ev, fn [mut cb] (mut ctx RenderContext) {
+		cb.close_dropdown(mut ctx)
+	})
+}
+
+// ───────────── Drawing ─────────────────────────────────
+
+pub fn (mut cb ComboBox) draw(mut ctx RenderContext) {
+	if !cb.visible {
+		return
+	}
+	if !ctx.is_in_clip(cb.bounds) {
+		return
+	}
+
+	if cb.enabled {
+		ctx.focus.register_combo_box(&cb, cb.focus_group)
+	}
+
+	should_focus := ctx.focus.is_focused(unsafe { &cb })
+	if cb.focused && !should_focus {
+		cb.focused = false
+		if cb.open {
+			cb.close_dropdown(mut ctx)
+		}
+	} else if !cb.focused && should_focus {
+		cb.focused = true
+	}
+
+	target_focus := if cb.focused && cb.enabled { f32(1.0) } else { f32(0.0) }
+	// Кольцо фокуса и подсветка рамки — внутри bounds (+1 px свечения).
+	if cb.focus_anim.update(target_focus, ctx) {
+		ctx.mark_anim_rect('combobox', cb.bounds.expanded(1))
+	}
+
+	rad := ctx.theme.border_radius
+	bg := if cb.enabled { ctx.theme.eff_cb_bg() } else { ctx.theme.eff_cb_bg().darken(0.05) }
+	ctx.fill_rounded_rect(cb.bounds, bg, rad)
+
+	bc := ctx.theme.eff_cb_border().blend(ctx.theme.input_focus, cb.focus_anim.value)
+	ctx.draw_rounded_rect(cb.bounds, bc, rad)
+
+	ctx.draw_focus_ring(cb.bounds, rad, cb.focus_anim.value)
+
+	// ── Text ──
+	font := ctx.get_font(.regular, 0)
+	fh := ctx.font_height_of(font)
+	ty := cb.bounds.y + (cb.bounds.h - fh) * 0.5
+
+	arrow_w := f32(24)
+	text_w := cb.bounds.w - cb.pad * 2 - arrow_w
+
+	text_clip := Rect{cb.bounds.x + cb.pad, cb.bounds.y, text_w, cb.bounds.h}
+	ctx.push_clip(text_clip)
+
+	if cb.selected >= 0 && cb.selected < cb.entries.len {
+		ctx.draw_text_with_font(cb.entries[cb.selected].text, cb.bounds.x + cb.pad, ty,
+			ctx.theme.eff_cb_text(), font)
+	} else {
+		ctx.draw_text_with_font(cb.placeholder, cb.bounds.x + cb.pad, ty, ctx.theme.text_secondary,
+			font)
+	}
+
+	ctx.pop_clip()
+
+	// ── Arrow ──
+	ax := cb.bounds.x + cb.bounds.w - arrow_w
+	ay := cb.bounds.y
+	ah := cb.bounds.h
+
+	cx := ax + arrow_w * 0.5
+	cy := ay + ah * 0.5
+	aw := f32(8)
+	ahh := f32(5)
+	ac := ctx.theme.eff_cb_arrow()
+
+	if cb.open {
+		ctx.fill_triangle(cx, cy - ahh * 0.5, cx - aw * 0.5, cy + ahh * 0.5, cx + aw * 0.5, cy +
+			ahh * 0.5, ac)
+	} else {
+		ctx.fill_triangle(cx, cy + ahh * 0.5, cx - aw * 0.5, cy - ahh * 0.5, cx + aw * 0.5,
+			cy - ahh * 0.5, ac)
+	}
+}
+
+// ───────────── Events ──────────────────────────────────
+
+pub fn (mut cb ComboBox) handle_event(event &GuiEvent, app &App) bool {
+	if !cb.visible || !cb.enabled {
+		return false
+	}
+
+	match event.typ {
+		.mouse_move {
+			cb.hovered = cb.bounds.contains(event.mouse_x, event.mouse_y)
+		}
+		.mouse_down {
+			if event.mouse_btn == .left && cb.hovered {
+				ctx_ptr := app.get_active_ctx()
+				if unsafe { ctx_ptr != nil } {
+					mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
+					ctx_mut.focus.focus_combo_box(&cb, cb.focus_group)
+					cb.focused = true
+					if cb.open {
+						cb.close_dropdown(mut ctx_mut)
+					} else if cb.entries.len > 0 {
+						cb.open_dropdown(mut ctx_mut)
+					}
+				}
+				return true
+			}
+		}
+		.key_down {
+			if !cb.focused {
+				return false
+			}
+			if cb.open {
+				return false
+			}
+
+			if is_home_key(event.keycode, event.scancode) {
+				if cb.entries.len > 0 {
+					cb.selected = 0
+					cb.fire_change()
+				}
+				return true
+			}
+			if is_end_key(event.keycode, event.scancode) {
+				if cb.entries.len > 0 {
+					cb.selected = cb.entries.len - 1
+					cb.fire_change()
+				}
+				return true
+			}
+
+			match event.keycode {
+				sdl_k_return, sdl_k_space {
+					ctx_ptr := app.get_active_ctx()
+					if unsafe { ctx_ptr != nil } {
+						mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
+						cb.open_dropdown(mut ctx_mut)
+					}
+					return true
+				}
+				sdl_k_up {
+					if cb.entries.len > 0 {
+						if cb.selected <= 0 {
+							cb.selected = cb.entries.len - 1
+						} else {
+							cb.selected -= 1
+						}
+						cb.fire_change()
+					}
+					return true
+				}
+				sdl_k_down {
+					if cb.entries.len > 0 {
+						if cb.selected >= cb.entries.len - 1 {
+							cb.selected = 0
+						} else {
+							cb.selected += 1
+						}
+						cb.fire_change()
+					}
+					return true
+				}
+				sdl_k_tab {
+					ctx_ptr := app.get_active_ctx()
+					if unsafe { ctx_ptr != nil } {
+						mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
+						ctx_mut.focus.tab(event.shift())
+					}
+					return true
+				}
+				sdl_k_escape {
+					ctx_ptr := app.get_active_ctx()
+					if unsafe { ctx_ptr != nil } {
+						mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
+						ctx_mut.focus.blur_current()
+					}
+					return true
+				}
+				else {}
+			}
+		}
+		else {}
+	}
+
+	return false
+}
