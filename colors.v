@@ -4,6 +4,11 @@ module vgui
 // Predefined colors
 // ═══════════════════════════════════════════════════════
 
+// Именованные базовые цвета (RGBA, 0..255). Это удобные константы для кода
+// приложений и примеров; виджеты берут цвета в основном из темы (`Theme`,
+// theme.v), отсюда — разве что color_transparent как «нет заливки». Порядок полей Color — r, g, b, a; a = 0 —
+// полностью прозрачный.
+
 pub const color_transparent = Color{0, 0, 0, 0}
 pub const color_white = Color{255, 255, 255, 255}
 pub const color_black = Color{0, 0, 0, 255}

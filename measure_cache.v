@@ -105,6 +105,11 @@ pub fn measure_pass_enter() {
 	g_measure_depth++
 }
 
+//
+// Вызовы обязаны быть парными: enter поднимает g_measure_depth, и пока
+// leave не опустил его обратно, measure_widget считает любое измерение
+// вложенным и не открывает новый проход (кэш остаётся от enter).
+// leave не уходит ниже нуля - лишний вызов безвреден.
 pub fn measure_pass_leave() {
 	if g_measure_depth > 0 {
 		g_measure_depth--

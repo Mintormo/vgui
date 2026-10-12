@@ -4,6 +4,14 @@ module vgui
 // DirtyRegion — pure accumulation of "changed" rectangles.
 // No SDL here: Window.render() decides what to do with it.
 // ═══════════════════════════════════════════════════════
+//
+// Связь с остальной библиотекой (PROJECT.md, «Инвалидация и dirty regions»):
+// экземпляр живёт в RenderContext.dirty (render_context.v). Его наполняют
+// mark_anim_rect (точечная перерисовка области виджета), mark_anim /
+// invalidate_all (mark_full - полный кадр) и Window.invalidate_hover_change.
+// Window.render() (sdl3_window.v) в начале кадра решает: полный кадр
+// (full), частичный (клип по union_rect() поверх persistent render target)
+// или пропуск рисования (is_empty()), а после кадра вызывает clear().
 
 // dirty_max_rects caps how many separate rectangles DirtyRegion tracks
 // before collapsing them into a single bounding box. Keeps the list from
@@ -25,8 +33,8 @@ pub const dirty_max_rects = 8
 // isn't one yet.
 pub struct DirtyRegion {
 pub mut:
-	rects []Rect
-	full  bool
+	rects []Rect // накопленные изменённые прямоугольники (уже расширенные и обрезанные по окну)
+	full  bool   // true - перерисовать весь кадр; rects при этом не важны
 }
 
 // add registers r as changed, clamped to bounds (normally the window's
@@ -57,6 +65,8 @@ pub fn (mut d DirtyRegion) add(r Rect, bounds Rect) bool {
 		return false
 	}
 	d.rects << clamped
+	// Достигли лимита - схлопываем список в один охватывающий прямоугольник.
+	// После этого в списке снова один элемент, и накопление продолжается.
 	if d.rects.len >= dirty_max_rects {
 		bbox := d.union_rect()
 		d.rects = [bbox]
@@ -77,6 +87,8 @@ pub fn (mut d DirtyRegion) clear() {
 	d.full = false
 }
 
+// is_empty - true, если за кадр ничего не изменилось: ни полного кадра, ни
+// прямоугольников. Window.render() по этому признаку пропускает рисование.
 pub fn (d &DirtyRegion) is_empty() bool {
 	return !d.full && d.rects.len == 0
 }
@@ -88,6 +100,8 @@ pub fn (d &DirtyRegion) union_rect() Rect {
 	if d.rects.len == 0 {
 		return Rect{}
 	}
+	// Обычный поиск охватывающего прямоугольника: минимумы левых/верхних
+	// краёв и максимумы правых/нижних по всем элементам.
 	mut x1 := d.rects[0].x
 	mut y1 := d.rects[0].y
 	mut x2 := d.rects[0].x + d.rects[0].w

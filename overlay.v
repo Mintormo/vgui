@@ -39,6 +39,11 @@ pub fn (mut ctx RenderContext) clear_overlay(owner voidptr) {
 	ctx.reset_overlay_slot()
 }
 
+// reset_overlay_slot обнуляет все четыре поля слота разом, без вызова
+// close-хука и без проверки владельца. Внутренний помощник: снаружи слот
+// освобождают только через clear_overlay (с проверкой владельца) или
+// release_overlay (при уничтожении виджета). Кадр не инвалидирует —
+// это забота вызывающего.
 fn (mut ctx RenderContext) reset_overlay_slot() {
 	ctx.overlay_owner = unsafe { nil }
 	ctx.overlay_cb = unsafe { nil }

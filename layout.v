@@ -88,7 +88,10 @@ pub fn (h SizeHint) clamped() SizeHint {
 	return r
 }
 
-// main_size / cross_size — проекции hint на ось контейнера.
+// axis — проекция hint на одну ось контейнера: возвращает
+// (желаемый размер, min, max, политика) вдоль вертикали
+// (vertical = true, для VBox) или горизонтали (для HBox).
+// Позволяет писать алгоритм раскладки один раз для обеих осей.
 fn (h SizeHint) axis(vertical bool) (f32, f32, f32, SizePolicy) {
 	if vertical {
 		return h.h, h.min_h, h.max_h, h.v_policy
@@ -184,10 +187,10 @@ pub fn is_measurable(w &Widget) bool {
 struct LayoutItem {
 mut:
 	base    f32 // желаемый размер
-	min     f32
-	max     f32
+	min     f32 // нижняя граница вдоль оси (из hint и LayoutParams.min)
+	max     f32 // верхняя граница вдоль оси (size_unbounded = нет)
 	flex    f32 // 0 = не участвует в дележе остатка
-	result  f32
+	result  f32 // выход: окончательный размер вдоль главной оси
 	settled bool // размер уже упёрся в min/max, дележу не подлежит
 }
 
@@ -201,10 +204,20 @@ mut:
 // сжимаются) пропорционально весам. Элемент, упёршийся в min или
 // max, фиксируется, и его доля переразделяется между оставшимися -
 // поэтому нужен цикл, а не один проход.
+//
+// Пример: avail = 300, items = [A base 100 без flex, B flex 1 base 0,
+// C flex 1 base 0 max 50]. A сразу получает 100; остаток 200 делится
+// пополам, но C упирается в max 50 и фиксируется; на втором круге B
+// получает 300 - 100 - 50 = 150.
+//
+// Результат пишется в items[i].result; сумма результатов может не
+// совпасть с avail, если все упёрлись в границы (контейнер тогда
+// оставляет пустое место или вылезает за край - это его дело).
 fn distribute_main(mut items []LayoutItem, avail f32) {
 	if items.len == 0 {
 		return
 	}
+	// Шаг 1: нефлексовые фиксируются сразу, флексовые стартуют с базы.
 	for mut it in items {
 		if it.flex <= 0 {
 			it.result = clamp_f32(it.base, it.min, it.max)
@@ -215,6 +228,7 @@ fn distribute_main(mut items []LayoutItem, avail f32) {
 		}
 	}
 
+	// Шаг 2: итеративный делёж остатка между ещё не зафиксированными.
 	// Не больше items.len итераций: каждый проход либо
 	// фиксирует хотя бы один упёршийся элемент, либо
 	// раскладка уже сошлась.
@@ -281,6 +295,12 @@ pub enum CrossAlign {
 
 // align_cross возвращает (смещение, размер) ребёнка на
 // поперечной оси внутри отрезка [0, avail].
+//
+// stretch/inherit - размер = вся доступная ширина (в пределах
+// min/max ребёнка), смещение 0. Остальные режимы берут желаемый
+// размер pref, но не больше avail, и сдвигают его к началу,
+// центру или концу. Смещение не бывает отрицательным: если min
+// ребёнка больше avail, он вылезет за конец, а не за начало.
 fn align_cross(a CrossAlign, avail f32, pref f32, min f32, max f32) (f32, f32) {
 	if a == .stretch || a == .inherit {
 		return 0, clamp_f32(avail, min, max)
@@ -321,6 +341,8 @@ pub:
 }
 
 // to_entry переводит параметры в ChildEntry контейнера.
+// own_cross запоминает, задал ли ребёнок своё выравнивание
+// (иначе контейнер подставит своё cross_align при раскладке).
 pub fn (p LayoutParams) to_entry(widget &Widget) ChildEntry {
 	mode := if p.flex > 0 { SizeMode.flex } else { SizeMode.auto }
 	return ChildEntry{
@@ -341,6 +363,10 @@ pub fn (p LayoutParams) to_entry(widget &Widget) ChildEntry {
 // measure_text_lines измеряет многострочный текст (\n)
 // заданным шрифтом: ширина — по самой длинной строке,
 // высота — сумма строк с зазором line_gap.
+//
+// Пустой текст и пустые строки внутри него всё равно занимают
+// высоту строки шрифта: иначе метка без текста схлопнулась бы
+// в 0 и при появлении текста раскладка «прыгала» бы.
 fn measure_text_lines(ctx &RenderContext, text string, font voidptr, line_gap f32) Vec2 {
 	if text.len == 0 {
 		return Vec2{0, ctx.font_height_of(font)}

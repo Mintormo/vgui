@@ -16,13 +16,26 @@ module vgui
 // the menu item fires first (widgets dispatch before
 // hotkey manager). Hotkeys only fire for unhandled keys.
 // ═══════════════════════════════════════════════════════
+//
+// Два экземпляра HotkeyManager: Window.hotkeys (sdl3_window.v) и App.hotkeys
+// (sdl3_app.v); публичный доступ - через bind_hotkey/unbind_hotkey/
+// set_hotkey_enabled/clear_hotkeys у Window и App. Цепочку приоритетов
+// реализует обработка событий окна (sdl3_window.v): сначала оверлей и
+// виджеты, затем w.hotkeys.try_match, затем app.hotkeys.try_match. Разбор
+// строки сочетания и сравнение с событием - общие с меню
+// (menu_shortcut_matches), поэтому формат строк один и тот же.
 
+// HotkeyEntry - одна привязка: строка сочетания в исходном виде (как её
+// передал пользователь), обработчик и флаг включённости. Поля неизменяемые,
+// поэтому set_enabled пересоздаёт запись целиком.
 struct HotkeyEntry {
 	shortcut string
 	handler  fn () = unsafe { nil }
 	enabled  bool
 }
 
+// HotkeyManager - таблица горячих клавиш одного уровня (окно или приложение).
+// Записи проверяются по порядку добавления; срабатывает первая подходящая.
 pub struct HotkeyManager {
 mut:
 	entries []HotkeyEntry
@@ -34,6 +47,9 @@ mut:
 // menu shortcuts: "Ctrl+S", "Ctrl+Shift+Z", "F5", "Alt+Q".
 pub fn (mut hm HotkeyManager) bind(shortcut string, handler fn ()) {
 	// Remove existing binding for same shortcut (rebind)
+	// Сравнение строк - только без учёта регистра и крайних пробелов.
+	// Семантически одинаковые, но по-разному записанные сочетания
+	// ("Shift+Ctrl+S" и "Ctrl+Shift+S") здесь считаются разными привязками.
 	normalized := shortcut.to_lower().trim_space()
 	for i := hm.entries.len - 1; i >= 0; i-- {
 		if hm.entries[i].shortcut.to_lower().trim_space() == normalized {
@@ -78,6 +94,8 @@ pub fn (mut hm HotkeyManager) clear() {
 
 // Try to match event against registered hotkeys.
 // Returns true if a hotkey was fired.
+// Смотрит только key_down; выключенные записи пропускаются. Вызывается
+// окном лишь для событий, которые не поглотили оверлей и виджеты.
 fn (hm &HotkeyManager) try_match(event &GuiEvent) bool {
 	if event.typ != .key_down {
 		return false

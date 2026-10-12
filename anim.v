@@ -37,11 +37,15 @@ pub const anim_tau_hover = f32(75) // k = 0.2: наведение, развор�
 pub const anim_tau_toggle = f32(58) // k = 0.25: отметка флажка/радио
 pub const anim_tau_press = f32(47) // k = 0.3: нажатие
 
+// AnimMode — закон движения Anim к цели (см. шапку файла).
 pub enum AnimMode {
 	smooth
 	tween
 }
 
+// Easing — форма кривой режима .tween: как прогресс перехода (0..1)
+// зависит от доли прошедшего времени (0..1). in_* — разгон, out_* —
+// торможение к концу, in_out_* — и то и другое.
 pub enum Easing {
 	linear
 	in_quad
@@ -54,6 +58,9 @@ pub enum Easing {
 }
 
 // ease — кривая: t в [0, 1] → прогресс (0 → 0, 1 → 1).
+// t за пределами [0, 1] зажимается. Формулы — стандартные кривые
+// (easings.net); у out_back результат в середине пути ненадолго
+// превышает 1 — это и есть «перелёт» за цель.
 pub fn ease(e Easing, t_ f32) f32 {
 	t := clamp_f32(t_, 0, 1)
 	return match e {
@@ -85,6 +92,7 @@ pub fn ease(e Easing, t_ f32) f32 {
 			}
 		}
 		.out_back {
+			// c1 = 1.70158 — классическая константа Пеннера: перелёт ~10%.
 			c1 := f32(1.70158)
 			c3 := c1 + 1
 			u := t - 1
@@ -94,6 +102,8 @@ pub fn ease(e Easing, t_ f32) f32 {
 }
 
 // Anim — значение `value`, движущееся к цели `goal`.
+// Это value-структура: виджет хранит её полем и зовёт методы через `mut`.
+// Значение по умолчанию (Anim{}) — .smooth с tau_hover, стоит в 0.
 pub struct Anim {
 pub mut:
 	mode        AnimMode = .smooth
@@ -110,7 +120,11 @@ pub mut:
 mut:
 	from       f32 // .tween: откуда идёт переход
 	elapsed    f32 // .tween: мс от начала перехода
-	running    bool
+	// true, пока идёт переход. Нужен отдельно от value != goal: у .tween
+	// он отмечает, что from/elapsed уже инициализированы для текущей цели.
+	running bool
+	// ctx.frame_no кадра, в котором был последний шаг: охрана
+	// «не больше одного шага за кадр» в step().
 	last_frame u64
 }
 
@@ -169,7 +183,11 @@ pub fn (mut a Anim) update(target f32, ctx &RenderContext) bool {
 }
 
 // step продвигает значение на ctx.anim_dt — не больше раза за кадр.
+// Возвращает animating(). Повторный вызов в том же кадре (например,
+// сначала из arrange(), потом из draw()) ничего не двигает.
 pub fn (mut a Anim) step(ctx &RenderContext) bool {
+	// frame_no == 0 — контекст без окна (тесты, ручной RenderContext):
+	// кадров нет, поэтому шагаем на каждый вызов.
 	if ctx.frame_no != 0 {
 		if a.last_frame == ctx.frame_no {
 			return a.animating()
@@ -182,6 +200,8 @@ pub fn (mut a Anim) step(ctx &RenderContext) bool {
 
 // advance — шаг на dt мс (без учёта кадров; для тестов и своих часов).
 pub fn (mut a Anim) advance(dt_ f32) {
+	// Начало перехода: запоминаем точку старта (нужна .tween для lerp)
+	// и обнуляем прошедшее время. Если уже стоим на цели — делать нечего.
 	if !a.running {
 		if a.value == a.goal {
 			return
@@ -190,9 +210,14 @@ pub fn (mut a Anim) advance(dt_ f32) {
 		a.from = a.value
 		a.elapsed = 0
 	}
+	// Потолок шага: после долгой паузы анимация не перескакивает в конец.
 	dt := clamp_f32(dt_, 0, anim_max_dt)
 	match a.mode {
 		.smooth {
+			// Экспоненциальное сближение: за время dt проходим долю
+			// k = 1 - e^(-dt/tau) оставшегося пути. Два шага по dt/2 дают
+			// ровно то же, что один по dt, — отсюда независимость от fps.
+			// tau <= 0 — мгновенный переход (k = 1).
 			k := if a.tau_ms <= 0 { f32(1) } else { f32(1 - math.exp(-dt / a.tau_ms)) }
 			a.value += (a.goal - a.value) * k
 			if abs_f32(a.goal - a.value) < a.epsilon {
@@ -201,6 +226,8 @@ pub fn (mut a Anim) advance(dt_ f32) {
 			}
 		}
 		.tween {
+			// Доля прошедшего времени t → прогресс по кривой easing →
+			// интерполяция между from и goal. duration <= 0 — сразу в цель.
 			a.elapsed += dt
 			t := if a.duration_ms <= 0 { f32(1) } else { a.elapsed / a.duration_ms }
 			if t >= 1 {

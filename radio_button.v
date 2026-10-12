@@ -8,7 +8,23 @@ module vgui
 // that share the same radio_group and have been registered
 // in the same FocusManager (i.e. same window).
 // ═══════════════════════════════════════════════════════
+//
+// Как это устроено. Отдельного объекта «группа» нет: группа — это просто
+// строка radio_group. Список соседей берётся из фокус-учёта активного окна
+// (ctx.focus.entries, focus.v): каждый RadioButton регистрируется там в
+// draw(), поэтому при выборе select_in_group перебирает записи kind
+// .radio_button и снимает выбор с тех, у кого та же radio_group.
+// Следствие: кнопка, которая ещё ни разу не рисовалась включённой (enabled)
+// в этом окне, в учёте отсутствует, и select_in_group её не сбросит.
+//
+// Раскладка: размер считает measure() в layout_measure.v; виджет рисует
+// кружок слева (circle_size) и подпись справа через отступ gap.
+// Клик срабатывает по отпусканию кнопки мыши — PROJECT.md, «Клик
+// срабатывает по отпусканию». Анимации фокуса и выбора — через Anim
+// (anim.v), перерисовка только своего прямоугольника (mark_anim_rect).
 
+// RadioButton — одна радиокнопка. Взаимоисключение с соседями задаёт
+// radio_group (см. шапку файла).
 @[heap]
 pub struct RadioButton {
 pub mut:
@@ -19,14 +35,14 @@ pub mut:
 	visible     bool = true
 	enabled     bool = true
 	hovered     bool
-	focus_anim  Anim = anim_smooth(anim_tau_focus)
-	sel_anim    Anim = anim_smooth(anim_tau_toggle)
+	focus_anim  Anim = anim_smooth(anim_tau_focus)  // 0→1: кольцо фокуса и подсветка рамки
+	sel_anim    Anim = anim_smooth(anim_tau_toggle) // 0→1: радиус внутренней точки выбора
 	pressed     bool // левая кнопка нажата над виджетом; действие - по mouse_up
-	focus_group int
-	radio_group string    = 'default'
+	focus_group int  // группа Tab-обхода в FocusManager (не путать с radio_group)
+	radio_group string    = 'default' // строковый ключ взаимоисключения, см. шапку
 	circle_size f32       = 18
-	gap         f32       = 8
-	on_change   fn (bool) = unsafe { nil }
+	gap         f32       = 8            // отступ между кружком и подписью
+	on_change   fn (bool) = unsafe { nil } // true — выбрана, false — выбор снят соседом
 }
 
 pub fn radio_button(text string) &RadioButton {
