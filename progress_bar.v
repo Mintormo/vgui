@@ -1,12 +1,27 @@
 module vgui
 
+// ProgressBar — индикатор прогресса: линейная полоса или круговая дуга, с
+// определённым значением (0..1) либо в режиме indeterminate («бегущая» полоса /
+// вращающаяся дуга без конкретного процента).
+//
+// Связи: размер считает measure() в layout_measure.v; события виджет не
+// принимает (handle_event всегда false) и в фокус-учёте не участвует.
+// Indeterminate-анимация зависит от времени SDL_GetTicks(), а не от Anim, и
+// держится на mark_anim_rect каждый кадр (см. draw). Цвета с a == 0 означают
+// «взять из темы» (eff_*_color). Сеттеры кадр не инвалидируют: после set_value
+// в своём цикле зовите Window.invalidate*.
+
 import math
 
+// ProgressStyle — вид индикатора: linear — горизонтальная полоса, circular — кольцо с дугой.
 pub enum ProgressStyle {
 	linear
 	circular
 }
 
+// ProgressBar — сам виджет. set_value/set_percent держат value в 0..1; draw тоже
+// клампит, так что прямая запись в поле не опасна. При indeterminate=true value
+// и подпись игнорируются.
 pub struct ProgressBar {
 pub mut:
 	type_tag      int = kind_progress_bar // тег типа, см. widget_tag.v
@@ -19,9 +34,12 @@ pub mut:
 	thickness     f32 = 8
 	radius        f32 // circular: 0 → auto
 	corner_radius f32 = -1 // linear: <0 → pill (bar_h/2), 0 → sharp, >0 → explicit
-	show_text     bool
-	text_format   string = '%.0f%%'
-	text          string
+	// показывать ли подпись (процент или text); для indeterminate подпись не рисуется
+	show_text bool
+	// формат подписи в стиле printf: '%.0f%%', '%d', '%f'; см. progress_format
+	text_format string = '%.0f%%'
+	// произвольная подпись; если непустая, заменяет форматированный процент
+	text string
 	// Colors (0 = theme)
 	bg_color   Color = Color{0, 0, 0, 0}
 	fill_color Color = Color{0, 0, 0, 0}
@@ -36,16 +54,19 @@ pub mut:
 
 // ─── Constructors ──────────────────────────────────────
 
+// progress_bar создаёт линейную полосу со значением 0 (стиль по умолчанию — linear).
 pub fn progress_bar() &ProgressBar {
 	return &ProgressBar{}
 }
 
+// progress_bar_linear — то же, что progress_bar, но стиль задан явно.
 pub fn progress_bar_linear() &ProgressBar {
 	return &ProgressBar{
 		style: .linear
 	}
 }
 
+// progress_bar_sharp создаёт линейную полосу с прямыми углами (corner_radius = 0).
 pub fn progress_bar_sharp() &ProgressBar {
 	return &ProgressBar{
 		style:         .linear
@@ -53,12 +74,14 @@ pub fn progress_bar_sharp() &ProgressBar {
 	}
 }
 
+// progress_circular создаёт круговой индикатор.
 pub fn progress_circular() &ProgressBar {
 	return &ProgressBar{
 		style: .circular
 	}
 }
 
+// progress_indeterminate создаёт линейную полосу в режиме «неопределённого» прогресса.
 pub fn progress_indeterminate() &ProgressBar {
 	return &ProgressBar{
 		indeterminate: true
@@ -71,10 +94,12 @@ pub fn (p &ProgressBar) get_value() f32 {
 	return p.value
 }
 
+// set_value задаёт долю выполнения 0..1; значения вне диапазона обрезаются. Кадр не инвалидирует.
 pub fn (mut p ProgressBar) set_value(v f32) {
 	p.value = clamp_f32(v, 0.0, 1.0)
 }
 
+// set_percent — то же в процентах (0..100).
 pub fn (mut p ProgressBar) set_percent(pct f32) {
 	p.value = clamp_f32(pct / 100.0, 0.0, 1.0)
 }
@@ -85,6 +110,9 @@ pub fn (p &ProgressBar) get_percent() f32 {
 
 // ─── Helpers ───────────────────────────────────────────
 
+// eff_bg_color / eff_fill_color / eff_text_color: собственный цвет виджета, если он
+// задан (альфа > 0), иначе цвет из темы. Нулевая альфа — признак «не задано»,
+// поэтому полностью прозрачный цвет задать нельзя.
 fn (p &ProgressBar) eff_bg_color(ctx &RenderContext) Color {
 	if p.bg_color.a > 0 {
 		return p.bg_color
@@ -106,6 +134,7 @@ fn (p &ProgressBar) eff_text_color(ctx &RenderContext) Color {
 	return ctx.theme.eff_prog_text()
 }
 
+// eff_corner_radius: отрицательный corner_radius означает «таблетка» (радиус = половина высоты полосы).
 fn (p &ProgressBar) eff_corner_radius(bar_h f32) f32 {
 	if p.corner_radius < 0 {
 		return bar_h * 0.5 // pill shape
@@ -113,6 +142,7 @@ fn (p &ProgressBar) eff_corner_radius(bar_h f32) f32 {
 	return p.corner_radius
 }
 
+// label_text выбирает текст подписи: явный text > пустая строка для indeterminate > процент по text_format.
 fn (p &ProgressBar) label_text() string {
 	if p.text.len > 0 {
 		return p.text
@@ -123,6 +153,11 @@ fn (p &ProgressBar) label_text() string {
 	return progress_format(p.value * 100.0, p.text_format)
 }
 
+// progress_format подставляет значение v (в процентах 0..100) в printf-подобный
+// шаблон fmt. Поддержано: '%.Nf' (N знаков после запятой), '%d' (округление до
+// целого), '%f' (один знак); '%%' превращается в '%'. Пустой или нераспознанный
+// формат даёт '<целое>%'. Полноценный printf не используется — формат
+// разбирается вручную.
 fn progress_format(v f32, fmt string) string {
 	if fmt.len == 0 {
 		return '${int(v + 0.5)}%'
@@ -149,6 +184,8 @@ fn progress_format(v f32, fmt string) string {
 
 // ─── Drawing ───────────────────────────────────────────
 
+// draw: для indeterminate каждый кадр заказывает перерисовку своего прямоугольника,
+// затем делегирует рисование по стилю.
 pub fn (mut p ProgressBar) draw(mut ctx RenderContext) {
 	if !p.visible {
 		return
@@ -185,11 +222,15 @@ fn (p &ProgressBar) text_bar_h(ctx &RenderContext) f32 {
 	return ctx.font_height_of(font) + 4
 }
 
+// draw_linear рисует линейную полосу: фон-«таблетку», заливку и подпись.
+// Заливка рисуется как полная таблетка во всю ширину полосы, обрезанная clip-ом
+// до нужной доли — так скругления на конце заливки не искажаются.
 fn (p &ProgressBar) draw_linear(mut ctx RenderContext) {
 	mut bar_h := p.text_bar_h(ctx)
 	if bar_h <= 0 || bar_h > p.bounds.h {
 		bar_h = p.bounds.h
 	}
+	// полоса центрируется по вертикали внутри bounds
 	bar_y := p.bounds.y + (p.bounds.h - bar_h) * 0.5
 	bar := Rect{p.bounds.x, bar_y, p.bounds.w, bar_h}
 	rad := p.eff_corner_radius(bar_h)
@@ -208,6 +249,10 @@ fn (p &ProgressBar) draw_linear(mut ctx RenderContext) {
 	if p.indeterminate {
 		ms := C.SDL_GetTicks()
 		t := f32(ms) * 0.001 * p.anim_speed
+		// Indeterminate: положение бегущей полосы — функция времени. phase — доля
+		// периода (2 с при anim_speed = 1) в 0..1, остаток от деления считается
+		// вручную через int. Полоса проходит путь от полностью за левым краем до
+		// полностью за правым; ниже её обрезают по границам bar.
 		band_w := bar.w * 0.3
 		period := f32(2.0)
 		phase := (t - f32(int(t / period)) * period) / period
@@ -266,6 +311,9 @@ fn (p &ProgressBar) draw_linear(mut ctx RenderContext) {
 	}
 }
 
+// draw_circular рисует кольцо: фоновая окружность, поверх дуга заливки. Определённое
+// значение начинается с 12 часов (-pi/2) и идёт по часовой; indeterminate —
+// дуга фиксированной длины 1.8 рад, вращающаяся со временем. 6.2831853 — это 2*pi.
 fn (p &ProgressBar) draw_circular(mut ctx RenderContext) {
 	cx := p.bounds.x + p.bounds.w * 0.5
 	cy := p.bounds.y + p.bounds.h * 0.5
@@ -288,6 +336,7 @@ fn (p &ProgressBar) draw_circular(mut ctx RenderContext) {
 	if p.indeterminate {
 		ms := C.SDL_GetTicks()
 		t := f32(ms) * 0.001 * p.anim_speed
+		// indeterminate: один оборот в секунду при anim_speed = 1
 		angle := t * 6.2831853
 		arc_span := f32(1.8)
 		spinner_draw_circle_arc(mut ctx, cx, cy, outer_r, thick, angle, angle + arc_span, fill_c)
@@ -310,9 +359,11 @@ fn (p &ProgressBar) draw_circular(mut ctx RenderContext) {
 			ctx.draw_text_with_font(lbl, tx, ty, p.eff_text_color(ctx), font)
 		}
 	}
+	// import math нужен только ради этой строки (больше math в файле не используется).
 	_ = math.cosf(0)
 }
 
+// handle_event: индикатор событий не принимает, всегда false.
 pub fn (mut p ProgressBar) handle_event(event &GuiEvent, app &App) bool {
 	return false
 }

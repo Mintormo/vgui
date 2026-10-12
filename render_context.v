@@ -3,14 +3,20 @@ module vgui
 // ═══════════════════════════════════════════════════════
 // RenderContext — rendering abstraction (struct only)
 // Method implementations are in backend-specific files
-// (e.g. sdl2_render.v, sdl2_fonts.v)
+// (e.g. sdl3_render.v, sdl3_fonts.v)
 // ═══════════════════════════════════════════════════════
 
+// FontHandleInfo — стиль (FontStyle как int) и размер шрифта, соответствующие одному TTF_Font*; значение в FontSet.handle_map.
 struct FontHandleInfo {
 	style_int int
 	font_size int
 }
 
+// FontSet — набор шрифтов окна (обычный/жирный/курсив/моно + их пути, встроенные
+// данные и кэш размеров). Общий между окнами и считается по ссылкам (refs) в
+// g_font_cache (font_cache.v); окно держит одну ссылку и меняет набор только через
+// Window.reload_scaled_fonts(). Не переинициализируйте набор на месте и не храните
+// TTF_Font в полях виджетов (PROJECT.md, «Архитектура рендеринга»).
 pub struct FontSet {
 pub mut:
 	regular          voidptr
@@ -34,7 +40,8 @@ pub mut:
 	bold_italic_data []u8
 	mono_data        []u8
 	mono_bold_data   []u8
-	size_cache       map[string]voidptr
+	// size_cache — уже открытые TTF_Font по ключу (стиль, размер): шрифты разных размеров открываются лениво.
+	size_cache map[string]voidptr
 	// Reverse map: font handle → (style_int, font_size) for O(1) cache key lookup.
 	handle_map map[voidptr]FontHandleInfo
 	// Shared-cache bookkeeping (font_cache.v): the g_font_cache key this set is
@@ -43,14 +50,22 @@ pub mut:
 	refs      int
 }
 
+// RenderContext — всё, что нужно виджету, чтобы рисоваться: SDL-рендерер, тема,
+// шрифты, стек клипов, фокус-учёт, слот оверлея, кэши текста и иконок, масштабы
+// (HiDPI и пользовательский ui_scale) и состояние инвалидации/анимаций. Один на
+// окно (Window.ctx). Тут только данные и самые общие помощники; примитивы рисования
+// лежат в sdl3_render.v, текст и шрифты — в sdl3_fonts.v, инвалидация — ниже, dirty
+// regions — в dirty.v. Все координаты виджетов — логические (до dpi_scale*ui_scale).
 pub struct RenderContext {
 pub mut:
+	// renderer — SDL_Renderer*; его жизнь контролируется поколениями (is_renderer_alive_gen), текстуры освобождать только при живом рендерере
 	renderer      voidptr
 	theme         Theme
 	fonts         &FontSet = unsafe { nil } // shared via g_font_cache; the owning Window releases it (release_fonts)
 	screen_width  f32
 	screen_height f32
-	clip_stack    []Rect
+	// clip_stack — стек активных clip-прямоугольников (push_clip/pop_clip); верхний определяет, что вообще стоит рисовать (is_in_clip)
+	clip_stack []Rect
 	// HiDPI
 	dpi_scale f32 = 1.0
 	dpi_info  DpiInfo
@@ -86,8 +101,10 @@ pub mut:
 	pending_titlebar_rects []Rect
 	// Pending tooltips (multiple can register per frame)
 	pending_tooltips []&Tooltip
-	needs_animation  bool
-	anim_reason      string // DEBUG
+	// needs_animation — «нужен ещё кадр из-за анимации»; ставить ТОЛЬКО через mark_anim/mark_anim_rect, иначе анимация замирает под dirty regions
+	needs_animation bool
+	// anim_reason — кто первым запросил анимацию в этом кадре (для отладки зависаний)
+	anim_reason string // DEBUG
 	// Accumulated changed-rectangles for this frame. Window.render() consumes
 	// it to decide between a full repaint and a partial one; see dirty.v.
 	dirty DirtyRegion
@@ -111,6 +128,7 @@ pub mut:
 	arrange_depth int
 }
 
+// TextCacheEntry — запись кэша текстур текста: готовая текстура, её размер, штамп LRU и поля верификации (исходные входы) для обнаружения коллизий FNV-1a.
 struct TextCacheEntry {
 mut:
 	texture   voidptr
@@ -127,6 +145,11 @@ mut:
 
 // ─── Backend-agnostic convenience methods ───
 
+// draw_shadow рисует мягкую тень под прямоугольником r со скруглением radius:
+// несколько вложенных скруглённых слоёв, смещённых на shadow_offset. Внешний слой
+// самый широкий и прозрачный, внутренний — самый плотный (квадратичный рост
+// плотности к центру), так получается размытие без шейдеров. Нет тени, если
+// alpha цвета тени равна 0. Тень выходит за r — см. visual_margin.
 pub fn (mut ctx RenderContext) draw_shadow(r Rect, radius f32) {
 	sc := ctx.theme.shadow_color
 	if sc.a == 0 {
@@ -175,6 +198,11 @@ pub fn (mut ctx RenderContext) draw_focus_ring_soft(r Rect, radius f32, strength
 	ctx.focus_ring_impl(r, radius, strength, ctx.theme.focus_ring_inset, fc, 1)
 }
 
+// focus_ring_impl — общая реализация колец фокуса: рамка из width физических
+// линий, вложенных внутрь r на inset; strength (0..1) — прозрачность (анимация
+// фокуса виджета), при <= 0.02 не рисуется. Каждая следующая линия смещается ровно
+// на один ФИЗИЧЕСКИЙ пиксель от уже привязанной к сетке рамки (snap_rect), иначе на
+// дробном масштабе линии «съезжали» бы неравномерно.
 fn (mut ctx RenderContext) focus_ring_impl(r Rect, radius f32, strength f32, inset f32, base Color, width f32) {
 	if strength <= 0.02 {
 		return
@@ -194,6 +222,10 @@ fn (mut ctx RenderContext) focus_ring_impl(r Rect, radius f32, strength f32, ins
 	}
 }
 
+// draw_text* — рисование строки стандартным шрифтом нужного стиля в точке (x, y)
+// (левый верхний угол строки). Если нужного стиля в наборе нет, подставляется запасной
+// (regular; для mono_bold — mono). Остальная логика (кэш текстур и др.) — в
+// draw_text_with_font (sdl3_fonts.v).
 pub fn (mut ctx RenderContext) draw_text(text string, x f32, y f32, c Color) {
 	ctx.draw_text_with_font(text, x, y, c, ctx.fonts.regular)
 }
@@ -230,6 +262,7 @@ pub fn (mut ctx RenderContext) draw_text_mono_bold(text string, x f32, y f32, c 
 	ctx.draw_text_with_font(text, x, y, c, font)
 }
 
+// draw_text_mono_centered рисует моноширинный текст по центру прямоугольника r (пустой текст или отсутствие шрифта — ничего).
 pub fn (mut ctx RenderContext) draw_text_mono_centered(text string, r Rect, c Color) {
 	mut font := voidptr(ctx.fonts.regular)
 	if unsafe { ctx.fonts.mono != nil } {
@@ -244,6 +277,7 @@ pub fn (mut ctx RenderContext) draw_text_mono_centered(text string, r Rect, c Co
 	ctx.draw_text_with_font(text, x, y, c, font)
 }
 
+// measure_text_mono — размер строки моноширинным шрифтом (или regular, если mono нет).
 pub fn (ctx &RenderContext) measure_text_mono(text string) Vec2 {
 	mut font := voidptr(ctx.fonts.regular)
 	if unsafe { ctx.fonts.mono != nil } {
@@ -252,6 +286,7 @@ pub fn (ctx &RenderContext) measure_text_mono(text string) Vec2 {
 	return ctx.measure_text_with_font(text, font)
 }
 
+// mono_font_height — высота строки моно-шрифта в логических пикселях (физическая высота / dpi_scale при HiDPI); 14 — запасное значение, если шрифта нет.
 pub fn (ctx &RenderContext) mono_font_height() f32 {
 	mut font := voidptr(ctx.fonts.regular)
 	if unsafe { ctx.fonts.mono != nil } {
@@ -267,12 +302,16 @@ pub fn (ctx &RenderContext) mono_font_height() f32 {
 	return h
 }
 
+// mono_char_width — ширина символа моно-шрифта (по 'M'); для моно-шрифта все символы одной ширины.
 pub fn (ctx &RenderContext) mono_char_width() f32 {
 	return ctx.measure_text_mono('M').x
 }
 
 // ─── Icon texture cache ───
 
+// load_icon_texture загружает картинку по пути в SDL-текстуру и кэширует её в
+// icon_cache (ключ — путь; кэш не вытесняется, в отличие от text_cache). Возвращает
+// nil при пустом пути или ошибке загрузки (тогда draw_icon ничего не рисует).
 pub fn (mut ctx RenderContext) load_icon_texture(path string) voidptr {
 	if path.len == 0 {
 		return unsafe { nil }
@@ -297,6 +336,7 @@ pub fn (mut ctx RenderContext) load_icon_texture(path string) voidptr {
 	return texture
 }
 
+// draw_icon рисует текстуру в прямоугольник (x, y, w, h); nil-текстура игнорируется.
 pub fn (mut ctx RenderContext) draw_icon(texture voidptr, x f32, y f32, w f32, h f32) {
 	if unsafe { texture == nil } {
 		return

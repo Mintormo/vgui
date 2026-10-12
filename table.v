@@ -1,12 +1,37 @@
 // Файл: ./table.v
 module vgui
 
+// Шапка файла.
+// TableView - таблица в стиле электронной таблицы: колонки с заголовками, строки
+// ячеек, выделение ячейки или целой строки, встроенное (inline) редактирование
+// текста ячейки, изменение ширины колонок и высоты строк мышью, прокрутка по обеим
+// осям со своими полосами прокрутки, загрузка из CSV.
+//
+// Как файл связан с остальной библиотекой:
+//   - раскладка: bounds виджету выдаёт контейнер (Layouted/Arrangeable в
+//     widget_tree.v), сам виджет размер не вычисляет; measure() - layout_measure.v;
+//   - отрисовка: draw() рисует всё за один проход, клипируя содержимое через
+//     ctx.push_clip/pop_clip; цвета берутся из темы (ctx.theme.eff_tv_*), если у
+//     виджета не задан свой (a == 0 означает «брать из темы»);
+//   - события: handle_event() возвращает true, если событие поглощено;
+//   - фокус: поле focus_group и FocusKind в focus.v; анимация рамки - focus_anim;
+//   - undo/redo редактируемой ячейки - UndoHistory[RuneSnap] (общий для виджетов);
+//   - C-ABI: функции vgui_table_* живут в vgui_capi, здесь только методы.
+//
+// Модель координат. Прокрутка хранится в scroll_x/scroll_y как смещение содержимого
+// (данных) относительно viewport'а в логических пикселях. Позиция колонки/строки в
+// «пространстве данных» считается суммой ширин/высот предыдущих (col_x/row_y), на
+// экран переводится вычитанием scroll_* и прибавлением data_origin_x/y.
 import os
 
 // ═══════════════════════════════════════════════════════
 // TableView — spreadsheet-style table widget
 // ═══════════════════════════════════════════════════════
 
+// CellAlign - выравнивание текста в ячейке. Приоритет при отрисовке: ячейка ->
+// колонка -> строка -> .left (см. eff_cell_align). Значение default_ (с
+// подчёркиванием, т.к. default - ключевое слово V) означает «не задано здесь,
+// смотри уровнем выше».
 pub enum CellAlign {
 	default_ // use column → row → left fallback
 	left
@@ -14,6 +39,8 @@ pub enum CellAlign {
 	right
 }
 
+// Колонка: заголовок, текущая ширина и нижняя граница ширины (min_w), ниже которой
+// колонку нельзя сузить ни мышью, ни set_column_width.
 struct TableColumn {
 mut:
 	title string
@@ -22,6 +49,8 @@ mut:
 	align CellAlign = .default_
 }
 
+// Ячейка. Нулевой Color (a == 0) в color/bg_color значит «цвет не задан, брать
+// из темы/виджета».
 struct TableCell {
 mut:
 	text     string
@@ -31,6 +60,8 @@ mut:
 	bg_color Color     = Color{0, 0, 0, 0} // per-cell background color
 }
 
+// Строка: ячейки (по одной на колонку на момент add_row), выравнивание по умолчанию
+// для строки и своя высота.
 struct TableRow {
 mut:
 	cells  []TableCell
@@ -38,11 +69,26 @@ mut:
 	height f32 // 0 = use default row_height
 }
 
+// Константы геометрии: tbl_sb_w - толщина полос прокрутки; tbl_resize_zone -
+// полуширина «горячей зоны» у границы колонки/строки, где мышь захватывает ресайз;
+// tbl_cell_pad - горизонтальный отступ текста от краёв ячейки;
+// tbl_max_edit_undo - глубина undo при редактировании одной ячейки.
 const tbl_sb_w = f32(12)
 const tbl_resize_zone = f32(5)
 const tbl_cell_pad = f32(6)
 const tbl_max_edit_undo = 50
 
+// TableView - сама таблица. Все поля pub mut, но обычно их меняют методами ниже.
+// Примечания к полям:
+//   sel_row/sel_col - выделенная ячейка (-1 = нет выделения);
+//   hover_row       - строка под курсором (для подсветки), -1 если мышь вне;
+//   editing/edit_*  - состояние inline-редактора: какая ячейка, буфер рун, позиция
+//                     курсора, горизонтальная прокрутка текста, границы выделения
+//                     (edit_sel_a/b; -1 = нет), история undo;
+//   *_resizing/resize_* - состояние перетаскивания границы колонки/строки: что тянем
+//                     и исходные координаты мыши и размер в момент нажатия;
+//   vsb_*/hsb_*     - состояние полос прокрутки (наведение, перетаскивание и
+//                     исходные координаты/прокрутка в момент нажатия на ползунок).
 @[heap]
 pub struct TableView {
 pub mut:
@@ -130,12 +176,16 @@ pub mut:
 
 // ─── Constructors ──────────────────────────────────────
 
+// Конструктор: пустая таблица без колонок. Пока колонок нет, draw() и
+// handle_event() ничего не делают.
 pub fn table_view() &TableView {
 	return &TableView{}
 }
 
 // ─── Public API ────────────────────────────────────────
 
+// Добавляет колонку; ширина не меньше 30 (min_w по умолчанию). Уже существующим
+// строкам ячейки НЕ добавляются, поэтому колонки нужно создавать до add_row.
 pub fn (mut t TableView) add_column(title string, width f32) {
 	t.columns << TableColumn{
 		title: title
@@ -204,6 +254,8 @@ pub fn (t &TableView) get_min_row_height() f32 {
 	return t.min_row_height
 }
 
+// Добавляет строку: на каждую существующую колонку создаётся ячейка; недостающие
+// тексты заменяются пустой строкой, лишние отбрасываются.
 pub fn (mut t TableView) add_row(texts []string) {
 	mut cells := []TableCell{cap: t.columns.len}
 	for i in 0 .. t.columns.len {
@@ -217,6 +269,10 @@ pub fn (mut t TableView) add_row(texts []string) {
 	}
 }
 
+// Методы set_cell*/get_cell*/set_row_*/set_column_* ниже молча игнорируют
+// индексы вне диапазона (get_* возвращают нейтральное значение: '', false,
+// прозрачный цвет). Ни один из сеттеров не инвалидирует кадр - в собственном цикле
+// после изменений нужно вызвать Window.invalidate*.
 pub fn (mut t TableView) set_cell(row int, col int, text string) {
 	if row >= 0 && row < t.rows.len && col >= 0 && col < t.columns.len {
 		t.rows[row].cells[col].text = text
@@ -293,6 +349,8 @@ pub fn (mut t TableView) set_row_height_at(row int, h f32) {
 	}
 }
 
+// Удаляет все строки, отменяет редактирование (без commit и без on_change), сбрасывает
+// выделение и прокрутку. Колонки остаются.
 pub fn (mut t TableView) clear_rows() {
 	t.cancel_edit()
 	t.rows.clear()
@@ -310,6 +368,7 @@ pub fn (t &TableView) col_count() int {
 	return t.columns.len
 }
 
+// Возвращает (row, col) выделенной ячейки; (-1, -1), если выделения нет.
 pub fn (t &TableView) get_selected() (int, int) {
 	return t.sel_row, t.sel_col
 }
@@ -330,6 +389,8 @@ pub fn (t &TableView) has_selection() bool {
 	return t.sel_row >= 0 && t.sel_col >= 0
 }
 
+// Программно выделяет ячейку (не вызывает on_select и не прокручивает к ней).
+// Некорректные индексы игнорируются.
 pub fn (mut t TableView) set_selected(row int, col int) {
 	if row >= 0 && row < t.rows.len && col >= 0 && col < t.columns.len {
 		t.sel_row = row
@@ -342,6 +403,10 @@ pub fn (mut t TableView) clear_selection() {
 	t.sel_col = -1
 }
 
+// Подгоняет ширину каждой колонки под самый широкий текст (заголовок или ячейка) плюс
+// отступы и 4 px запаса, но не меньше min_w. Заголовок измеряется обычным, а не
+// жирным шрифтом, поэтому для жирного заголовка запас может оказаться тесноват.
+// Нужен ctx, так как ширина текста известна только отрисовщику (шрифты).
 pub fn (mut t TableView) auto_fit_columns(ctx &RenderContext) {
 	font := ctx.get_font_immut(.regular, 0)
 	for ci in 0 .. t.columns.len {
@@ -358,6 +423,8 @@ pub fn (mut t TableView) auto_fit_columns(ctx &RenderContext) {
 
 // ─── Geometry helpers ──────────────────────────────────
 
+// Эффективная высота строки: своя (если задана > 0) или общая row_height, но
+// всегда не меньше min_row_height.
 fn (t &TableView) eff_row_height(row int) f32 {
 	if row >= 0 && row < t.rows.len && t.rows[row].height > 0 {
 		return max_f32(t.rows[row].height, t.min_row_height)
@@ -365,6 +432,8 @@ fn (t &TableView) eff_row_height(row int) f32 {
 	return max_f32(t.row_height, t.min_row_height)
 }
 
+// Левый верхний угол области данных (под заголовком и правее колонки номеров
+// строк) в координатах окна. Прокрутка сюда не входит.
 fn (t &TableView) data_origin_x() f32 {
 	return t.bounds.x + t.pad + (if t.show_row_numbers {
 		t.row_num_width
@@ -393,6 +462,8 @@ fn (t &TableView) total_rows_height() f32 {
 	return h
 }
 
+// Видимая область данных: от начала данных до края bounds минус pad и полосы
+// прокрутки (если они сейчас показаны). Шириной/высотой никогда не бывает < 0.
 fn (t &TableView) viewport_rect() Rect {
 	ox := t.data_origin_x()
 	oy := t.data_origin_y()
@@ -407,6 +478,7 @@ fn (t &TableView) viewport_rect() Rect {
 	return Rect{ox, oy, max_f32(w, 0), max_f32(h, 0)}
 }
 
+// Максимально допустимая прокрутка по осям: размер всех данных минус размер viewport'а.
 fn (t &TableView) max_scroll_x() f32 {
 	vp := t.viewport_rect()
 	return max_f32(0, t.total_cols_width() - vp.w)
@@ -417,6 +489,10 @@ fn (t &TableView) max_scroll_y() f32 {
 	return max_f32(0, t.total_rows_height() - vp.h)
 }
 
+// Нужна ли полоса прокрутки. Намеренно сравнивается с размером области БЕЗ вычета
+// другой полосы (viewport_rect сам зовёт has_vsb/has_hsb, прямой вызов дал бы
+// рекурсию). Побочный эффект: возможна ситуация, когда содержимое чуть-чуть не
+// влезает только из-за соседней полосы, а полоса не показывается.
 fn (t &TableView) has_vsb() bool {
 	vp_h := t.bounds.y + t.bounds.h - t.pad - t.data_origin_y()
 	return t.total_rows_height() > vp_h
@@ -427,6 +503,8 @@ fn (t &TableView) has_hsb() bool {
 	return t.total_cols_width() > vp_w
 }
 
+// Смещение левого края колонки / верхнего края строки внутри данных (сумма
+// размеров предыдущих; без прокрутки). Сложность O(n) на вызов.
 fn (t &TableView) col_x(col int) f32 {
 	mut x := f32(0)
 	for i in 0 .. col {
@@ -445,6 +523,7 @@ fn (t &TableView) row_y(row int) f32 {
 
 // ─── Effective alignment ───────────────────────────────
 
+// Итоговое выравнивание текста ячейки по цепочке ячейка -> колонка -> строка -> left.
 fn (t &TableView) eff_cell_align(row int, col int) TextAlign {
 	if row >= 0 && row < t.rows.len && col >= 0 && col < t.columns.len {
 		ca := t.rows[row].cells[col].align
@@ -478,6 +557,10 @@ fn tbl_ca_to_ta(ca CellAlign) TextAlign {
 
 // ─── Effective colors ──────────────────────────────────
 
+// Группа eff_*: «эффективный» цвет - собственное значение виджета, если оно задано
+// (альфа > 0), иначе цвет темы (ctx.theme.eff_tv_*, общие с TreeView). Для
+// readonly_bg/readonly_text темы нет: возвращается прозрачный цвет, т.е. «ничего
+// не рисовать/не менять».
 fn (t &TableView) eff_header_bg(ctx &RenderContext) Color {
 	if t.header_bg.a > 0 {
 		return t.header_bg
@@ -564,6 +647,9 @@ fn (t &TableView) eff_readonly_text(_ &RenderContext) Color {
 
 // ─── Hit test ──────────────────────────────────────────
 
+// Какая ячейка под точкой (mx, my) окна. Возвращает (row, col); если точка вне
+// viewport'а - (-1, -1); если внутри, но за последней строкой/колонкой - -1 в
+// соответствующей позиции (часть может быть валидной, другая нет).
 fn (t &TableView) hit_cell(mx f32, my f32) (int, int) {
 	vp := t.viewport_rect()
 	if !vp.contains(mx, my) {
@@ -593,6 +679,8 @@ fn (t &TableView) hit_cell(mx f32, my f32) (int, int) {
 	return row, col
 }
 
+// Попадание в «горячую зону» правой границы колонки в строке заголовка. Возвращает
+// индекс колонки, чью ширину тянут, или -1. Границы считаются с учётом scroll_x.
 fn (t &TableView) hit_col_border(mx f32, my f32) int {
 	hdr_y := t.bounds.y + t.pad
 	if my < hdr_y || my > hdr_y + t.header_height {
@@ -609,6 +697,8 @@ fn (t &TableView) hit_col_border(mx f32, my f32) int {
 	return -1
 }
 
+// Попадание в нижнюю границу строки в колонке номеров. Работает только если
+// показаны номера строк (за границу строки без номеров тянуть нельзя).
 fn (t &TableView) hit_row_border(mx f32, my f32) int {
 	if !t.show_row_numbers {
 		return -1
@@ -630,6 +720,9 @@ fn (t &TableView) hit_row_border(mx f32, my f32) int {
 
 // ─── Scrollbar geometry ────────────────────────────────
 
+// Геометрия полос прокрутки: возвращает (дорожка, ползунок) или два пустых Rect,
+// если всё содержимое помещается. Длина ползунка пропорциональна доле видимой части
+// (не меньше 20 px), позиция - доле текущей прокрутки от максимальной.
 fn (t &TableView) vsb_rects() (Rect, Rect) {
 	vp := t.viewport_rect()
 	ch := t.total_rows_height()
@@ -680,6 +773,7 @@ fn (t &TableView) hsb_rects() (Rect, Rect) {
 
 // ─── Inline edit helpers ───────────────────────────────
 
+// Можно ли редактировать ячейку: нужна и глобальная editable, и её собственная.
 fn (t &TableView) is_cell_editable(row int, col int) bool {
 	if !t.editable {
 		return false
@@ -690,6 +784,9 @@ fn (t &TableView) is_cell_editable(row int, col int) bool {
 	return t.rows[row].cells[col].editable
 }
 
+// Входит в режим редактирования: загружает текст ячейки в буфер рун, ставит курсор
+// в конец, выделяет весь текст (первый введённый символ его заменит) и очищает
+// историю undo. Ничего не делает для нередактируемой ячейки.
 fn (mut t TableView) begin_edit(row int, col int) {
 	if !t.is_cell_editable(row, col) {
 		return
@@ -705,6 +802,10 @@ fn (mut t TableView) begin_edit(row int, col int) {
 	t.edit_history.clear()
 }
 
+// Завершает редактирование с сохранением: пишет буфер в ячейку, зовёт on_change
+// (row, col, новый текст) - всегда, даже если текст не изменился - и выходит из
+// режима. Сначала вызывается колбэк, потом сбрасывается состояние: из колбэка
+// edit_row/edit_col ещё доступны.
 fn (mut t TableView) commit_edit() {
 	if !t.editing {
 		return
@@ -719,12 +820,16 @@ fn (mut t TableView) commit_edit() {
 	t.edit_col = -1
 }
 
+// Завершает редактирование без сохранения (Escape, clear_rows).
 fn (mut t TableView) cancel_edit() {
 	t.editing = false
 	t.edit_row = -1
 	t.edit_col = -1
 }
 
+// Хелперы выделения внутри редактора: выделение задаётся парой индексов рун
+// edit_sel_a (якорь) и edit_sel_b (подвижный конец); lo/hi - упорядоченные границы.
+// Выделения нет, если индекс -1 или a == b.
 fn (t &TableView) edit_has_sel() bool {
 	return t.edit_sel_a >= 0 && t.edit_sel_b >= 0 && t.edit_sel_a != t.edit_sel_b
 }
@@ -742,6 +847,8 @@ fn (mut t TableView) edit_clear_sel() {
 	t.edit_sel_b = -1
 }
 
+// Кладёт текущий буфер и курсор в историю undo. Вызывается ПЕРЕД каждой изменяющей
+// операцией.
 fn (mut t TableView) edit_save_undo() {
 	t.edit_history.save(RuneSnap{
 		buf: t.edit_buf.clone()
@@ -749,6 +856,8 @@ fn (mut t TableView) edit_save_undo() {
 	})
 }
 
+// Удаляет выделенный фрагмент из буфера, ставит курсор на его начало. Undo сам не
+// сохраняет - это делает вызывающий.
 fn (mut t TableView) edit_delete_sel() {
 	if !t.edit_has_sel() {
 		return
@@ -767,6 +876,8 @@ fn (mut t TableView) edit_delete_sel() {
 	t.edit_clear_sel()
 }
 
+// Вставка строки в позицию курсора с заменой выделения. Сохраняет undo один раз
+// (замена выделения и вставка откатываются вместе).
 fn (mut t TableView) edit_insert(s string) {
 	if s.len == 0 {
 		return
@@ -790,6 +901,8 @@ fn (mut t TableView) edit_insert(s string) {
 	t.edit_cur += rr.len
 }
 
+// Undo/redo редактора: меняют местами текущее состояние и снимок из истории. Курсор
+// после восстановления ограничивается длиной буфера.
 fn (mut t TableView) edit_perform_undo() {
 	entry := t.edit_history.undo(RuneSnap{
 		buf: t.edit_buf.clone()
@@ -810,6 +923,8 @@ fn (mut t TableView) edit_perform_redo() {
 	t.edit_clear_sel()
 }
 
+// Прокручивает так, чтобы выделенная ячейка целиком попала в viewport (по обеим осям).
+// Если ячейка шире/выше viewport'а, приоритет у её правого/нижнего края.
 fn (mut t TableView) ensure_sel_visible() {
 	if t.sel_row < 0 || t.sel_col < 0 {
 		return
@@ -835,6 +950,7 @@ fn (mut t TableView) ensure_sel_visible() {
 	t.scroll_x = clamp_f32(t.scroll_x, 0, t.max_scroll_x())
 }
 
+// Вызывает on_select(row, col), если колбэк задан.
 fn (mut t TableView) fire_select() {
 	if t.on_select != unsafe { nil } {
 		t.on_select(t.sel_row, t.sel_col)
@@ -844,6 +960,10 @@ fn (mut t TableView) fire_select() {
 // ─── Text clipping helper ──────────────────────────────
 
 // NEW: Truncate text to fit within available width, appending ellipsis if needed
+// Обрезает текст по ширине max_w, добавляя многоточие. Двоичным поиском по числу рун
+// ищется самый длинный префикс, который вместе с «…» помещается. Возвращает '',
+// если не помещается даже многоточие; сам '…', если не помещается ни одной руны.
+// Работает по рунам, а не байтам, чтобы не разрезать UTF-8.
 fn tbl_clip_text(ctx &RenderContext, text string, max_w f32, font voidptr) string {
 	if text.len == 0 || max_w <= 0 {
 		return ''
@@ -881,6 +1001,8 @@ fn tbl_clip_text(ctx &RenderContext, text string, max_w f32, font voidptr) strin
 
 // ─── Draw text aligned in cell rect (with clipping) ───
 
+// Рисует однострочный текст в прямоугольнике ячейки: по горизонтали по align с отступом
+// tbl_cell_pad, по вертикали по центру; длинный текст обрезается через tbl_clip_text.
 fn tbl_draw_text_aligned(mut ctx RenderContext, text string, r Rect, align TextAlign, tc Color, font voidptr) {
 	if text.len == 0 {
 		return
@@ -908,6 +1030,12 @@ fn tbl_draw_text_aligned(mut ctx RenderContext, text string, r Rect, align TextA
 
 // ─── Drawing ───────────────────────────────────────────
 
+// Отрисовка таблицы. Порядок слоёв: фон и рамка (цвет рамки плавно смешивается с
+// цветом фокуса через focus_anim) -> колонка номеров строк -> строка заголовка ->
+// ячейки данных (под клипом viewport'а) -> рамка выделенной ячейки -> полосы
+// прокрутки. Сначала прокрутка ограничивается допустимым диапазоном (содержимое
+// могло уменьшиться). Строки и колонки вне видимой области пропускаются, а
+// перебор строк прерывается при выходе за нижний край (rows упорядочены по Y).
 pub fn (mut t TableView) draw(mut ctx RenderContext) {
 	if !t.visible || t.columns.len == 0 {
 		return
@@ -948,6 +1076,8 @@ pub fn (mut t TableView) draw(mut ctx RenderContext) {
 	ro_bg := t.eff_readonly_bg(ctx)
 	ro_tc := t.eff_readonly_text(ctx)
 
+	// Колонка номеров строк рисуется отдельно от данных: она не прокручивается по X, но
+	// прокручивается по Y вместе со строками (поэтому свой клип по высоте viewport'а).
 	// ── Row numbers column ──
 	if t.show_row_numbers {
 		rn_x := t.bounds.x + t.pad
@@ -978,6 +1108,8 @@ pub fn (mut t TableView) draw(mut ctx RenderContext) {
 		ctx.pop_clip()
 	}
 
+	// Заголовок не прокручивается по Y, но по X идёт вместе с колонками (hx начинается с
+	// ox - scroll_x); клип hdr_r не даёт ему залезть на колонку номеров.
 	// ── Header row ──
 	hdr_r := Rect{ox, t.bounds.y + t.pad, vp.w, t.header_height}
 	ctx.fill_rect(hdr_r, hdr_bg)
@@ -1000,6 +1132,9 @@ pub fn (mut t TableView) draw(mut ctx RenderContext) {
 	// ── Data cells ──
 	ctx.push_clip(vp)
 
+	// Основной цикл по строкам. ry - Y верхнего края строки на экране (с учётом прокрутки).
+	// Приоритет слоёв фона: подсветка наведённой строки -> выделение всей строки ->
+	// фон ячейки / readonly-фон / выделение одной ячейки -> текст.
 	mut ry := oy - t.scroll_y
 	for ri in 0 .. t.rows.len {
 		rh := t.eff_row_height(ri)
@@ -1044,6 +1179,10 @@ pub fn (mut t TableView) draw(mut ctx RenderContext) {
 					ctx.fill_rect(cell_r, sel_bg)
 				}
 
+				// Редактируемая ячейка рисуется «вручную»: фон поля ввода, выделение (полупрозрачный
+				// accent), текст со сдвигом edit_scroll_x и мигающий курсор.
+				// Замечание: edit_scroll_x здесь только читается; в этой функции он не
+				// обновляется (см. открытые вопросы в отчёте).
 				if is_editing_cell {
 					// ── Inline edit ──
 					ctx.fill_rect(cell_r, ctx.theme.input_bg)
@@ -1076,6 +1215,8 @@ pub fn (mut t TableView) draw(mut ctx RenderContext) {
 					ctx.draw_text_with_font(edit_text, edit_inner.x - t.edit_scroll_x, ty,
 						ctx.theme.text_primary, font)
 
+					// Мигание курсора: период 1060 мс, видим первые 530 мс. Перерисовку по таймеру
+					// (чтобы курсор мигал) этот код сам не запрашивает.
 					ms := C.SDL_GetTicks()
 					if ms % u64(1060) < 530 {
 						text_before := if t.edit_cur > 0 && t.edit_cur <= t.edit_buf.len {
@@ -1132,6 +1273,8 @@ pub fn (mut t TableView) draw(mut ctx RenderContext) {
 
 	ctx.pop_clip()
 
+	// Полосы прокрутки рисуются поверх клипа данных, после его снятия. Цвет ползунка:
+	// перетаскивание > наведение > обычный.
 	// ── Vertical scrollbar ──
 	if t.has_vsb() {
 		track, thumb := t.vsb_rects()
@@ -1169,6 +1312,12 @@ pub fn (mut t TableView) draw(mut ctx RenderContext) {
 // Event handling
 // ═══════════════════════════════════════════════════════
 
+// Обработка событий. Возвращает true, если событие поглощено таблицей.
+// Приоритеты (порядок проверок важен): 1) активные перетаскивания (ползунки, границы
+// колонки/строки) забирают ВСЕ события, пока не отпущена левая кнопка; 2) режим
+// редактирования ячейки (handle_edit_event); 3) обычные события: наведение, нажатие
+// (ползунок -> граница колонки -> граница строки -> ячейка), двойной клик (старт
+// редактирования), колесо, клавиши навигации (только при фокусе).
 pub fn (mut t TableView) handle_event(event &GuiEvent, app &App) bool {
 	if !t.visible || !t.enabled || t.columns.len == 0 {
 		return false
@@ -1176,6 +1325,8 @@ pub fn (mut t TableView) handle_event(event &GuiEvent, app &App) bool {
 
 	ctx_ptr := app.get_active_ctx()
 
+	// Перетаскивание ползунка: сдвиг мыши в пикселях дорожки переводится в прокрутку
+	// пропорционально отношению (макс. прокрутка / ход ползунка).
 	// ── Scrollbar drags ──
 	if t.vsb_dragging {
 		match event.typ {
@@ -1389,6 +1540,10 @@ pub fn (mut t TableView) handle_event(event &GuiEvent, app &App) bool {
 				}
 			}
 		}
+		// Колесо: Shift - горизонтальная прокрутка, иначе вертикальная. Возвращает true только
+		// если прокрутка реально изменилась - тогда, дойдя до края, таблица отдаёт колесо
+		// родительскому ScrollBox. Позиция мыши берётся из ctx (актуальная для активного
+		// окна), а при его отсутствии - из события.
 		.mouse_wheel {
 			if !t.wheel {
 				return false
@@ -1429,6 +1584,11 @@ pub fn (mut t TableView) handle_event(event &GuiEvent, app &App) bool {
 
 // ─── Navigation keys ───────────────────────────────────
 
+// Клавиатурная навигация по выделению: стрелки, Tab/Shift+Tab (по ячейкам с
+// переходом на соседнюю строку), Enter/F2 (начать правку), Home/End (первая/последняя
+// строка, а без select_full_row ещё и колонка), Escape (снять фокус). Любое
+// перемещение прокручивает к ячейке и вызывает on_select. Стрелки и Tab поглощают
+// событие (true) даже на границе, чтобы фокус не ушёл дальше.
 fn (mut t TableView) handle_nav_key(event &GuiEvent) bool {
 	if t.rows.len == 0 || t.columns.len == 0 {
 		return false
@@ -1524,9 +1684,17 @@ fn (mut t TableView) handle_nav_key(event &GuiEvent) bool {
 
 // ─── Inline edit event handler ─────────────────────────
 
+// События во время inline-редактирования (аналог TextInput, но для одной строки без
+// переноса): ввод текста, Enter (commit и переход вниз), Escape (отмена), Tab (commit
+// и переход к следующей редактируемой ячейке), Backspace/Delete, стрелки с Shift
+// (выделение), Ctrl+A/C/X/V/Z (Ctrl+Shift+Z - redo), Home/End. Клик вне редактируемой
+// ячейки подтверждает правку и выделяет ячейку под курсором. Любая клавиша
+// поглощается (true), чтобы не уходить в навигацию.
 fn (mut t TableView) handle_edit_event(event &GuiEvent, app &App, _ &RenderContext) bool {
 	match event.typ {
 		.text_input {
+			// При зажатом Ctrl SDL всё равно присылает text_input для горячих клавиш - такие
+			// символы вставлять нельзя.
 			mod_state := C.SDL_GetModState()
 			if (mod_state & sdl_kmod_ctrl) != 0 {
 				return true
@@ -1691,6 +1859,7 @@ fn (mut t TableView) handle_edit_event(event &GuiEvent, app &App, _ &RenderConte
 					if c {
 						cl := app.get_clipboard()
 						if cl.len > 0 {
+							// Однострочный редактор: переводы строк и табы из буфера обмена заменяются пробелами.
 							filtered := cl.replace('\n', ' ').replace('\r', '').replace('\t', ' ')
 							t.edit_insert(filtered)
 						}

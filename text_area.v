@@ -2,17 +2,47 @@ module vgui
 
 // ═══════════════════════════════════════════════════════════
 //  TextArea — multi-line editable text field with undo/redo,
-//  word-wrap, vertical scrolling, and selection.
+//  scrolling in both directions, and selection.
+//  (Раньше здесь значилось «word-wrap», но переноса строк по ширине нет:
+//  длинная строка уходит за край и прокручивается по горизонтали.)
 // ═══════════════════════════════════════════════════════════
 
+// Шапка файла (продолжение).
+// TextArea - многострочное поле ввода без форматирования: выбор мышью и клавишами,
+// буфер обмена, undo/redo (UndoHistory[TaUndoEntry]), прокрутка по обеим осям со своими
+// тонкими полосами. Для больших/подсвечиваемых текстов есть отдельный CodeEditor.
+//
+// Связь с остальной библиотекой:
+//   - раскладка: bounds выдаёт контейнер (Layouted в widget_tree.v);
+//   - фокус: регистрируется в ctx.focus при каждом draw (focus.v);
+//   - события: handle_event -> on_mouse_*/on_text/on_key; true = событие поглощено;
+//   - колбэк on_change(полный_текст) вызывается после каждой правки и undo/redo;
+//   - сочетания Ctrl+буква распознаются по физическому scancode (константы
+//     ti_sc_letter_* из text_input.v), чтобы работать при нелатинской раскладке;
+//     is_home_key/is_end_key/is_word тоже общие с text_input.v.
+//
+// Модель данных: текст - массив строк `lines` (всегда минимум одна, возможно пустая),
+// перевод строки в хранилище не содержится. Курсор - пара (cur_l, cur_c): номер
+// строки и индекс РУНЫ внутри строки (не байта). Выделение - от якоря (sel_al,
+// sel_ac; -1 = нет) до курсора; sel_start/sel_end упорядочивают концы.
 const ta_max_undo = 100
 
+// Снимок для undo/redo: все строки целиком плюс позиция курсора. Простой, но
+// O(размер текста) на каждую правку - для очень больших текстов дорого.
 struct TaUndoEntry {
 	lines []string
 	cur_l int
 	cur_c int
 }
 
+// TextArea - многострочное поле. Примечания к полям:
+//   lines/cur_l/cur_c/sel_al/sel_ac - см. описание модели в шапке файла;
+//   max_len     - в текущем коде нигде не проверяется (ограничения длины нет);
+//   scroll_x/y  - прокрутка в пикселях; допустимый диапазон ограничивается в draw();
+//   drag        - идёт выделение мышью; vscroll_drag/hscroll_drag(+_off) -
+//                 перетаскивание ползунка и смещение точки захвата внутри него;
+//   focus_t     - анимация фокуса рамки; flat - без фона/рамки (для встраивания);
+//   wheel       - false: колесо отдаётся родителю (например, ScrollBox).
 @[heap]
 pub struct TextArea {
 pub mut:
@@ -63,10 +93,13 @@ pub fn text_area(placeholder string) &TextArea {
 
 // ───────────── public helpers ───────────────────────────
 
+// Весь текст одной строкой, строки соединены '\n'.
 pub fn (ta &TextArea) get_text() string {
 	return ta.lines.join('\n')
 }
 
+// Заменяет текст: курсор в конец, выделение и прокрутка сброшены, undo-история очищена.
+// on_change НЕ вызывается. Строки делятся по '\n' ('\r' не обрабатывается).
 pub fn (mut ta TextArea) set_text(s string) {
 	ta.lines = s.split('\n')
 	if ta.lines.len == 0 {
@@ -81,6 +114,9 @@ pub fn (mut ta TextArea) set_text(s string) {
 	ta.history.clear()
 }
 
+// Дописывает s в конец (без undo-снимка, курсор в конец), вызывает on_change. Подходит
+// для логов. Первый кусок s приклеивается к последней строке. История undo не
+// обновляется, поэтому её старые снимки после append_text могут не соответствовать тексту.
 pub fn (mut ta TextArea) append_text(s string) {
 	if s.len == 0 {
 		return
@@ -100,6 +136,8 @@ pub fn (mut ta TextArea) append_text(s string) {
 
 // ───────────── undo / redo ─────────────────────────────
 
+// Undo/redo: снимок кладётся в историю ПЕРЕД каждой правкой (save_undo); undo()/redo()
+// обменивают текущее состояние со снимком, restore применяет его и вызывает on_change.
 fn (ta &TextArea) snap() TaUndoEntry {
 	return TaUndoEntry{
 		lines: ta.lines.clone()
@@ -149,6 +187,7 @@ pub fn (mut ta TextArea) clear_undo() {
 
 // ───────────── selection helpers ───────────────────────
 
+// Выделение непусто: якорь задан и не совпадает с курсором.
 fn (ta &TextArea) has_sel() bool {
 	if ta.sel_al < 0 {
 		return false
@@ -156,6 +195,8 @@ fn (ta &TextArea) has_sel() bool {
 	return ta.sel_al != ta.cur_l || ta.sel_ac != ta.cur_c
 }
 
+// Начало и конец выделения в порядке документа (строка, колонка), независимо от
+// того, куда ведёт курсор - вперёд или назад от якоря.
 fn (ta &TextArea) sel_start() (int, int) {
 	if ta.sel_al < ta.cur_l || (ta.sel_al == ta.cur_l && ta.sel_ac < ta.cur_c) {
 		return ta.sel_al, ta.sel_ac
@@ -175,6 +216,8 @@ fn (mut ta TextArea) clear_sel() {
 	ta.sel_ac = -1
 }
 
+// Если выделения нет, ставит якорь в текущую позицию курсора - перед расширением
+// Shift+стрелкой.
 fn (mut ta TextArea) ensure_sel() {
 	if ta.sel_al < 0 {
 		ta.sel_al = ta.cur_l
@@ -182,6 +225,8 @@ fn (mut ta TextArea) ensure_sel() {
 	}
 }
 
+// Текст выделения: фрагменты первой и последней строк плюс целые строки между
+// ними, соединённые '\n'.
 fn (ta &TextArea) selected_text() string {
 	if !ta.has_sel() {
 		return ''
@@ -203,6 +248,12 @@ fn (ta &TextArea) selected_text() string {
 
 // ───────────── drawing ─────────────────────────────────
 
+// Отрисовка. Порядок: регистрация в FocusManager и синхронизация focused -> заказ
+// перерисовки для мигания курсора -> проверка клипа -> фон/рамка (если не flat) ->
+// расчёт размеров содержимого и ограничение прокрутки -> плейсхолдер (если пусто и без
+// фокуса) -> автопрокрутка к курсору -> выделение -> строки -> курсор (мигание 1060
+// мс, видим 530 мс) -> полосы прокрутки поверх. Рисуются только видимые строки.
+// Меняет состояние виджета: scroll_x/scroll_y подправляются здесь.
 pub fn (mut ta TextArea) draw(mut ctx RenderContext) {
 	if !ta.visible {
 		return
@@ -220,6 +271,10 @@ pub fn (mut ta TextArea) draw(mut ctx RenderContext) {
 	// this block ahead of is_in_clip for the cursor-blink fix below, not an
 	// intentional focus-order redesign (mirrors the same change in
 	// text_input.v).
+	// Регистрация и синхронизация фокуса выполняются ДО проверки клипа: Tab-порядок и
+	// флаг focused не должны зависеть от того, попал ли виджет в dirty region
+	// кадра (подробности - в комментарии выше). Побочный эффект: полностью
+	// вырезанный клипом виджет всё равно виден FocusManager'у.
 	if ta.enabled {
 		ctx.focus.register_text_area(&ta, ta.focus_group)
 	}
@@ -266,6 +321,8 @@ pub fn (mut ta TextArea) draw(mut ctx RenderContext) {
 
 	font := ctx.get_font(.regular, 0)
 	fh := ctx.font_height_of(font)
+	// Шаг строки = высота шрифта + 2 px. Тот же расчёт повторяется в on_mouse_move,
+	// on_mouse_down и hit_pos - при изменении менять во всех местах.
 	line_step := fh + 2
 
 	// Compute max text width for horizontal scroll
@@ -279,6 +336,9 @@ pub fn (mut ta TextArea) draw(mut ctx RenderContext) {
 	total_w += 4 // small right margin
 
 	// Horizontal scrollbar height (shown when needed)
+	// Размеры: sb_h_sz - толщина горизонтальной полосы; cr_h - высота области текста
+	// (если горизонтальная полоса видна - на неё и зазор 2 px меньше). Вертикальная
+	// полоса поверх текста места не отнимает.
 	sb_h_sz := f32(5)
 	h_scroll_visible := total_w > cr.w
 	// Effective content height available (leave room for h-scrollbar)
@@ -303,6 +363,8 @@ pub fn (mut ta TextArea) draw(mut ctx RenderContext) {
 		ta.scroll_x = 0
 	}
 
+	// Плейсхолдер может быть многострочным (делится по '\n'). Рисуется и функция
+	// завершается досрочно (с pop_clip), поэтому полос прокрутки в этом состоянии нет.
 	// Show placeholder when empty and not focused
 	if ta.lines.len == 1 && ta.lines[0].len == 0 && !ta.focused {
 		ph_lines := ta.placeholder.split('\n')
@@ -315,6 +377,8 @@ pub fn (mut ta TextArea) draw(mut ctx RenderContext) {
 		return
 	}
 
+	// Автопрокрутка к курсору - только при фокусе, иначе пользователь не смог бы
+	// прокрутить колесом, оставив курсор за экраном, у нефокусного поля.
 	// Ensure cursor is visible vertically
 	if ta.focused {
 		cursor_y := f32(ta.cur_l) * line_step - ta.scroll_y
@@ -333,6 +397,9 @@ pub fn (mut ta TextArea) draw(mut ctx RenderContext) {
 		}
 	}
 
+	// Подсветка выделения построчно: первая строка - от начала выделения до конца
+	// строки, средние - вся строка (+4 px, чтобы подсвечивался и перевод строки),
+	// последняя - до конца выделения.
 	// Draw selection background
 	if ta.has_sel() {
 		sl, sc := ta.sel_start()
@@ -402,6 +469,7 @@ pub fn (mut ta TextArea) draw(mut ctx RenderContext) {
 	}
 }
 
+// Рисует дорожку и ползунок полосы прокрутки по геометрии из vscroll_geom/hscroll_geom.
 fn (ta &TextArea) draw_vscrollbar(mut ctx RenderContext, cr Rect, cr_h f32, total_h f32, h_scroll_visible bool) {
 	g := ta.vscroll_geom(cr, cr_h, total_h, h_scroll_visible)
 	ctx.fill_rounded_rect(Rect{g.sb_x, g.sb_y, g.sb_w, g.sb_h}, ctx.theme.button_border.with_alpha(60), 3)
@@ -416,6 +484,10 @@ fn (ta &TextArea) draw_hscrollbar(mut ctx RenderContext, cr Rect, total_w f32, s
 
 // ───────────── event dispatch ──────────────────────────
 
+// Диспетчер событий. Нефокусные скрытые/выключенные поля события не берут.
+// Колесо при наведении всегда поглощается (true), даже на краю прокрутки: родитель
+// (например, ScrollBox) не получит колесо, если только не выключен флаг wheel.
+// Значение прокрутки здесь не ограничивается - её зажимает ближайший draw().
 pub fn (mut ta TextArea) handle_event(ev &GuiEvent, app &App) bool {
 	if !ta.visible || !ta.enabled {
 		return false
@@ -465,6 +537,9 @@ pub fn (mut ta TextArea) handle_event(ev &GuiEvent, app &App) bool {
 	}
 }
 
+// Движение мыши: при перетаскивании ползунка пересчитывает прокрутку из положения
+// мыши (позиция ползунка / ход ползунка * ход прокрутки); при выделении мышью
+// двигает курсор. Для расчёта заново вычисляются размеры содержимого (как в draw()).
 fn (mut ta TextArea) on_mouse_move(ev &GuiEvent, app &App) bool {
 	ta.hovered = ta.bounds.contains(ev.mouse_x, ev.mouse_y)
 
@@ -514,6 +589,10 @@ fn (mut ta TextArea) on_mouse_move(ev &GuiEvent, app &App) bool {
 	return false
 }
 
+// Левая кнопка. Внутри поля: взять фокус, затем проверить попадание в полосы
+// прокрутки (захват ползунка, а клик по дорожке перепрыгивает центром ползунка к
+// курсору), иначе поставить курсор под мышью и начать выделение. Вне поля при
+// фокусе - снять фокус (событие не поглощается).
 fn (mut ta TextArea) on_mouse_down(ev &GuiEvent, app &App) bool {
 	if ev.mouse_btn != .left {
 		return false
@@ -605,6 +684,8 @@ fn (mut ta TextArea) on_mouse_down(ev &GuiEvent, app &App) bool {
 	return false
 }
 
+// Отпускание: завершает перетаскивание ползунка или выделение (пустое выделение
+// сбрасывается).
 fn (mut ta TextArea) on_mouse_up(ev &GuiEvent) bool {
 	if ev.mouse_btn != .left {
 		return false
@@ -632,6 +713,14 @@ fn (mut ta TextArea) on_text(ev &GuiEvent) bool {
 	return true
 }
 
+// Нажатия клавиш (только при фокусе). Порядок: Ctrl+A/C/X/V/Z по scancode
+// (раскладко-независимо; Ctrl+Shift+Z - redo) -> Home/End (в пределах строки) ->
+// остальное по keycode: Enter разбивает строку, Backspace/Delete (с Ctrl - по
+// слову, на краю строки склеивают соседние), стрелки (Up/Down сохраняют колонку,
+// зажимая по длине строки), Tab вставляет 4 пробела (Ctrl+Tab передаёт фокус
+// дальше), Escape снимает фокус, Ctrl/Shift+Insert - копировать/вставить.
+// Замечание: ветки sdl_k_a/c/x/v/z по keycode для этого виджета отсутствуют, поэтому
+// при нелатинской раскладке всё работает только благодаря scancode.
 fn (mut ta TextArea) on_key(ev &GuiEvent, app &App) bool {
 	if !ta.focused {
 		return false
@@ -773,6 +862,9 @@ fn (mut ta TextArea) on_key(ev &GuiEvent, app &App) bool {
 
 // ───────────── key actions ─────────────────────────────
 
+// Backspace/Delete: выделение удаляется целиком; в начале/конце строки склеиваются
+// соседние строки; иначе удаляется символ (с Ctrl - слово слева/справа). Перед
+// правкой пишется undo-снимок, после - on_change.
 fn (mut ta TextArea) key_backspace(ctrl bool) {
 	if ta.has_sel() {
 		ta.save_undo()
@@ -834,6 +926,9 @@ fn (mut ta TextArea) key_delete(ctrl bool) {
 	ta.fire()
 }
 
+// Стрелки влево/вправо: без Shift при активном выделении курсор прыгает к
+// краю выделения и выделение снимается; на краю строки переходят на соседнюю
+// строку; Ctrl - по словам; Shift расширяет выделение.
 fn (mut ta TextArea) key_left(ctrl bool, shift bool) {
 	if shift { ta.ensure_sel() }
 	if !shift && ta.has_sel() {
@@ -872,6 +967,8 @@ fn (mut ta TextArea) key_right(ctrl bool, shift bool) {
 	if !shift { ta.clear_sel() }
 }
 
+// Вверх/вниз по строкам. Колонка сохраняется, но зажимается длиной новой строки
+// («липкой» колонки, запоминающей исходную, нет). Выделение при ходе без Shift снимается.
 fn (mut ta TextArea) key_up(shift bool) {
 	if shift { ta.ensure_sel() }
 	if ta.cur_l > 0 {
@@ -898,6 +995,11 @@ fn (mut ta TextArea) key_down_key(shift bool) {
 
 // ───────────── insert / delete ─────────────────────────
 
+// Вставка текста (в т.ч. многострочного) в позицию курсора с заменой выделения.
+// Один undo-снимок на операцию. Однострочная вставка меняет одну строку; иначе
+// строка курсора делится: левая часть + первый кусок, промежуточные куски становятся
+// новыми строками, а последний кусок получает правый хвост исходной строки. Курсор
+// оказывается в конце вставленного текста. Ограничение max_len не применяется.
 fn (mut ta TextArea) insert_text(s string) {
 	if s.len == 0 {
 		return
@@ -926,6 +1028,9 @@ fn (mut ta TextArea) insert_text(s string) {
 	ta.fire()
 }
 
+// Удаляет выделение (в т.ч. многострочное: склеивает начало первой и конец
+// последней строки, промежуточные удаляет). Курсор на начало, undo не пишет -
+// вызывающий уже сделал save_undo.
 fn (mut ta TextArea) delete_selection() {
 	if !ta.has_sel() {
 		return
@@ -951,6 +1056,9 @@ fn (mut ta TextArea) delete_selection() {
 
 // ───────────── word boundaries ─────────────────────────
 
+// Границы слов внутри текущей строки (как wl/wr в TextInput): word_left - начало
+// слова левее курсора, word_right - начало следующего слова правее. Через границу
+// строк не переходят.
 fn (ta &TextArea) word_left() int {
 	rr := ta.lines[ta.cur_l].runes()
 	if ta.cur_c == 0 {
@@ -982,6 +1090,7 @@ fn (ta &TextArea) word_right() int {
 	return p
 }
 
+// Выделяет слово под курсором в пределах текущей строки (двойной клик).
 fn (mut ta TextArea) select_word() {
 	rr := ta.lines[ta.cur_l].runes()
 	if rr.len == 0 {
@@ -1003,6 +1112,8 @@ fn (mut ta TextArea) select_word() {
 
 // ───────────── scrollbar geometry helpers ─────────────
 
+// Геометрия полосы прокрутки: sb_* - дорожка, thumb_* - ползунок (в координатах
+// окна). Считается заново при каждой отрисовке и обработке мыши.
 struct VScrollGeom {
 	sb_x    f32
 	sb_y    f32
@@ -1021,6 +1132,10 @@ struct HScrollGeom {
 	thumb_w f32
 }
 
+// Расчёт ползунков: толщина дорожки 5 px у правого края bounds; длина ползунка
+// пропорциональна видимой доле содержимого (не меньше 20 px); его положение -
+// доля текущей прокрутки от максимальной, умноженная на ход ползунка.
+// max_f32(1, ...) защищает от деления на ноль, когда прокручивать нечего.
 fn (ta &TextArea) vscroll_geom(cr Rect, cr_h f32, total_h f32, h_scroll_visible bool) VScrollGeom {
 	sb_w := f32(5)
 	sb_x := ta.bounds.x + ta.bounds.w - sb_w - 2
@@ -1047,6 +1162,9 @@ fn (ta &TextArea) hscroll_geom(cr Rect, total_w f32, sb_h_sz f32) HScrollGeom {
 
 // ───────────── hit-test ────────────────────────────────
 
+// Мышь -> позиция курсора (строка, колонка). Строка определяется делением на шаг
+// строки (зажата в диапазон), колонка - ближайшая граница между рунами перебором
+// префиксов (O(n) измерений текста). Без активного контекста возвращает (0, 0).
 fn (ta &TextArea) hit_pos(mx f32, my f32, app &App) (int, int) {
 	ctx_ptr := app.get_active_ctx()
 	if unsafe { ctx_ptr == nil } {

@@ -20,6 +20,7 @@ module vgui
 //   - Slide-in animation from edge
 // ═══════════════════════════════════════════════════════
 
+// NotificationKind — тип уведомления: задаёт цвет акцента (полоса, значок, рамка) и вид встроенного значка.
 pub enum NotificationKind {
 	info
 	success
@@ -27,6 +28,7 @@ pub enum NotificationKind {
 	error
 }
 
+// NotificationAnim — как уведомление «влетает» и «улетает»: сдвиг с края (на 40 px) вместе с прозрачностью либо только fade. NotificationManager выбирает вариант по своей позиции.
 pub enum NotificationAnim {
 	slide_right
 	slide_left
@@ -35,6 +37,13 @@ pub enum NotificationAnim {
 	fade
 }
 
+// Notification — одно toast-уведомление. Само не решает, где стоять: bounds ему
+// выдаёт NotificationManager (layout_notifications) каждый кадр. Жизненный цикл:
+// создано (created_at) -> show_anim 0..1 -> (по таймеру duration_ms, кнопке × или
+// dismiss()) dismissing -> dismiss_anim 1..0 -> dismissed = true, on_dismiss;
+// после этого менеджер убирает его из списка. Пока курсор над уведомлением,
+// таймер автозакрытия сбрасывается (см. handle_event). Цвета с a == 0 — «по
+// умолчанию для kind / из темы» (eff_*_color).
 @[heap]
 pub struct Notification {
 pub mut:
@@ -51,12 +60,16 @@ pub mut:
 	close_hover bool
 	close_press bool
 	// Auto-dismiss
+	// время жизни в мс до автозакрытия; 0 — только вручную. Ошибки (notification_error) живут дольше — 6000
 	duration_ms u32 = 4000
-	created_at  u64
-	dismissing  bool
-	dismissed   bool
+	// отметка C.SDL_GetTicks() старта таймера; сбрасывается при наведении и reset_timer
+	created_at u64
+	// dismissing — идёт анимация закрытия; dismissed — анимация закончена, виджет не рисуется и не принимает события
+	dismissing bool
+	dismissed  bool
 	// Animation
-	show_anim    Anim = anim_smooth(anim_tau_focus)
+	show_anim Anim = anim_smooth(anim_tau_focus)
+	// dismiss_anim идёт 1 -> 0 (стартует с 1: полностью видимо); show_anim идёт 0 -> 1. Видимость = произведение обоих
 	dismiss_anim Anim = Anim{
 		tau_ms:  anim_tau_focus
 		epsilon: 0.01
@@ -88,6 +101,7 @@ pub mut:
 
 // ─── Constructors ──────────────────────────────────────
 
+// notification создаёт обычное (info) уведомление с текстом message. Таймер стартует в момент создания (при show() менеджер перезапускает его).
 pub fn notification(message string) &Notification {
 	return &Notification{
 		message:    message
@@ -95,6 +109,7 @@ pub fn notification(message string) &Notification {
 	}
 }
 
+// notification_info — то же, но kind задан явно (.info).
 pub fn notification_info(message string) &Notification {
 	return &Notification{
 		kind:       .info
@@ -103,6 +118,7 @@ pub fn notification_info(message string) &Notification {
 	}
 }
 
+// notification_success — уведомление об успехе (зелёное).
 pub fn notification_success(message string) &Notification {
 	return &Notification{
 		kind:       .success
@@ -111,6 +127,7 @@ pub fn notification_success(message string) &Notification {
 	}
 }
 
+// notification_warning — предупреждение.
 pub fn notification_warning(message string) &Notification {
 	return &Notification{
 		kind:       .warning
@@ -119,6 +136,7 @@ pub fn notification_warning(message string) &Notification {
 	}
 }
 
+// notification_error — ошибка; живёт 6 с вместо 4 с.
 pub fn notification_error(message string) &Notification {
 	return &Notification{
 		kind:        .error
@@ -128,6 +146,7 @@ pub fn notification_error(message string) &Notification {
 	}
 }
 
+// notification_with_title — уведомление заданного kind с жирным заголовком над текстом.
 pub fn notification_with_title(kind NotificationKind, title string, message string) &Notification {
 	return &Notification{
 		kind:       kind
@@ -139,6 +158,7 @@ pub fn notification_with_title(kind NotificationKind, title string, message stri
 
 // ─── Public API ────────────────────────────────────────
 
+// dismiss запускает анимацию закрытия (идемпотентно; для уже закрытого ничего не делает). on_dismiss вызовется по её окончании в draw().
 pub fn (mut n Notification) dismiss() {
 	if n.dismissed {
 		return
@@ -146,10 +166,12 @@ pub fn (mut n Notification) dismiss() {
 	n.dismissing = true
 }
 
+// is_dismissed: анимация закрытия завершена.
 pub fn (n &Notification) is_dismissed() bool {
 	return n.dismissed
 }
 
+// reset_timer перезапускает таймер автозакрытия и «оживляет» уже закрывающееся/закрытое уведомление (dismiss_anim мгновенно возвращается в 1).
 pub fn (mut n Notification) reset_timer() {
 	n.created_at = C.SDL_GetTicks()
 	n.dismissing = false
@@ -157,6 +179,7 @@ pub fn (mut n Notification) reset_timer() {
 	n.dismiss_anim.snap(1)
 }
 
+// Цвета: собственный цвет, если задан (a > 0), иначе умолчание по kind (акцент: info/success/warning/error из темы) или цвет темы; рамка — акцент с alpha 120, значок — акцент.
 // ─── Default colors per kind ───────────────────────────
 
 fn (n &Notification) eff_accent_color(ctx &RenderContext) Color {
@@ -215,6 +238,7 @@ fn (n &Notification) eff_radius(ctx &RenderContext) f32 {
 
 // ─── Geometry ──────────────────────────────────────────
 
+// close_btn_rect — область кнопки × в правом верхнем углу (пустой Rect, если closable = false).
 fn (n &Notification) close_btn_rect() Rect {
 	if !n.closable {
 		return Rect{}
@@ -228,6 +252,7 @@ fn (n &Notification) close_btn_rect() Rect {
 	}
 }
 
+// icon_rect — место значка: правее акцентной полосы и отступа, чуть ниже верхнего отступа (+2 px под выравнивание с первой строкой).
 fn (n &Notification) icon_rect() Rect {
 	stripe := if n.show_accent_stripe { n.stripe_width } else { f32(0) }
 	return Rect{
@@ -238,6 +263,7 @@ fn (n &Notification) icon_rect() Rect {
 	}
 }
 
+// text_rect — область текста: между значком (если есть) и кнопкой × (если есть), с отступами pad.
 fn (n &Notification) text_rect() Rect {
 	stripe := if n.show_accent_stripe { n.stripe_width } else { f32(0) }
 	icon_w := if n.has_icon() { n.icon_size + n.icon_gap } else { f32(0) }
@@ -250,12 +276,15 @@ fn (n &Notification) text_rect() Rect {
 	}
 }
 
+// has_icon сейчас всегда true (из-за `|| true`): без icon_path рисуется встроенный значок по kind.
 fn (n &Notification) has_icon() bool {
 	return n.icon_path.len > 0 || true
 }
 
 // ─── Animation offsets ─────────────────────────────────
 
+// anim_offset — смещение (dx, dy) для анимации появления/исчезновения: t = show * dismiss;
+// при t >= 0.999 смещения нет, иначе до 40 px от стороны, указанной anim_kind (для .fade — 0).
 fn (n &Notification) anim_offset() (f32, f32) {
 	t := n.show_anim.value * n.dismiss_anim.value
 	if t >= 0.999 {
@@ -272,6 +301,7 @@ fn (n &Notification) anim_offset() (f32, f32) {
 	}
 }
 
+// anim_alpha — общая прозрачность 0..255 = show_anim * dismiss_anim; на неё домножаются все цвета в draw().
 fn (n &Notification) anim_alpha() u8 {
 	t := clamp_f32(n.show_anim.value * n.dismiss_anim.value, 0, 1)
 	return u8(255.0 * t)
@@ -279,6 +309,7 @@ fn (n &Notification) anim_alpha() u8 {
 
 // ─── Built-in icon drawing ─────────────────────────────
 
+// draw_builtin_icon рисует значок по kind примитивами: info — кружок с «i», success — кружок с галочкой, warning — треугольник с «!», error — кружок с крестом. Знак рисуется цветом поверхности темы (ctx.theme.surface), а не вырезается прозрачностью.
 fn (n &Notification) draw_builtin_icon(r Rect, c Color, mut ctx RenderContext) {
 	cx := r.x + r.w * 0.5
 	cy := r.y + r.h * 0.5
@@ -324,6 +355,13 @@ fn (n &Notification) draw_builtin_icon(r Rect, c Color, mut ctx RenderContext) {
 
 // ─── Drawing ───────────────────────────────────────────
 
+// draw: (1) проверяет таймер автозакрытия, (2) шагает show_anim/dismiss_anim и по
+// окончании закрытия ставит dismissed + on_dismiss, (3) пока идёт анимация или
+// тикает таймер — заказывает следующий кадр (mark_anim на всё окно, не rect;
+// область уведомления сдвигается анимацией), (4) рисует тень, фон, рамку, акцентную полосу, значок,
+// текст и ×. На время рисования n.bounds подменяется сдвинутым прямоугольником
+// (anim_bounds), чтобы геометрические помощники (icon_rect и др.) учитывали
+// смещение; в конце bounds возвращается.
 pub fn (mut n Notification) draw(mut ctx RenderContext) {
 	if !n.visible || n.dismissed {
 		return
@@ -477,6 +515,9 @@ pub fn (mut n Notification) draw(mut ctx RenderContext) {
 
 // ─── Word wrap helper ──────────────────────────────────
 
+// wrap_text_notif переносит текст по словам под ширину max_w (измерение — реальным шрифтом).
+// Абзацы разделяются '\n', пустой абзац даёт пустую строку. Слово шире строки не
+// разрывается и вылезет за ширину (клип по text_rect его обрежет).
 fn wrap_text_notif(text string, mut ctx RenderContext, font voidptr, max_w f32) []string {
 	if text.len == 0 {
 		return []
@@ -509,6 +550,11 @@ fn wrap_text_notif(text string, mut ctx RenderContext, font voidptr, max_w f32) 
 
 // ─── Events ────────────────────────────────────────────
 
+// handle_event: наведение подсвечивает ×; нажатие на × запоминается (close_press),
+// закрытие — по отпусканию на ×: on_close, затем dismiss(). Клик по телу вызывает
+// on_click, только если он задан (иначе событие не поглощается). Пока курсор над
+// уведомлением, created_at сбрасывается на каждое событие — таймер автозакрытия
+// фактически приостановлен.
 pub fn (mut n Notification) handle_event(event &GuiEvent, app &App) bool {
 	if !n.visible || !n.enabled || n.dismissed {
 		return false
@@ -567,6 +613,7 @@ pub fn (mut n Notification) handle_event(event &GuiEvent, app &App) bool {
 // automatic positioning and removal
 // ═══════════════════════════════════════════════════════
 
+// NotificationPosition — угол/край окна, у которого менеджер выстраивает стопку уведомлений.
 pub enum NotificationPosition {
 	top_right
 	top_left
@@ -576,6 +623,11 @@ pub enum NotificationPosition {
 	bottom_center
 }
 
+// NotificationManager — стопка уведомлений в углу/у края окна. Добавляется в окно
+// как виджет через win.add_widget(nm) (в контейнеры не кладётся). Каждый кадр
+// убирает закрытые, раскладывает остальные столбиком (layout_notifications) и
+// рисует; показывает не больше max_visible, остальные скрыты (visible = false)
+// до освобождения места. Область — bounds, а если они пусты — screen_w/screen_h.
 @[heap]
 pub struct NotificationManager {
 pub mut:
@@ -591,14 +643,17 @@ pub mut:
 	max_visible   int                  = 5
 	// Fallback screen size if bounds not provided.
 	// Set these from your app on init/resize.
+	// запасной размер области (меняется set_screen_size), когда bounds менеджера не заданы
 	screen_w f32 = 1920
 	screen_h f32 = 1080
 }
 
+// notification_manager создаёт менеджер с позицией top_right.
 pub fn notification_manager() &NotificationManager {
 	return &NotificationManager{}
 }
 
+// notification_manager_at — менеджер с заданной позицией.
 pub fn notification_manager_at(pos NotificationPosition) &NotificationManager {
 	return &NotificationManager{
 		position: pos
@@ -606,6 +661,7 @@ pub fn notification_manager_at(pos NotificationPosition) &NotificationManager {
 }
 
 // Update fallback screen size (call on window resize)
+// set_screen_size обновляет запасной размер области (звать при ресайзе окна, если bounds менеджера не выставляются).
 pub fn (mut nm NotificationManager) set_screen_size(w f32, h f32) {
 	nm.screen_w = w
 	nm.screen_h = h
@@ -613,6 +669,7 @@ pub fn (mut nm NotificationManager) set_screen_size(w f32, h f32) {
 
 // ─── Public API ────────────────────────────────────────
 
+// show добавляет уведомление в стопку: подбирает направление анимации под position менеджера и перезапускает таймер. Менеджер хранит ссылку на n (держит живым для GC).
 pub fn (mut nm NotificationManager) show(n &Notification) {
 	mut mn := unsafe { n }
 	mn.anim_kind = match nm.position {
@@ -626,6 +683,7 @@ pub fn (mut nm NotificationManager) show(n &Notification) {
 	nm.notifications << unsafe { n }
 }
 
+// show_info / show_success / show_warning / show_error / show_with_title создают уведомление соответствующего вида, показывают его и возвращают (чтобы можно было назначить колбэки или закрыть вручную).
 pub fn (mut nm NotificationManager) show_info(message string) &Notification {
 	mut n := notification_info(message)
 	nm.show(n)
@@ -656,22 +714,26 @@ pub fn (mut nm NotificationManager) show_with_title(kind NotificationKind, title
 	return n
 }
 
+// clear плавно закрывает все уведомления (анимацией).
 pub fn (mut nm NotificationManager) clear() {
 	for mut n in nm.notifications {
 		n.dismiss()
 	}
 }
 
+// clear_immediate мгновенно убирает все уведомления из списка, без анимации и без on_dismiss.
 pub fn (mut nm NotificationManager) clear_immediate() {
 	nm.notifications.clear()
 }
 
+// count — сколько уведомлений в списке (включая закрывающиеся и скрытые сверх max_visible).
 pub fn (nm &NotificationManager) count() int {
 	return nm.notifications.len
 }
 
 // ─── Layout ────────────────────────────────────────────
 
+// calc_height считает высоту уведомления при ширине notif_width: отступы + заголовок + перенесённые строки сообщения, но не меньше notif_height.
 fn (nm &NotificationManager) calc_height(n &Notification, mut ctx RenderContext) f32 {
 	font_b := ctx.get_font(.bold, 0)
 	font_r := ctx.get_font(.regular, 0)
@@ -698,6 +760,10 @@ fn (nm &NotificationManager) calc_height(n &Notification, mut ctx RenderContext)
 	return h
 }
 
+// layout_notifications выставляет bounds уведомлениям. Колонка: по краю (с margin)
+// или по центру. Для верхних позиций стопка растёт вниз от верхнего края, для
+// нижних — вверх от нижнего (самое старое уведомление у края). Сверх
+// max_visible уведомления скрываются, закрытые пропускаются.
 fn (mut nm NotificationManager) layout_notifications(mut ctx RenderContext) {
 	// Determine anchor (use bounds, or fallback to screen size)
 	mut area := nm.bounds
@@ -756,6 +822,7 @@ fn (mut nm NotificationManager) layout_notifications(mut ctx RenderContext) {
 
 // ─── Drawing ───────────────────────────────────────────
 
+// draw: удаляет закрытые уведомления, пересчитывает раскладку (каждый кадр, т.к. анимации и закрытия сдвигают соседей) и рисует видимые.
 pub fn (mut nm NotificationManager) draw(mut ctx RenderContext) {
 	if !nm.visible {
 		return
@@ -788,6 +855,7 @@ pub fn (mut nm NotificationManager) draw(mut ctx RenderContext) {
 
 // ─── Events ────────────────────────────────────────────
 
+// handle_event пересылает событие уведомлениям с верхнего (последнего добавленного) к нижнему; останавливается на первом поглотившем.
 pub fn (mut nm NotificationManager) handle_event(event &GuiEvent, app &App) bool {
 	if !nm.visible {
 		return false

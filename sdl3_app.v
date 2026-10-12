@@ -4,6 +4,17 @@ module vgui
 // Application — main loop, manages multiple SDL3 windows
 // ═══════════════════════════════════════════════════════
 
+// Файл sdl3_app.v: объект приложения App и главный цикл. App владеет списками окон (Window),
+// диалогов (Dialog) и трей-иконок, менеджером горячих клавиш, очередью post() для замыканий из
+// фоновых потоков. Здесь же: инициализация SDL/SDL_ttf (create_app), разбор событий SDL и маршрутизация
+// их по окнам с учётом модальных диалогов (process_events), перерисовка всех окон (render_all),
+// порядок завершения (cleanup). Цикл однопоточный: всё, кроме post(), вызывается только из главного
+// потока (PROJECT.md, «Контракт потоков»). Окно/диалог получают события через
+// Window.dispatch_event_with_app (sdl3_window.v); модальность - modal_scope.v; рендер - sdl3_render.v.
+
+// Настройки приложения. font_path/bold_path/... - пути к файлам шрифтов, font_data/... - те же
+// шрифты байтами (используются, если заданы; см. sdl3_fonts.v). font_size/mono_size - базовые
+// размеры обычного и моноширинного шрифтов, theme - тема по умолчанию для окон без своей.
 @[params]
 pub struct AppConfig {
 pub mut:
@@ -22,9 +33,13 @@ pub mut:
 	font_size        int   = 14
 	mono_size        int   = 13
 	theme            Theme = light_theme()
-	target_fps       int   = 60
+	// target_fps в коде библиотеки нигде не читается (частота кадров задаётся константой в run()).
+	target_fps int = 60
 }
 
+// Минимальный интерфейс любого виджета: нарисоваться и обработать событие (true - событие
+// поглощено). Остальные возможности (раскладка, hit-test, измерение) - отдельные интерфейсы в
+// widget_tree.v / layout_measure.v.
 pub interface Widget {
 mut:
 	draw(mut ctx RenderContext)
@@ -39,6 +54,9 @@ struct Posted {
 	f fn () = unsafe { nil }
 }
 
+// Приложение. Один экземпляр на процесс. active_ctx - контекст окна, чьё событие обрабатывается
+// прямо сейчас (nil вне обработки); виджеты берут его через get_active_ctx() для расчёта
+// геометрии в handle_event. cleaned защищает cleanup() от повторного вызова.
 pub struct App {
 pub mut:
 	config     AppConfig
@@ -59,6 +77,9 @@ pub mut:
 	wake_event u32
 }
 
+// Инициализирует SDL (видео + события) и SDL_ttf и возвращает приложение. Ошибка SDL_Init/TTF_Init
+// возвращается как error с текстом SDL_GetError. Регистрирует пользовательский тип события
+// wake_event (нужен только для пробуждения цикла из post()).
 pub fn create_app(config AppConfig) !&App {
 	// X11: SDL sets the UTF-8 window title (_NET_WM_NAME) only after the
 	// title converts to the C locale's charset. Without setlocale that is
@@ -196,10 +217,12 @@ pub fn (mut app App) add_tray(t &Tray) {
 	app.keep_alive = true
 }
 
+// Явное включение/выключение keep_alive (приложение не завершается при отсутствии открытых окон).
 pub fn (mut app App) set_keep_alive(v bool) {
 	app.keep_alive = v
 }
 
+// Контекст окна, обрабатывающего событие сейчас; nil вне dispatch (проверять через unsafe).
 pub fn (app &App) get_active_ctx() &RenderContext {
 	return app.active_ctx
 }
@@ -307,6 +330,10 @@ fn (app &App) needs_animation_now() bool {
 	return false
 }
 
+// Главный цикл: первый кадр -> повторять { пауза до 16 мс при анимации -> pump_events() ->
+// render_all(), если были события или идёт анимация -> update_running() } -> cleanup().
+// Кадр рисуется только при необходимости; без анимации цикл спит в SDL_WaitEventTimeout
+// (до 100 мс), так что простаивающее приложение почти не грузит процессор.
 pub fn (mut app App) run() {
 	app.render_all()
 
@@ -319,6 +346,7 @@ pub fn (mut app App) run() {
 		if any_anim {
 			now := C.SDL_GetTicks()
 			elapsed := now - last_render_ms
+			// 16 мс - бюджет кадра при 60 fps. Жёсткая константа, AppConfig.target_fps не используется.
 			if elapsed < 16 {
 				C.SDL_Delay(u32(16 - elapsed))
 			}
@@ -336,7 +364,18 @@ pub fn (mut app App) run() {
 	app.cleanup()
 }
 
+// Забирает все накопившиеся события SDL и раздаёт их. Возвращает true, если хотя бы одно событие
+// было получено (даже если оно ничего не изменило) и false, если за время ожидания событий нет.
+// Приоритет маршрутизации для каждого события: (1) сброс render-target - полная перерисовка;
+// (2) expose окна - немедленный render (без мерцания при ресайзе); (3) quit; (4) если есть
+// открытый модальный диалог, блокирующий окно-адресат, - событие уходит диалогу (Esc и закрытие
+// окна закрывают его с результатом 0), клики по заблокированным окнам лишь поднимают диалог;
+// (5) обычный диалог; (6) обычное окно. Координаты мыши и размеры делятся на ui_scale
+// окна/диалога: виджеты работают в логических, а SDL сообщает физические пиксели.
+// Во время обработки active_ctx указывает на контекст окна-адресата. В конце проверяется
+// двойной клик по заголовку безрамочных окон (развернуть/восстановить).
 pub fn (mut app App) process_events() bool {
+	// Первое событие берём блокирующим вызовом (ожидание/опрос), остальные - в цикле PollEvent.
 	raw_event := C.SDL_Event{}
 
 	needs_animation := app.needs_animation_now()
@@ -377,6 +416,8 @@ pub fn (mut app App) process_events() bool {
 			app.invalidate_all_windows()
 			continue
 		}
+		// Для expose окно рисуется сразу же, а не в конце итерации: при изменении размера
+		// иначе виден мерцающий/растянутый кадр.
 		if etype == sdl_event_window_exposed {
 			we := unsafe { &C.SDL_WindowEvent(&current_event) }
 			for mut w in app.windows {
@@ -405,6 +446,8 @@ pub fn (mut app App) process_events() bool {
 
 		// Модальный диалог гасит события не всего приложения, а только
 		// своего дерева владения — см. «Область модальности» в modal_scope.v.
+		// Ищем диалог, блокирующий окно-адресат: modal_blocker_index по списку записей (id окна,
+		// id родителя, флаг модальности) возвращает индекс блокирующего диалога или -1.
 		mut modal_dialog := unsafe { &Dialog(nil) }
 		mut has_modal := false
 		for d in app.dialogs {
@@ -439,6 +482,7 @@ pub fn (mut app App) process_events() bool {
 					continue
 				}
 
+				// Копия события в логических координатах (делим на ui_scale диалога).
 				mut dlg_ev := ev
 				dlg_scale := modal_dialog.win.ctx.ui_scale
 				if dlg_scale != 1.0 {
@@ -475,6 +519,7 @@ pub fn (mut app App) process_events() bool {
 			continue
 		}
 
+		// Не модальный путь: событие диалогу, чьё окно является адресатом.
 		mut routed := false
 		for mut d in app.dialogs {
 			if d.is_open() && event_wid == d.win.sdl_id {
@@ -526,6 +571,8 @@ pub fn (mut app App) process_events() bool {
 			continue
 		}
 
+		// Обычные окна. Сначала служебная обработка (размер, мышь, перетаскивание безрамочного окна),
+		// затем общая передача события виджетам через dispatch_event_with_app.
 		for mut w in app.windows {
 			if !w.open {
 				continue
@@ -610,6 +657,9 @@ pub fn (mut app App) process_events() bool {
 	return true
 }
 
+// Синхронизирует флаги окна (minimized/maximized/visible) и его размеры с событиями SDL
+// свёрнуто / развёрнуто / восстановлено / показано / скрыто. При развороте и восстановлении
+// читает реальный размер окна у SDL и переводит в логические единицы (делит на ui_scale).
 fn (app &App) handle_window_state_event(raw &C.SDL_Event, mut w Window) {
 	etype := unsafe { raw.@type }
 	match etype {
@@ -702,6 +752,10 @@ pub fn (mut app App) render_all() {
 	}
 }
 
+// Освобождает всё в порядке: трей-иконки -> диалоги -> окна -> кэш шрифтов -> TTF_Quit ->
+// SDL_Quit. Порядок важен: текстуры/рендереры окон должны быть уничтожены до выключения
+// SDL, а шрифты - до TTF_Quit. Идемпотентна (флаг cleaned). run() зовёт её сам при выходе
+// из цикла; при своём цикле её вызывает вызывающий код.
 pub fn (mut app App) cleanup() {
 	if app.cleaned {
 		return
@@ -721,12 +775,14 @@ pub fn (mut app App) cleanup() {
 	C.SDL_Quit()
 }
 
+// Просит цикл завершиться (running = false); окна закроются в cleanup().
 pub fn (mut app App) quit() {
 	app.running = false
 }
 
 // ─── Clipboard helpers via App ───
 
+// Текст из буфера обмена или пустая строка. Память SDL освобождается здесь.
 pub fn (app &App) get_clipboard() string {
 	ptr := C.SDL_GetClipboardText()
 	if ptr == unsafe { nil } {
@@ -743,6 +799,8 @@ pub fn (app &App) set_clipboard(text string) {
 
 // ─── App-level hotkey convenience methods ─────────────────
 
+// Делегаты к HotkeyManager (hotkeys.v): регистрация, снятие, включение/выключение и очистка
+// горячих клавиш приложения. shortcut - строка вида из HotkeyManager.bind.
 pub fn (mut app App) bind_hotkey(shortcut string, handler fn ()) {
 	app.hotkeys.bind(shortcut, handler)
 }

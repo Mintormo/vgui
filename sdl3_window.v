@@ -5,6 +5,19 @@ module vgui
 // Dialog — modal variant that blocks other windows
 // ═══════════════════════════════════════════════════════
 
+// Файл sdl3_window.v: окно (Window) и диалог (Dialog) - обёртки над SDL-окном и его рендерером.
+// Window владеет SDL_Window, SDL_Renderer, RenderContext (ctx: тема, шрифты, фокус, dirty regions,
+// кэши текстур), списком корневых виджетов и постоянной текстурой-целью рендера (rt). Что где:
+// создание и режимы окна (create_window, set_mode...), реестр живых рендереров (защита от
+// двойного освобождения текстур), кадр (render: arrange -> отрисовка в rt целиком или только
+// dirty-прямоугольника -> оверлеи/тултипы -> копия rt на экран), события (dispatch_event_*), точечная
+// инвалидация hover при mouse_move, teardown (cleanup), фоновая картинка, а во второй половине
+// файла - Dialog (окно фиксированного размера, чаще модальное) и масштаб интерфейса set_ui_scale.
+// Окна регистрирует App (sdl3_app.v): он же гонит SDL-события в dispatch_event_with_app и зовёт
+// render(). Рисование - sdl3_render.v / sdl3_fonts.v, HiDPI - sdl3_hdpi.v, привязки SDL -
+// sdl3_bindings.v, раскладка - PROJECT.md «Layout: measure/arrange», «Фаза arrange».
+
+// Дополнительные C-привязки SDL, нужные только окнам (основные - в sdl3_bindings.v).
 fn C.SDL_GetWindowID(win voidptr) u32
 fn C.SDL_GetWindowFromID(id u32) voidptr
 fn C.SDL_RaiseWindow(win voidptr) bool
@@ -27,6 +40,9 @@ fn C.SDL_SetWindowBordered(win voidptr, bordered bool) bool
 
 // ─── Window mode ───
 
+// Режим окна: resizable - обычное с рамкой и изменяемым размером; fixed - с рамкой, размер
+// фиксирован; fullscreen - полноэкранное; borderless - без рамки; borderless_resizable - без рамки,
+// размер можно менять (края перетаскиваются через hit-test, см. borderless-функции).
 pub enum WindowMode {
 	resizable
 	fixed
@@ -37,6 +53,13 @@ pub enum WindowMode {
 
 // ─── WindowConfig ───
 
+// Параметры create_window. width/height == 0 - размер по содержимому (окно создаётся скрытым и
+// показывается после первой раскладки). x/y < 0 - по центру экрана. min_*/max_* - границы
+// размера (0 у max - без ограничения). theme == none - тема приложения (применит App.add_window).
+// *_path / *_data - шрифты файлом или байтами (data приоритетнее; пусто - встроенные).
+// font_size/mono_size - логические размеры; high_dpi - включить HiDPI; borderless/hittest_data -
+// служебные поля безрамочного режима. Поле vsync в create_window не читается (VSync всегда
+// выключен, частоту кадров задаёт цикл App).
 @[params]
 pub struct WindowConfig {
 pub mut:
@@ -96,16 +119,20 @@ pub mut:
 // one, making the dead renderer look alive to a stale snapshot. Texture owners
 // must therefore record (pointer, generation) at texture-creation time and
 // validate both via is_renderer_alive_gen before SDL_DestroyTexture.
+// Запись реестра: указатель рендерера и номер его "поколения" (generation).
 struct LiveRenderer {
 	ptr voidptr
 	gen u64
 }
 
+// Глобальное состояние главного потока: реестр живых рендереров и счётчик поколений
+// (не сбрасывается и не переиспользуется - защита от ABA).
 __global (
 	g_live_renderers = []LiveRenderer{}
 	g_renderer_gen   = u64(0)
 )
 
+// Заносит свежесозданный рендерер в реестр с новым номером поколения.
 fn register_renderer(ren voidptr) {
 	if ren == unsafe { nil } {
 		return
@@ -166,6 +193,13 @@ pub fn is_renderer_alive_gen(ren voidptr, gen u64) bool {
 
 // ─── Window ───
 
+// Окно SDL вместе со всем состоянием отрисовки. sdl_window/renderer - ресурсы SDL (освобождает
+// cleanup); widgets - корневые виджеты в порядке добавления (последний рисуется поверх);
+// focused - индекс корня, получающего событие первым (-1 - нет); open/visible - окно "живо" и
+// показано; on_close - колбэк закрытия; on_drop_* - запасные получатели drag-and-drop; hotkeys -
+// горячие клавиши окна; hittest_data/in_drag_zone - безрамочный режим. Остальные поля -
+// служебное состояние раскладки, размера по содержимому, постоянной render-цели (rt*), точечной
+// инвалидации hover (hover_*) и пометка prev_overlayish; подробности в комментариях к полям.
 pub struct Window {
 pub mut:
 	sdl_window    voidptr
@@ -251,6 +285,12 @@ pub mut:
 	prev_overlayish bool
 }
 
+// Создаёт окно: SDL_Window с флагами из cfg -> размеры/позиция/иконка -> рендерер (с реестром
+// живых рендереров) -> набор шрифтов из общего кэша (get_or_load_fonts) -> RenderContext ->
+// HiDPI (init_hidpi; при HiDPI шрифты пересоздаются под физический размер). Ошибки SDL
+// возвращаются как error, при этом уже созданные ресурсы освобождаются. Размер "по содержимому"
+// (width/height <= 0): окно создаётся скрытым с временным размером 640x480, а на экран его
+// выводит первая раскладка (fit_min_size).
 pub fn create_window(cfg WindowConfig) !&Window {
 	px := if cfg.x < 0 { sdl_windowpos_centered } else { cfg.x }
 	py := if cfg.y < 0 { sdl_windowpos_centered } else { cfg.y }
@@ -319,6 +359,7 @@ pub fn create_window(cfg WindowConfig) !&Window {
 		}
 	}
 
+	// Драйвер рендерера выбирает SDL (name = nil).
 	ren := C.SDL_CreateRenderer(win, unsafe { nil })
 	if ren == unsafe { nil } {
 		C.SDL_DestroyWindow(win)
@@ -417,15 +458,19 @@ fn (mut w Window) reload_scaled_fonts() {
 	w.fonts_held = true
 }
 
+// Добавляет корневой виджет. Виджет не копируется и не освобождается окном; владельцем остаётся
+// вызывающий код. Раскладка выполнится при ближайшей перерисовке (размер корню выдаётся в arrange()).
 pub fn (mut w Window) add_widget(widget &Widget) {
 	w.widgets << widget
 }
 
+// Меняет заголовок окна (и запоминает в config).
 pub fn (mut w Window) set_title(title string) {
 	w.config.title = title
 	C.SDL_SetWindowTitle(w.sdl_window, title.str)
 }
 
+// Загружает иконку окна из файла; при ошибке загрузки молча ничего не делает.
 pub fn (mut w Window) set_icon(path string) {
 	icon_surface := C.IMG_Load(path.str)
 	if unsafe { icon_surface != nil } {
@@ -456,11 +501,14 @@ pub fn (mut w Window) show() {
 	w.render()
 }
 
+// Скрывает окно (open остаётся true - окно "живо", его можно показать через show()).
 pub fn (mut w Window) hide() {
 	w.visible = false
 	C.SDL_HideWindow(w.sdl_window)
 }
 
+// Свернуть / восстановить / развернуть окно. Флаги minimized/maximized выставляются сразу, затем
+// их уточняют события SDL (App.handle_window_state_event).
 pub fn (mut w Window) minimize() {
 	C.SDL_MinimizeWindow(w.sdl_window)
 	w.minimized = true
@@ -477,11 +525,14 @@ pub fn (mut w Window) maximize() {
 	w.maximized = true
 }
 
+// Включает/выключает полноэкранный режим; при выключении config.mode становится resizable.
 pub fn (mut w Window) set_fullscreen(on bool) {
 	C.SDL_SetWindowFullscreen(w.sdl_window, on)
 	w.config.mode = if on { WindowMode.fullscreen } else { WindowMode.resizable }
 }
 
+// Переключает режим окна на лету, переставляя флаги SDL (полноэкранность, рамка, изменяемость
+// размера) и синхронизируя config.mode / config.borderless.
 pub fn (mut w Window) set_mode(mode WindowMode) {
 	match mode {
 		.resizable {
@@ -519,6 +570,8 @@ pub fn (mut w Window) set_mode(mode WindowMode) {
 	}
 }
 
+// Включает/выключает безрамочный режим. При включении подключается hit-test с зоной изменения
+// размера 6 px по краям (enable_borderless_resize), при выключении - отключается.
 pub fn (mut w Window) set_borderless(on bool) {
 	C.SDL_SetWindowBordered(w.sdl_window, !on)
 	w.config.borderless = on
@@ -533,6 +586,9 @@ pub fn (w &Window) is_borderless() bool {
 	return w.config.borderless
 }
 
+// Задаёт размер окна в пикселях SDL и сразу обновляет логический размер экрана ctx. При
+// ui_scale != 1 переданные значения записываются в screen_width/height как есть, без деления на
+// масштаб (set_ui_scale и событие resize потом приведут их в порядок).
 pub fn (mut w Window) set_size(width int, height int) {
 	C.SDL_SetWindowSize(w.sdl_window, width, height)
 	w.config.width = width
@@ -590,6 +646,7 @@ pub fn (mut w Window) fit_to_content(max_w int, max_h int) {
 	w.set_size(cw, ch)
 }
 
+// Позиция окна на экране в пикселях; center() - по центру экрана (SDL_WINDOWPOS_CENTERED).
 pub fn (mut w Window) set_position(x int, y int) {
 	C.SDL_SetWindowPosition(w.sdl_window, x, y)
 }
@@ -598,6 +655,8 @@ pub fn (mut w Window) center() {
 	C.SDL_SetWindowPosition(w.sdl_window, sdl_windowpos_centered, sdl_windowpos_centered)
 }
 
+// Закрывает окно: помечает его не открытым и скрытым, прячет SDL-окно и вызывает on_close.
+// Ресурсы SDL при этом НЕ освобождаются - это делает cleanup() (App.cleanup / вызывающий код).
 pub fn (mut w Window) close() {
 	w.open = false
 	w.visible = false
@@ -609,6 +668,7 @@ pub fn (mut w Window) close() {
 	}
 }
 
+// Поднимает окно поверх остальных.
 pub fn (mut w Window) raise() {
 	C.SDL_RaiseWindow(w.sdl_window)
 }
@@ -624,6 +684,7 @@ pub fn (mut w Window) set_on_drop_text(cb fn (text string)) {
 	w.on_drop_text = cb
 }
 
+// Буфер обмена: чтение возвращает пустую строку, если там нет текста; память SDL освобождается здесь.
 pub fn (w &Window) get_clipboard() string {
 	ptr := C.SDL_GetClipboardText()
 	if ptr == unsafe { nil } {
@@ -670,10 +731,13 @@ pub fn (mut w Window) invalidate(r Rect) {
 	w.ctx.invalidate(r)
 }
 
+// Помечает весь кадр как требующий перерисовки.
 pub fn (mut w Window) invalidate_all() {
 	w.ctx.invalidate_all()
 }
 
+// Передаёт фокус полю ввода / кнопке (например, при открытии диалога) и синхронизирует
+// текстовый ввод SDL.
 pub fn (mut w Window) set_default_focus_text_input(ti &TextInput) {
 	w.ctx.focus.focus_text_input(ti, ti.focus_group)
 	w.sync_text_input()
@@ -870,6 +934,14 @@ fn (mut w Window) arrange_if_needed() {
 	}
 }
 
+// Один кадр окна. Шаги: (1) сброс флага анимации и расчёт anim_dt; (2) пропуск, если окно
+// закрыто/скрыто; (3) подготовка render-цели rt; (4) решение, какой кадр рисовать: полный
+// (full), частичный по dirty-прямоугольнику или никакой (skip_draw - ничего не изменилось);
+// (5) arrange; (6) очистка фона и отрисовка корневых виджетов (при частичном кадре - в клипе
+// dirty-прямоугольника); (7) подложка модального диалога, оверлей, тултипы - поверх всего
+// и без клипа, поэтому их наличие форсирует полный кадр; (8) копирование rt в окно и
+// SDL_RenderPresent - каждый кадр, даже пропущенный. Подробные причины каждого шага -
+// в комментариях внутри.
 fn (mut w Window) render() {
 	w.sync_text_input()
 	// Reset needs_animation/anim_reason FIRST — before the visibility
@@ -1150,6 +1222,9 @@ fn (mut w Window) render() {
 	C.SDL_RenderPresent(w.renderer)
 }
 
+// Точка входа события в окно (координаты мыши уже в логических единицах): передаёт событие в
+// dispatch_event_inner, затем синхронизирует режим текстового ввода SDL (кроме mouse_move -
+// движение мыши фокус не меняет).
 fn (mut w Window) dispatch_event_with_app(ev &GuiEvent, app &App) {
 	w.dispatch_event_inner(ev, app)
 	// Фокус меняется кликом, клавишами, Tab - сверить нужду в текстовом
@@ -1214,6 +1289,11 @@ mut:
 	found bool
 }
 
+// Маршрутизация события: (1) актуализация раскладки; (2) оверлей (выпадающий список/меню)
+// перехватывает событие первым; (3) корень с индексом focused; (4) остальные корни сверху вниз
+// (последний добавленный - верхний), до первого обработавшего; (5) не обработанный key_down -
+// горячие клавиши окна, затем приложения; (6) не обработанный drop - обработчик окна; (7)
+// инвалидация: для mouse_move - точечная (invalidate_hover_change), для остального - полный кадр.
 fn (mut w Window) dispatch_event_inner(ev &GuiEvent, app &App) {
 	if !w.open {
 		return
@@ -1415,6 +1495,10 @@ fn (mut w Window) invalidate_hover_change(ev &GuiEvent) {
 	// основной выигрыш 3.C.
 }
 
+// Освобождает ресурсы окна в строгом порядке: остановка текстового ввода -> кэши текстов ->
+// ссылка на общий набор шрифтов (ровно один раз) -> текстура фона -> render-цель rt -> снятие
+// рендерера с учёта (его текстуры умирают вместе с ним) -> SDL_DestroyRenderer ->
+// SDL_DestroyWindow. Идемпотентна: указатели обнуляются, повторный вызов безопасен.
 pub fn (mut w Window) cleanup() {
 	if unsafe { w.sdl_window != nil } {
 		C.SDL_StopTextInput(w.sdl_window)
@@ -1454,6 +1538,8 @@ pub fn (mut w Window) cleanup() {
 
 // ─── Window background image ───────────────────────────
 
+// Фоновая картинка окна (рисуется под всеми виджетами, на весь экран): создаётся лениво при первой
+// установке; set_background_mode задаёт режим вписывания, clear_background освобождает.
 fn (mut w Window) ensure_bg_image() {
 	if w.bg_image == unsafe { nil } {
 		w.bg_image = &ImageBackground{
@@ -1488,6 +1574,9 @@ pub fn (mut w Window) clear_background() {
 // Dialog
 // ═══════════════════════════════════════════════════════
 
+// Параметры create_dialog (поля шрифтов/темы - как в WindowConfig). width/height == 0 - размер по
+// содержимому (пересчитывается при каждом show()). parent - окно-родитель: даёт тему и масштаб,
+// по нему центрируется диалог и определяется модальная область. ui_scale 0 - как у родителя.
 @[params]
 pub struct DialogConfig {
 pub mut:
@@ -1523,6 +1612,11 @@ pub mut:
 	ui_scale         f32
 }
 
+// Диалог: окно фиксированного размера (win) плюс логика результата. modal == true - пока открыт,
+// блокирует ввод в окнах своего дерева владения (App.process_events, modal_scope.v).
+// result - код закрытия (-1 - пока не закрыт; 0 - отмена по Esc/крестику), on_result вызывается при
+// закрытии. base_width/base_height - логический размер без масштаба: из него show() считает
+// физический размер окна.
 pub struct Dialog {
 pub mut:
 	win         Window
@@ -1552,6 +1646,9 @@ fn dialog_theme(cfg DialogConfig) ?Theme {
 	return none
 }
 
+// Создаёт скрытое окно диалога (режим fixed) и оборачивает его в Dialog. Окно копируется
+// в поле win по значению. Тема: своя -> родителя -> приложения. Масштаб интерфейса берётся из
+// cfg.ui_scale либо у родителя. Показывает диалог show().
 pub fn create_dialog(cfg DialogConfig) !&Dialog {
 	parent_id := if unsafe { cfg.parent != nil } {
 		cfg.parent.sdl_id
@@ -1631,6 +1728,7 @@ pub fn (mut d Dialog) set_size_limits(min_w int, min_h int, max_w int, max_h int
 	d.max_h = max_h
 }
 
+// Добавляет корневой виджет в окно диалога.
 pub fn (mut d Dialog) add_widget(widget &Widget) {
 	d.win.add_widget(widget)
 }
@@ -1672,6 +1770,11 @@ pub fn (mut d Dialog) fit_to_content(max_w int, max_h int) {
 	}
 }
 
+// Показывает диалог: сбрасывает result в -1, подгоняет размер по содержимому (если auto_size),
+// переводит логический размер в физический по масштабу родителя, фиксирует размер окна
+// (min = max, пользователь не может его менять), центрирует и поднимает. Позиция
+// выставляется дважды - до и после показа, потому что оконный менеджер может проигнорировать
+// первую.
 pub fn (mut d Dialog) show() {
 	d.result = -1
 	if d.auto_size {
@@ -1727,6 +1830,7 @@ fn dialog_center_pos(d &Dialog) int {
 	return sdl_windowpos_centered
 }
 
+// Показывает диалог с масштабом интерфейса, как у переданного окна.
 pub fn (mut d Dialog) show_scaled(parent &Window) {
 	parent_scale := parent.ctx.ui_scale
 	if d.win.ctx.ui_scale != parent_scale {
@@ -1735,6 +1839,9 @@ pub fn (mut d Dialog) show_scaled(parent &Window) {
 	d.show()
 }
 
+// Закрывает диалог с кодом result: прячет окно, сбрасывает нажатое состояние кнопок (иначе
+// после повторного показа кнопка осталась бы "нажатой") и вызывает on_result. Освобождения
+// ресурсов не делает - временные диалоги затем сами зовут app.remove_dialog и win.cleanup().
 pub fn (mut d Dialog) close_with_result(result int) {
 	d.result = result
 	d.win.open = false
@@ -1753,6 +1860,7 @@ pub fn (mut d Dialog) close_with_result(result int) {
 	}
 }
 
+// Открыт ли диалог.
 pub fn (d &Dialog) is_open() bool {
 	return d.win.open
 }
@@ -1765,6 +1873,10 @@ pub fn (mut d Dialog) set_theme(theme Theme) {
 	d.win.set_theme(theme)
 }
 
+// Меняет пользовательский масштаб интерфейса (ограничивается 0.5..4.0). Итоговый масштаб
+// рендера = dpi_scale * ui_scale. Окно SDL растягивается на тот же коэффициент, чтобы
+// логический размер (config.width x height) остался прежним; кэш текстов сбрасывается, шрифты
+// перезагружаются под новый физический размер (reload_scaled_fonts).
 pub fn (mut w Window) set_ui_scale(scale f32) {
 	s := clamp_f32(scale, 0.5, 4.0)
 	w.ctx.ui_scale = s
@@ -1787,6 +1899,8 @@ pub fn (mut w Window) set_ui_scale(scale f32) {
 
 // ─── Window hotkey convenience methods ─────────────────
 
+// Горячие клавиши окна: делегаты к HotkeyManager (hotkeys.v); срабатывают после виджетов, до
+// горячих клавиш приложения (см. dispatch_event_inner).
 pub fn (mut w Window) bind_hotkey(shortcut string, handler fn ()) {
 	w.hotkeys.bind(shortcut, handler)
 }
@@ -1803,6 +1917,7 @@ pub fn (mut w Window) clear_hotkeys() {
 	w.hotkeys.clear()
 }
 
+// Масштаб интерфейса диалога: делегаты к окну диалога.
 pub fn (mut d Dialog) set_ui_scale(scale f32) {
 	d.win.set_ui_scale(scale)
 }

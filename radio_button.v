@@ -45,20 +45,27 @@ pub mut:
 	on_change   fn (bool) = unsafe { nil } // true — выбрана, false — выбор снят соседом
 }
 
+// radio_button создаёт радиокнопку с подписью text в группе 'default'.
+// Выбор снимается/ставится только через клик, клавиши или set_selected.
 pub fn radio_button(text string) &RadioButton {
 	return &RadioButton{
 		text: text
 	}
 }
 
+// is_selected сообщает, выбрана ли кнопка сейчас.
 pub fn (rb &RadioButton) is_selected() bool {
 	return rb.selected
 }
 
+// set_selected ставит флаг выбора напрямую: соседей по группе НЕ сбрасывает,
+// on_change не зовёт и кадр не инвалидирует (в своём цикле зовите Window.invalidate*).
 pub fn (mut rb RadioButton) set_selected(v bool) {
 	rb.selected = v
 }
 
+// circle_center возвращает центр кружка: у левого края bounds, по вертикали
+// посередине высоты.
 fn (rb &RadioButton) circle_center() (f32, f32) {
 	// +1 inset so the outer border contour doesn't get clipped by the container.
 	cx := rb.bounds.x + rb.circle_size * 0.5 + 1
@@ -66,6 +73,10 @@ fn (rb &RadioButton) circle_center() (f32, f32) {
 	return cx, cy
 }
 
+// select_in_group выбирает кнопку и снимает выбор с соседей той же radio_group
+// (список соседей — из фокус-учёта активного окна, см. шапку файла).
+// Сначала зовётся on_change(false) у сброшенных соседей, затем on_change(true)
+// у самой кнопки. Если кнопка уже выбрана — ничего не делает (on_change не зовётся).
 fn (mut rb RadioButton) select_in_group(app &App) {
 	if rb.selected {
 		return
@@ -93,6 +104,8 @@ fn (mut rb RadioButton) select_in_group(app &App) {
 	}
 }
 
+// draw рисует кружок, кольцо фокуса, точку выбора и подпись; регистрирует
+// кнопку в фокус-учёте (только если enabled) и шагает анимации focus_anim/sel_anim.
 pub fn (mut rb RadioButton) draw(mut ctx RenderContext) {
 	if !rb.visible {
 		return
@@ -165,6 +178,9 @@ pub fn (mut rb RadioButton) draw(mut ctx RenderContext) {
 	}
 }
 
+// handle_event обрабатывает мышь (нажатие фокусирует, отпускание над виджетом
+// выбирает), Tab и Space/Enter у сфокусированной кнопки. Возвращает true, если
+// событие поглощено.
 pub fn (mut rb RadioButton) handle_event(event &GuiEvent, app &App) bool {
 	if !rb.visible || !rb.enabled {
 		return false

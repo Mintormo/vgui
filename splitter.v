@@ -30,11 +30,26 @@ module vgui
 //     ...
 // ═══════════════════════════════════════════════════════
 
+// Файл splitter.v: Splitter - контейнер из двух панелей (first/second) с перетаскиваемой
+// разделительной полосой. Хранит не пиксели, а долю ratio (0..1) от "полезного" места
+// (ширина/высота минус толщина полосы), поэтому при изменении размера окна панели масштабируются
+// пропорционально; min_first/min_second ограничивают доли снизу. Связи: раскладка - arrange()
+// выдаёт детям bounds через arrange_child (widget_tree.v), draw() рисует детей в клипе своих
+// прямоугольников, события - сначала полоса, потом дети. Полоса в покое невидима, подсвечивается
+// при наведении и перетаскивании. Тег типа kind_splitter - widget_tag.v. Дети хранятся по
+// указателю и не освобождаются при очистке Splitter.
+
+// Направление деления.
 pub enum SplitDir {
 	horizontal // first=left, second=right, bar is vertical line
 	vertical   // first=top, second=bottom, bar is horizontal line
 }
 
+// Контейнер из двух панелей. ratio - доля первой панели (после применения min_* реальная
+// доля вычисляется в clamped_ratio()); bar_color/bar_hover/bar_drag с нулевой альфой - брать из
+// темы. Внутреннее состояние перетаскивания: dragging, hovered, drag_offset (смещение курсора от
+// центра полосы в момент захвата, чтобы полоса не "прыгала" под курсор). on_resize(ratio)
+// вызывается один раз по окончании перетаскивания.
 pub struct Splitter {
 pub mut:
 	type_tag   int = kind_splitter // тег типа, см. widget_tag.v
@@ -61,6 +76,8 @@ pub mut:
 
 // ─── Constructors ──────────────────────────────────────
 
+// Фабрики: splitter(dir) / splitter_horizontal() (панели слева и справа) / splitter_vertical()
+// (сверху и снизу).
 pub fn splitter(dir SplitDir) &Splitter {
 	return &Splitter{
 		dir: dir
@@ -81,6 +98,7 @@ pub fn splitter_vertical() &Splitter {
 
 // ─── Public API ────────────────────────────────────────
 
+// Назначают панели. Старая панель просто откреплается (не освобождается).
 pub fn (mut s Splitter) set_first(w &Widget) {
 	s.first = unsafe { w }
 }
@@ -98,6 +116,8 @@ pub fn (mut s Splitter) clear_second() {
 	s.second = unsafe { nil }
 }
 
+// Задаёт долю первой панели (ограничивается 0..1). Минимальные размеры применяются при раскладке.
+// Не вызывает on_resize и не инвалидирует кадр.
 pub fn (mut s Splitter) set_ratio(r f32) {
 	s.ratio = clamp_f32(r, 0.0, 1.0)
 }
@@ -117,6 +137,8 @@ fn (s &Splitter) total_main() f32 {
 }
 
 // Clamp ratio so both panes respect min sizes
+// Если в полезное место не помещаются оба минимума, приоритет у min_second (применяется
+// последним). При неположительном полезном месте возвращается 0.5.
 fn (s &Splitter) clamped_ratio() f32 {
 	total := s.total_main()
 	usable := total - s.bar_size
@@ -136,6 +158,8 @@ fn (s &Splitter) clamped_ratio() f32 {
 	return clamp_f32(r, 0.0, 1.0)
 }
 
+// Прямоугольники трёх частей: first (от начала), bar (сразу за first), second (всё, что осталось
+// после полосы до конца bounds).
 fn (s &Splitter) first_rect() Rect {
 	r := s.clamped_ratio()
 	usable := s.total_main() - s.bar_size
@@ -220,6 +244,8 @@ fn (s &Splitter) eff_bar_drag(ctx &RenderContext) Color {
 
 // ─── Drawing ───────────────────────────────────────────
 
+// Раскладка: если bounds не заданы (корневой Splitter без контейнера) - занимает весь экран;
+// затем даёт bounds обеим панелям.
 pub fn (mut s Splitter) arrange(mut ctx RenderContext) {
 	if !s.visible {
 		return
@@ -235,6 +261,8 @@ pub fn (mut s Splitter) arrange(mut ctx RenderContext) {
 	}
 }
 
+// Сначала дети (каждый в клипе своей панели), потом полоса поверх: так линия/ручка не перекрывается
+// содержимым. В покое (не drag, не hover и нет своего bar_color) полоса не рисуется.
 pub fn (mut s Splitter) draw(mut ctx RenderContext) {
 	if !s.visible {
 		return
@@ -276,6 +304,7 @@ pub fn (mut s Splitter) draw(mut ctx RenderContext) {
 	s.draw_grip(br, bar_c, mut ctx)
 }
 
+// Три точки-"ручки" по центру полосы (вдоль её длинной стороны), цвет - чуть светлее полосы.
 fn (s &Splitter) draw_grip(br Rect, bar_c Color, mut ctx RenderContext) {
 	grip_c := bar_c.brighten(0.15)
 	dot_r := f32(1.5)
@@ -307,6 +336,11 @@ fn (s &Splitter) draw_grip(br Rect, bar_c Color, mut ctx RenderContext) {
 
 // ─── Events ────────────────────────────────────────────
 
+// События. В режиме перетаскивания Splitter поглощает ВСЕ события: mouse_move обновляет ratio,
+// левый mouse_up завершает drag и вызывает on_resize. Вне drag: mouse_move обновляет hovered и
+// курсор (кроме случая, когда окно само управляет курсором - in_drag_zone безрамочного
+// окна); левый mouse_down на расширенной зоне полосы начинает drag. Остальные события
+// отдаются детям: сначала second, потом first (порядок z-order).
 pub fn (mut s Splitter) handle_event(event &GuiEvent, app &App) bool {
 	if !s.visible {
 		return false
@@ -403,6 +437,9 @@ pub fn (mut s Splitter) handle_event(event &GuiEvent, app &App) bool {
 	return false
 }
 
+// Пересчитывает ratio по позиции мыши: из координаты вычитаются смещение захвата и начало
+// bounds, получается положение центра полосы; доля первой панели = (центр - половина полосы) /
+// полезное место. Затем применяются min_first / min_second, как в clamped_ratio().
 fn (mut s Splitter) update_ratio_from_mouse(mx f32, my f32) {
 	usable := s.total_main() - s.bar_size
 	if usable <= 0 {
@@ -431,6 +468,7 @@ fn (mut s Splitter) update_ratio_from_mouse(mx f32, my f32) {
 	s.ratio = clamp_f32(r, 0.0, 1.0)
 }
 
+// Ставит системный курсор изменения размера (стрелки влево-вправо или вверх-вниз).
 fn (s &Splitter) set_resize_cursor() {
 	cursor_id := match s.dir {
 		.horizontal { sdl_system_cursor_sizewe }
@@ -441,6 +479,7 @@ fn (s &Splitter) set_resize_cursor() {
 	C.SDL_SetCursor(cursor)
 }
 
+// Возвращает курсор-стрелку (не прежний, а именно стандартный).
 fn (s &Splitter) restore_cursor() {
 	cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_arrow)
 	C.SDL_SetCursor(cursor)

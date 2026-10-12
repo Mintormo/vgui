@@ -14,6 +14,11 @@ import os
 
 // ─── Pending-request registry ──────────────────────────
 
+// NativeFdRequest — состояние одного ожидающего запроса к нативному диалогу.
+// Заполняется колбэком SDL (native_fd_trampoline), читается циклом ожидания.
+// done — пользователь закончил (выбрал или отменил), paths — выбранные пути
+// (пусто при отмене/ошибке), filter — индекс выбранного фильтра, как его сообщил SDL (-1 —
+// не сообщён). Поле filter сейчас нигде дальше не используется.
 struct NativeFdRequest {
 mut:
 	done   bool
@@ -29,6 +34,7 @@ __global (
 	g_native_fd_counter  u64
 )
 
+// native_fd_register выдаёт новый id (монотонный счётчик) и кладёт свежий запрос в реестр. id уходит в SDL как userdata.
 fn native_fd_register() (u64, &NativeFdRequest) {
 	g_native_fd_counter++
 	id := g_native_fd_counter
@@ -43,6 +49,11 @@ fn native_fd_register() (u64, &NativeFdRequest) {
 // `filelist` is a null-terminated array of C strings; nil on error, or an
 // array whose first element is nil when the user cancelled.
 
+// native_fd_trampoline — C-колбэк для SDL_Show*Dialog. Находит запрос по id из
+// userdata (нет в реестре — молча выходит: запрос уже снят), копирует пути из
+// C-массива в []string (массив оканчивается nil), записывает номер фильтра и
+// ставит done. SDL зовёт его из цикла событий, т.е. из того же главного потока
+// в момент process_events() в native_fd_wait.
 fn native_fd_trampoline(userdata voidptr, filelist &&char, filter int) {
 	id := u64(usize(userdata))
 	req := g_native_fd_requests[id] or { return }
@@ -70,6 +81,9 @@ fn native_fd_trampoline(userdata voidptr, filelist &&char, filter int) {
 // must outlive the *async* dialog. We clone them into stable V strings held
 // for the duration of the wait loop.
 
+// NativeFilterSet — владелец данных для массива SDL_DialogFileFilter. Хранит
+// V-копии строк (names/patterns), C-указатели на них (cnames/cpatterns) и
+// собранные структуры фильтров. Должен жить, пока идёт ожидание диалога.
 struct NativeFilterSet {
 mut:
 	names     []string
@@ -79,6 +93,9 @@ mut:
 	filters   []C.SDL_DialogFileFilter
 }
 
+// build_filter_set собирает NativeFilterSet из двух параллельных списков (имя,
+// шаблон вроде 'png;jpg'). Если длины различаются, берётся меньшая. Строки
+// клонируются: SDL хранит указатели на них, пока диалог открыт.
 fn build_filter_set(names []string, patterns []string) NativeFilterSet {
 	mut fs := NativeFilterSet{}
 	n := if names.len < patterns.len { names.len } else { patterns.len }
@@ -101,6 +118,10 @@ fn build_filter_set(names []string, patterns []string) NativeFilterSet {
 
 // ─── Wait loop ─────────────────────────────────────────
 
+// native_fd_wait крутит цикл событий приложения, пока колбэк не поставит done
+// (или пока приложение не закрылось), и затем удаляет запрос из реестра. Поздний
+// колбэк после этого ничего не найдёт и будет проигнорирован. Окна при этом
+// продолжают перерисовываться (render_all), шаг ~16 мс (C.SDL_Delay(16)).
 fn native_fd_wait(mut app App, id u64, req &NativeFdRequest) {
 	for app.running && !req.done {
 		app.process_events()
@@ -115,6 +136,10 @@ fn native_fd_wait(mut app App, id u64, req &NativeFdRequest) {
 
 // ─── Public config ─────────────────────────────────────
 
+// NativeFileDialogConfig — параметры нативного диалога. mode выбирает
+// open/save/folder; allow_many — множественный выбор (open, folder); start_dir —
+// стартовая папка; default_name — имя файла по умолчанию (только save);
+// filter_names/filter_patterns — параллельные списки фильтров.
 @[params]
 pub struct NativeFileDialogConfig {
 pub mut:
@@ -128,6 +153,11 @@ pub mut:
 }
 
 // Returns the chosen paths. Empty slice on cancel/error.
+// native_fd_run — общая точка входа: показывает нативный диалог режима cfg.mode,
+// блокирует вызывающий код (но не перерисовку) до закрытия диалога и возвращает
+// список выбранных путей (пусто при отмене или ошибке). parent — родительское окно
+// (может быть nil — тогда диалог без родителя). Стартовое расположение: для save
+// с default_name — start_dir/default_name, иначе просто start_dir.
 pub fn native_fd_run(parent &Window, mut app App, cfg NativeFileDialogConfig) []string {
 	mut win_ptr := voidptr(unsafe { nil })
 	if unsafe { parent != nil } {
@@ -186,15 +216,18 @@ pub fn native_open_file_dialog(parent &Window, mut app App, cfg NativeFileDialog
 	return if paths.len > 0 { paths[0] } else { '' }
 }
 
+// native_open_files_dialog — диалог открытия с множественным выбором; пусто при отмене.
 pub fn native_open_files_dialog(parent &Window, mut app App, cfg NativeFileDialogConfig) []string {
 	return native_fd_run(parent, mut app, NativeFileDialogConfig{ ...cfg, mode: .open, allow_many: true })
 }
 
+// native_save_file_dialog — диалог сохранения; возвращает выбранный путь или '' при отмене.
 pub fn native_save_file_dialog(parent &Window, mut app App, cfg NativeFileDialogConfig) string {
 	paths := native_fd_run(parent, mut app, NativeFileDialogConfig{ ...cfg, mode: .save, allow_many: false })
 	return if paths.len > 0 { paths[0] } else { '' }
 }
 
+// native_select_folder_dialog — выбор папки; возвращает путь или '' при отмене.
 pub fn native_select_folder_dialog(parent &Window, mut app App, cfg NativeFileDialogConfig) string {
 	paths := native_fd_run(parent, mut app, NativeFileDialogConfig{ ...cfg, mode: .folder, allow_many: false })
 	return if paths.len > 0 { paths[0] } else { '' }
@@ -208,12 +241,16 @@ pub fn native_select_folder_dialog(parent &Window, mut app App, cfg NativeFileDi
 // dragged over it. A Dialog is a normal vgui window that keeps rendering
 // in the wait loop, so it composites cleanly.
 
+// MessageBoxKind — важность сообщения; определяет букву и цвет значка в message_box.
 pub enum MessageBoxKind {
 	info
 	warning
 	error
 }
 
+// MessageBoxConfig — параметры message_box: заголовок, текст, вид, подписи кнопок
+// (по умолчанию одна 'OK'), default_button — кнопка с акцентным стилем (-1 — нет),
+// cancel_button — индекс, возвращаемый по Escape (-1 — нет).
 @[params]
 pub struct MessageBoxConfig {
 pub mut:
@@ -225,6 +262,7 @@ pub mut:
 	cancel_button  int            = -1 // index of Escape-default button; -1 = none
 }
 
+// MsgBoxState — общий между message_box и обработчиками кнопок результат: индекс нажатой кнопки и признак, что ответ получен. Куча нужна, потому что на него ссылаются замыкания.
 @[heap]
 struct MsgBoxState {
 mut:
@@ -252,6 +290,7 @@ pub fn message_box(parent &Window, mut app App, cfg MessageBoxConfig) int {
 		.error { 'x', Color{225, 90, 90, 255} }
 	}
 
+	// Диалог создаётся с темой, шрифтами и масштабом родителя, чтобы выглядеть как часть родительского окна.
 	mut dlg := create_dialog(DialogConfig{
 		title:     cfg.title
 		parent:    unsafe { parent }
@@ -265,6 +304,7 @@ pub fn message_box(parent &Window, mut app App, cfg MessageBoxConfig) int {
 		ui_scale:  parent.ctx.ui_scale
 	}) or { return -1 }
 
+	// state общий для обработчиков кнопок и Escape; цикл ниже ждёт state.answered.
 	mut state := &MsgBoxState{}
 
 	// ── Icon + message row ──
@@ -320,6 +360,7 @@ pub fn message_box(parent &Window, mut app App, cfg MessageBoxConfig) int {
 	app.add_dialog(dlg)
 	dlg.show()
 
+	// Модальное ожидание: диалог — обычное окно vgui, поэтому цикл событий и рендер продолжают работать.
 	for app.running && dlg.is_open() && !state.answered {
 		app.process_events()
 		app.render_all()

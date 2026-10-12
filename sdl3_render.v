@@ -3,10 +3,25 @@ module vgui
 // ═══════════════════════════════════════════════════════
 // SDL3 implementation of RenderContext drawing methods
 // ═══════════════════════════════════════════════════════
+
+// Файл sdl3_render.v: реализация рисовальных примитивов RenderContext поверх SDL3: отсечение
+// (clip), прямоугольники, скруглённые прямоугольники, линии, круги, треугольники. Все координаты -
+// ЛОГИЧЕСКИЕ; физический масштаб задаёт SDL_SetRenderScale = dpi_scale * ui_scale (выставляется
+// окном, sdl3_hdpi.v / sdl3_window.v). Скруглённые фигуры, круги и т.п. рисуются не через
+// SDL2_gfx, а треугольниками (SDL_RenderGeometry): заполненные - веером от центра, контуры -
+// полосой трапеций между внешним и внутренним контуром, чтобы граница получалась ровно в
+// один физический пиксель и без смещения, свойственного SDL_RenderLine. Каждая функция сама
+// выставляет blend mode (alpha-смешивание), на предыдущем состоянии не полагаясь.
+// Текст и иконки - в sdl3_fonts.v и других файлах; высокоуровневые виджеты вызывают методы
+// RenderContext отсюда, а функции render_* - внутренние.
+
 import math
 
 // ─── Clipping ───
 
+// Переводит логический Rect в целочисленный SDL_Rect для SDL_SetRenderClipRect: границы
+// округляются наружу (floor/ceil) и расширяются ещё на 1 единицу со всех сторон, чтобы обводка
+// ровно по границе области не обрезалась половиной своего пикселя.
 fn clip_sdl_rect(r Rect) C.SDL_Rect {
 	// Use floor/ceil to avoid losing fractional pixels when converting to int,
 	// then expand by 1 extra logical unit so border strokes drawn exactly on
@@ -18,6 +33,8 @@ fn clip_sdl_rect(r Rect) C.SDL_Rect {
 	return C.SDL_Rect{x0, y0, x1 - x0, y1 - y0}
 }
 
+// Включает область отсечения r, пересекая её с текущей (вложенные клипы только сужают область) и
+// запоминает в clip_stack. Каждому push_clip обязан соответствовать pop_clip.
 pub fn (mut ctx RenderContext) push_clip(r Rect) {
 	actual := if ctx.clip_stack.len > 0 {
 		r.intersection(ctx.clip_stack[ctx.clip_stack.len - 1])
@@ -29,6 +46,8 @@ pub fn (mut ctx RenderContext) push_clip(r Rect) {
 	C.SDL_SetRenderClipRect(ctx.renderer, &sdl_rect)
 }
 
+// Снимает последнюю область отсечения и возвращает предыдущую; при пустом стеке отсечение
+// отключается совсем (nil).
 pub fn (mut ctx RenderContext) pop_clip() {
 	if ctx.clip_stack.len > 0 {
 		ctx.clip_stack.delete(ctx.clip_stack.len - 1)
@@ -44,6 +63,8 @@ pub fn (mut ctx RenderContext) pop_clip() {
 
 // ─── Primitives ───
 
+// Заливка прямоугольника цветом c с alpha-смешиванием. Без привязки к физическим пикселям:
+// края могут быть дробными.
 pub fn (mut ctx RenderContext) fill_rect(r Rect, c Color) {
 	C.SDL_SetRenderDrawBlendMode(ctx.renderer, sdl_blendmode_blend)
 	C.SDL_SetRenderDrawColor(ctx.renderer, c.r, c.g, c.b, c.a)
@@ -56,6 +77,8 @@ pub fn (mut ctx RenderContext) fill_rect(r Rect, c Color) {
 	C.SDL_RenderFillRect(ctx.renderer, &sdl_rect)
 }
 
+// Рамка толщиной ровно 1 физический пиксель (а не логический): границы округляются до
+// физической сетки и рисуются четырьмя заливками. Так линия не расплывается при дробном масштабе.
 pub fn (mut ctx RenderContext) draw_rect(r Rect, c Color) {
 	// Snap to physical pixels to avoid sub-pixel bleed at fractional render scale.
 	// SDL render scale = dpi_scale * ui_scale; all geometry is in logical units.
@@ -72,6 +95,8 @@ pub fn (mut ctx RenderContext) draw_rect(r Rect, c Color) {
 	ctx.fill_rect(Rect{x1 - pw, y0 + pw, pw, y1 - y0 - pw * 2}, c)
 }
 
+// Привязывает все четыре границы прямоугольника к физической пиксельной сетке (округление к
+// ближайшему). Нужна скруглённым фигурам, чтобы заливка и обводка совпадали попиксельно.
 fn (ctx &RenderContext) snap_rect(r Rect) Rect {
 	s := ctx.dpi_scale * ctx.ui_scale
 	if s <= 0 {
@@ -85,6 +110,7 @@ fn (ctx &RenderContext) snap_rect(r Rect) Rect {
 	return Rect{x0, y0, x1 - x0, y1 - y0}
 }
 
+// Скруглённый прямоугольник (радиус <= 0 - обычный fill_rect). Границы привязываются к пикселям.
 pub fn (mut ctx RenderContext) fill_rounded_rect(r Rect, c Color, radius f32) {
 	if radius <= 0 {
 		ctx.fill_rect(r, c)
@@ -94,6 +120,7 @@ pub fn (mut ctx RenderContext) fill_rounded_rect(r Rect, c Color, radius f32) {
 	render_fill_rounded_rect(ctx.renderer, sr.x, sr.y, sr.w, sr.h, radius, c)
 }
 
+// Контур скруглённого прямоугольника толщиной в 1 физический пиксель (радиус <= 0 - draw_rect).
 pub fn (mut ctx RenderContext) draw_rounded_rect(r Rect, c Color, radius f32) {
 	if radius <= 0 {
 		ctx.draw_rect(r, c)
@@ -103,12 +130,14 @@ pub fn (mut ctx RenderContext) draw_rounded_rect(r Rect, c Color, radius f32) {
 	render_draw_rounded_rect(ctx.renderer, sr.x, sr.y, sr.w, sr.h, radius, c, ctx.dpi_scale * ctx.ui_scale)
 }
 
+// Тонкая линия (1 пиксель, средствами SDL).
 pub fn (mut ctx RenderContext) draw_line(x1 f32, y1 f32, x2 f32, y2 f32, c Color) {
 	C.SDL_SetRenderDrawBlendMode(ctx.renderer, sdl_blendmode_blend)
 	C.SDL_SetRenderDrawColor(ctx.renderer, c.r, c.g, c.b, c.a)
 	C.SDL_RenderLine(ctx.renderer, x1, y1, x2, y2)
 }
 
+// Линия толщиной thickness (в логических единицах); при thickness <= 1 - обычная draw_line.
 pub fn (mut ctx RenderContext) draw_line_thick(x1 f32, y1 f32, x2 f32, y2 f32, thickness u8, c Color) {
 	if thickness <= 1 {
 		ctx.draw_line(x1, y1, x2, y2, c)
@@ -117,20 +146,24 @@ pub fn (mut ctx RenderContext) draw_line_thick(x1 f32, y1 f32, x2 f32, y2 f32, t
 	render_thick_line(ctx.renderer, x1, y1, x2, y2, f32(thickness), c)
 }
 
+// Заполненный круг с центром (cx, cy). Тонкие обёртки над render_* ниже.
 pub fn (mut ctx RenderContext) fill_circle(cx f32, cy f32, radius f32, c Color) {
 	render_fill_circle(ctx.renderer, cx, cy, radius, c)
 }
 
+// Кольцо-контур круга шириной 1 логическая единица (в отличие от draw_rect, не 1 физический пиксель).
 pub fn (mut ctx RenderContext) draw_circle(cx f32, cy f32, radius f32, c Color) {
 	render_draw_circle(ctx.renderer, cx, cy, radius, c)
 }
 
+// Заполненный треугольник по трём вершинам.
 pub fn (mut ctx RenderContext) fill_triangle(x1 f32, y1 f32, x2 f32, y2 f32, x3 f32, y3 f32, c Color) {
 	render_fill_triangle(ctx.renderer, x1, y1, x2, y2, x3, y3, c)
 }
 
 // ─── Rotated texture copy ───
 
+// Рисует целую текстуру в прямоугольник dst, повёрнутую на angle градусов вокруг его центра.
 pub fn (mut ctx RenderContext) render_copy_rotated(texture voidptr, dst Rect, angle f64) {
 	sdl_dst := C.SDL_FRect{
 		x: dst.x
@@ -142,6 +175,8 @@ pub fn (mut ctx RenderContext) render_copy_rotated(texture voidptr, dst Rect, an
 		unsafe { nil }, 0)
 }
 
+// То же, что fill_rounded_rect, но БЕЗ привязки к физическим пикселям. Для "таблеток" (радиус
+// равен половине меньшей стороны), у которых точные границы и так задаются размером.
 pub fn (mut ctx RenderContext) fill_pill_rect(r Rect, c Color, radius f32) {
 	if radius <= 0 {
 		ctx.fill_rect(r, c)
@@ -156,6 +191,11 @@ pub fn (mut ctx RenderContext) fill_pill_rect(r Rect, c Color, radius f32) {
 
 // Renders a filled rounded rectangle using SDL_RenderGeometry.
 // This replaces SDL2_gfx roundedBoxRGBA.
+// Радиус ограничивается половиной меньшей стороны. Контур строится из четырёх дуг по 90
+// градусов (n+1 точек на дугу, n растёт с радиусом, минимум 8); дуги идут по часовой стрелке
+// начиная с левого верхнего угла, соседние дуги соединяются прямыми рёбрами автоматически, так
+// как последняя точка одной дуги и первая следующей соседние в массиве. Заливка - веер
+// треугольников от центра прямоугольника по точкам контура (веер корректен, т.к. фигура выпуклая).
 fn render_fill_rounded_rect(renderer voidptr, x f32, y f32, w f32, h f32, radius f32, c Color) {
 	if w <= 0 || h <= 0 {
 		return
@@ -224,6 +264,9 @@ fn render_fill_rounded_rect(renderer voidptr, x f32, y f32, w f32, h f32, radius
 
 // Renders an outline rounded rectangle as a geometry ring (quad strips).
 // Each segment is a trapezoid between the outer and inner contour — no SDL_RenderLine bias.
+// Параметр ui_scale здесь на самом деле комбинированный масштаб (dpi_scale * ui_scale) - так его
+// передаёт draw_rounded_rect. Толщина обводки = 1 физический пиксель: внутренний контур
+// смещён на радиус r - 2t, где t = 0.5/scale (полутолщина в логических единицах).
 fn render_draw_rounded_rect(renderer voidptr, x f32, y f32, w f32, h f32, radius f32, c Color, ui_scale f32) {
 	if w <= 0 || h <= 0 {
 		return
@@ -310,6 +353,7 @@ fn render_draw_rounded_rect(renderer voidptr, x f32, y f32, w f32, h f32, radius
 
 // Filled circle via geometry.
 // Replaces SDL2_gfx filledCircleRGBA.
+// Круг - веер из n треугольников; n растёт с радиусом (минимум 12).
 fn render_fill_circle(renderer voidptr, cx f32, cy f32, radius f32, c Color) {
 	if radius <= 0 {
 		return
@@ -349,6 +393,7 @@ fn render_fill_circle(renderer voidptr, cx f32, cy f32, radius f32, c Color) {
 }
 
 // Circle outline as geometry ring — no SDL_RenderLine bias.
+// Кольцо шириной 1 логическая единица: ro = r + 0.5, ri = r - 0.5. Число сегментов растёт с радиусом.
 fn render_draw_circle(renderer voidptr, cx f32, cy f32, radius f32, c Color) {
 	if radius <= 0 {
 		return
@@ -418,6 +463,8 @@ fn render_fill_triangle(renderer voidptr, x1 f32, y1 f32, x2 f32, y2 f32, x3 f32
 
 // Thick line via filled quad (2 triangles).
 // Replaces SDL2_gfx thickLineRGBA.
+// Линия как прямоугольник из двух треугольников: вершины смещены на половину толщины вдоль
+// нормали к направлению (nx, ny). Линия нулевой длины не рисуется (иначе деление на ноль).
 fn render_thick_line(renderer voidptr, x1 f32, y1 f32, x2 f32, y2 f32, thickness f32, c Color) {
 	dx := x2 - x1
 	dy := y2 - y1

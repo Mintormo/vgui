@@ -25,20 +25,27 @@ import os
 //   pv.set_range(-10, 10, -5, 5)
 // ═══════════════════════════════════════════════════════
 
+// PlotFunc — функция y = f(x) для серии-функции. Может вернуть NaN/±Inf: такие точки разрывают линию (не рисуются).
 pub type PlotFunc = fn (x f32) f32
 
+// PlotSeriesKind — вид серии: function (кривая по формуле, сэмплируется по пикселям), points (ломаная по точкам, опционально с маркерами), scatter (только точки).
 pub enum PlotSeriesKind {
 	function // y = f(x), sampled per pixel
 	points   // array of (x, y) points, connected by lines
 	scatter  // array of (x, y) points, dots only (no lines)
 }
 
+// PlotPoint — точка данных в координатах графика (не экрана).
 pub struct PlotPoint {
 pub mut:
 	x f32
 	y f32
 }
 
+// PlotSeries — одна серия данных (кривая/ломаная/облако). Приватна: создаётся через
+// add_function*/add_points*/add_scatter*. Для function используется func, для
+// остальных — points (копия данных). name хранится для легенды, но легенда
+// сейчас нигде не рисуется.
 struct PlotSeries {
 mut:
 	kind         PlotSeriesKind = .function
@@ -52,6 +59,10 @@ mut:
 	show_markers bool // for .points: draw dots on each vertex
 }
 
+// Константы PlotView: plot_virtual_range — на сколько единиц (±) полосы прокрутки
+// считают «весь мир» графика (раздвигается, если вид вышел за него); plot_sb_w —
+// толщина полос прокрутки; plot_axis_pad_l/b — поля слева/снизу под подписи осей;
+// plot_min_span/max_span — допустимая ширина/высота видимой области по каждой оси.
 const plot_virtual_range = f32(1000.0)
 const plot_sb_w = f32(12)
 const plot_axis_pad_l = f32(48)
@@ -59,6 +70,16 @@ const plot_axis_pad_b = f32(24)
 const plot_min_span = f32(0.001)
 const plot_max_span = f32(1_000_000.0)
 
+// PlotView — график функций и наборов точек: сетка, оси с подписями, перетаскивание
+// мышью, колесо (прокрутка/зум) и полосы прокрутки. События ловит только когда
+// курсор над виджетом (hovered); в фокус-учёте не участвует, поэтому горячие клавиши
+// (Home, Ctrl+/-/0) работают при наведении мыши, а не при фокусе.
+//
+// Система координат: видимая область — прямоугольник (view_x, view_y, view_w, view_h)
+// в координатах данных (view_y — НИЖНЯЯ граница, ось Y направлена вверх);
+// соответствие экрану даёт plot_rect() (область внутри полей) и пары px/py
+// (данные -> экран) и plot_x/plot_y (экран -> данные). Серии рисуются с клипом по
+// plot_rect. Размер — measure() в layout_measure.v.
 @[heap]
 pub struct PlotView {
 pub mut:
@@ -71,6 +92,7 @@ pub mut:
 	enabled bool = true
 	hovered bool
 	// Viewport in plot-space coordinates
+	// view_x/view_y — левый и нижний край видимой области, view_w/view_h — её размеры (в единицах данных)
 	view_x f32 = -10.0
 	view_y f32 = -5.0
 	view_w f32 = 20.0
@@ -88,14 +110,17 @@ pub mut:
 	show_axes        bool  = true
 	show_scrollbars  bool  = true
 	// Series
+	// серии в порядке добавления (поздние рисуются поверх)
 	series []PlotSeries
 	// Pan drag state
+	// панорамирование мышью: panning — идёт перетаскивание, pan_start_* — позиция мыши и вид в момент нажатия (вид считается от них, а не накапливается по дельтам)
 	panning      bool
 	pan_start_mx f32
 	pan_start_my f32
 	pan_start_vx f32
 	pan_start_vy f32
 	// Scrollbar drag state
+	// перетаскивание ползунков: *_dragging — идёт, sb_drag_start — координата мыши, sb_drag_start_val — значение вида в момент нажатия
 	vsb_dragging      bool
 	hsb_dragging      bool
 	vsb_hovered       bool
@@ -103,6 +128,7 @@ pub mut:
 	sb_drag_start     f32
 	sb_drag_start_val f32
 	// Sampling quality (samples per pixel)
+	// samples_per_pixel сейчас нигде не используется: функция сэмплируется по одному отсчёту на пиксель
 	samples_per_pixel int = 32
 	// Scroll/zoom speed
 	scroll_speed f32 = 30.0
@@ -111,12 +137,14 @@ pub mut:
 
 // ─── Constructors ──────────────────────────────────────
 
+// plot_view создаёт график с видом x -10..10, y -5..5.
 pub fn plot_view() &PlotView {
 	return &PlotView{}
 }
 
 // ─── Public API ────────────────────────────────────────
 
+// add_function добавляет кривую y = f(x) заданного цвета (толщина 2).
 pub fn (mut p PlotView) add_function(f PlotFunc, color Color) {
 	p.series << PlotSeries{
 		func:  f
@@ -124,6 +152,7 @@ pub fn (mut p PlotView) add_function(f PlotFunc, color Color) {
 	}
 }
 
+// add_function_named — то же с именем серии.
 pub fn (mut p PlotView) add_function_named(name string, f PlotFunc, color Color) {
 	p.series << PlotSeries{
 		func:  f
@@ -132,6 +161,7 @@ pub fn (mut p PlotView) add_function_named(name string, f PlotFunc, color Color)
 	}
 }
 
+// add_function_thick — кривая с заданной толщиной (при толщине > 4 рисуется медленным путём по сегментам).
 pub fn (mut p PlotView) add_function_thick(f PlotFunc, color Color, thickness f32) {
 	p.series << PlotSeries{
 		func:      f
@@ -140,6 +170,7 @@ pub fn (mut p PlotView) add_function_thick(f PlotFunc, color Color, thickness f3
 	}
 }
 
+// clear_functions удаляет ВСЕ серии (не только функции, но и точки).
 pub fn (mut p PlotView) clear_functions() {
 	p.series.clear()
 }
@@ -155,6 +186,7 @@ pub fn (mut p PlotView) add_points(points []PlotPoint, color Color) {
 	}
 }
 
+// add_points_named / add_points_thick — варианты add_points с именем / толщиной линии. Данные копируются.
 pub fn (mut p PlotView) add_points_named(name string, points []PlotPoint, color Color) {
 	p.series << PlotSeries{
 		kind:   .points
@@ -193,6 +225,7 @@ pub fn (mut p PlotView) add_scatter(points []PlotPoint, color Color) {
 	}
 }
 
+// add_scatter_sized — облако точек с заданным радиусом маркера.
 pub fn (mut p PlotView) add_scatter_sized(points []PlotPoint, color Color, marker_size f32) {
 	p.series << PlotSeries{
 		kind:       .scatter
@@ -222,6 +255,9 @@ pub fn make_points_y(ys []f32) []PlotPoint {
 }
 
 // Auto-fit viewport to encompass all points in all series.
+// fit_to_data подгоняет вид под все точки серий points/scatter с запасом 5% с каждой
+// стороны (функции игнорируются, у них нет конечного набора). Точки с NaN/Inf по Y
+// пропускаются (по X проверки нет). Нет данных — вид не меняется.
 pub fn (mut p PlotView) fit_to_data() {
 	mut has_data := false
 	mut xmin := f32(0)
@@ -267,6 +303,8 @@ pub fn (mut p PlotView) fit_to_data() {
 	p.set_range(xmin - dx * 0.05, xmax + dx * 0.05, ymin - dy * 0.05, ymax + dy * 0.05)
 }
 
+// set_range задаёт видимую область по границам. Ось, у которой max <= min, не меняется;
+// размер обрезается до [plot_min_span, plot_max_span].
 pub fn (mut p PlotView) set_range(xmin f32, xmax f32, ymin f32, ymax f32) {
 	if xmax > xmin {
 		p.view_x = xmin
@@ -278,10 +316,12 @@ pub fn (mut p PlotView) set_range(xmin f32, xmax f32, ymin f32, ymax f32) {
 	}
 }
 
+// get_range возвращает (xmin, xmax, ymin, ymax) текущей видимой области.
 pub fn (p &PlotView) get_range() (f32, f32, f32, f32) {
 	return p.view_x, p.view_x + p.view_w, p.view_y, p.view_y + p.view_h
 }
 
+// reset_view возвращает вид по умолчанию (x -10..10, y -5..5).
 pub fn (mut p PlotView) reset_view() {
 	p.view_x = -10.0
 	p.view_y = -5.0
@@ -289,6 +329,7 @@ pub fn (mut p PlotView) reset_view() {
 	p.view_h = 10.0
 }
 
+// Сеттеры/геттеры цветов. Цвет с a == 0 означает «взять из темы» (eff_* ниже).
 // ─── Color setters ─────────────────────────────────────
 
 pub fn (mut p PlotView) set_bg_color(c Color) {
@@ -346,6 +387,7 @@ pub fn (p &PlotView) get_border_color() Color {
 
 // ─── Effective colors ──────────────────────────────────
 
+// Эффективные цвета: свой цвет виджета (a > 0), иначе цвет plot_* темы (если задан), иначе подходящий общий цвет темы.
 // ─── Effective colors (theme-aware) ────────────────────
 
 fn (p &PlotView) eff_bg(ctx &RenderContext) Color {
@@ -410,6 +452,8 @@ fn (p &PlotView) eff_border(ctx &RenderContext) Color {
 
 // ─── Geometry ──────────────────────────────────────────
 
+// plot_rect — область самого графика внутри bounds: слева и снизу поля под подписи
+// осей (если show_labels), справа/снизу место под полосы прокрутки; минимум 20x20.
 fn (p &PlotView) plot_rect() Rect {
 	sbw := if p.show_scrollbars { plot_sb_w } else { f32(0) }
 	pad_l := if p.show_labels { plot_axis_pad_l } else { f32(6) }
@@ -422,6 +466,7 @@ fn (p &PlotView) plot_rect() Rect {
 	}
 }
 
+// px/py переводят координаты данных в экранные внутри plot_rect (Y инвертируется: экран растёт вниз); plot_x/plot_y делают обратное преобразование.
 fn (p &PlotView) px(x f32, pr Rect) f32 {
 	return pr.x + ((x - p.view_x) / p.view_w) * pr.w
 }
@@ -440,6 +485,10 @@ fn (p &PlotView) plot_y(sy f32, pr Rect) f32 {
 
 // ─── Nice grid step ───────────────────────────────────
 
+// nice_step подбирает «красивый» шаг сетки (1, 2, 5 или 10 · 10^n) так, чтобы на
+// диапазоне range было примерно target_count делений. Берётся грубый шаг
+// range/target_count, раскладывается на мантиссу и степень десяти, мантисса
+// округляется до ближайшего из 1/2/5/10 по порогам 1.5/3/7.
 fn nice_step(range f32, target_count int) f32 {
 	if range <= 0 || target_count <= 0 {
 		return 1.0
@@ -460,6 +509,7 @@ fn nice_step(range f32, target_count int) f32 {
 	return nice * pow10
 }
 
+// format_tick форматирует подпись деления: значения, близкие к нулю (меньше 0.1% шага), дают '0'; для шага >= 1 — целое с округлением; для дробного шага — столько знаков, сколько нужно, чтобы различались деления (до 6).
 fn format_tick(v f32, step f32) string {
 	if abs_f32(v) < step * 0.001 {
 		return '0'
@@ -481,6 +531,8 @@ fn format_tick(v f32, step f32) string {
 
 // ─── Virtual bounds (for scrollbars) ───────────────────
 
+// virtual_bounds возвращает границы «всего мира» для полос прокрутки: ±plot_virtual_range,
+// расширенные, если вид вышел за них (так ползунок всегда в пределах дорожки).
 fn (p &PlotView) virtual_bounds() (f32, f32, f32, f32) {
 	mut xmin := f32(-plot_virtual_range)
 	mut xmax := f32(plot_virtual_range)
@@ -501,6 +553,7 @@ fn (p &PlotView) virtual_bounds() (f32, f32, f32, f32) {
 	return xmin, xmax, ymin, ymax
 }
 
+// hsb_rect / vsb_rect — дорожки горизонтальной и вертикальной полос прокрутки (пустой Rect, если show_scrollbars = false).
 fn (p &PlotView) hsb_rect() Rect {
 	if !p.show_scrollbars {
 		return Rect{}
@@ -517,6 +570,7 @@ fn (p &PlotView) vsb_rect() Rect {
 	return Rect{p.bounds.x + p.bounds.w - plot_sb_w - 3, pr.y, plot_sb_w, pr.h}
 }
 
+// hsb_thumb_rect / vsb_thumb_rect — ползунки: длина пропорциональна доле видимой области в «мире» (не короче 24 px), положение — по view_x (для вертикальной — по ВЕРХНЕЙ границе вида, потому что вверху дорожки ymax). Пустой Rect, если вид не меньше «мира».
 fn (p &PlotView) hsb_thumb_rect() Rect {
 	track := p.hsb_rect()
 	if track.w <= 0 {
@@ -560,6 +614,7 @@ fn (p &PlotView) vsb_thumb_rect() Rect {
 
 // ─── Drawing ───────────────────────────────────────────
 
+// draw: фон и рамка, затем в клипе plot_rect — сетка, оси и все видимые серии; вне клипа — подписи осей и полосы прокрутки.
 pub fn (mut p PlotView) draw(mut ctx RenderContext) {
 	if !p.visible {
 		return
@@ -614,6 +669,10 @@ pub fn (mut p PlotView) draw(mut ctx RenderContext) {
 	}
 }
 
+// draw_grid рисует сетку: основные линии через nice_step (≈10 по X, ≈8 по Y) и по 4
+// промежуточные между ними (шаг/5). Линии привязываются к сетке ФИЗИЧЕСКИХ пикселей
+// и имеют толщину в один физический пиксель (pw), иначе на дробном ui_scale линии
+// получались бы разной толщины.
 fn (p &PlotView) draw_grid(pr Rect, mut ctx RenderContext) {
 	gc_major := p.eff_grid_major(ctx)
 	gc_minor := p.eff_grid_minor(ctx)
@@ -673,6 +732,7 @@ fn (p &PlotView) draw_grid(pr Rect, mut ctx RenderContext) {
 	}
 }
 
+// draw_axes рисует линии осей (y = 0 и x = 0), если они попадают в видимую область; толщина 2 физических пикселя.
 fn (p &PlotView) draw_axes(pr Rect, mut ctx RenderContext) {
 	ac := p.eff_axis(ctx)
 	s := ctx.dpi_scale * ctx.ui_scale
@@ -691,6 +751,7 @@ fn (p &PlotView) draw_axes(pr Rect, mut ctx RenderContext) {
 	}
 }
 
+// draw_series выбирает способ рисования по виду серии.
 fn (p &PlotView) draw_series(s PlotSeries, pr Rect, mut ctx RenderContext) {
 	match s.kind {
 		.function { p.draw_series_function(s, pr, mut ctx) }
@@ -699,6 +760,11 @@ fn (p &PlotView) draw_series(s PlotSeries, pr Rect, mut ctx RenderContext) {
 	}
 }
 
+// draw_series_function сэмплирует f по одному отсчёту на пиксель ширины и рисует ломаную.
+// Значения NaN/Inf и точки дальше 10 высот графика по вертикали разрывают линию:
+// накопленный участок дорисовывается, новый начинается заново (иначе SDL получил бы
+// огромные координаты у асимптот, вроде tan). Толщина <= 4 — быстрый путь:
+// один вызов SDL_RenderLines на участок (render_lines_thick); больше — по отрезкам.
 fn (p &PlotView) draw_series_function(s PlotSeries, pr Rect, mut ctx RenderContext) {
 	if unsafe { s.func == nil } {
 		return
@@ -804,6 +870,7 @@ fn (p &PlotView) render_lines_thick(renderer voidptr, pts []C.SDL_FPoint, thick 
 	}
 }
 
+// draw_series_points рисует ломаную по точкам (точки с NaN/Inf и далеко за областью разрывают линию) и поверх — маркеры, если show_markers.
 fn (p &PlotView) draw_series_points(s PlotSeries, pr Rect, mut ctx RenderContext) {
 	if s.points.len == 0 {
 		return
@@ -862,6 +929,7 @@ fn (p &PlotView) draw_series_points(s PlotSeries, pr Rect, mut ctx RenderContext
 	}
 }
 
+// draw_series_scatter рисует только маркеры (радиус point_size, по умолчанию 3); точки целиком за пределами области пропускаются.
 fn (p &PlotView) draw_series_scatter(s PlotSeries, pr Rect, mut ctx RenderContext) {
 	if s.points.len == 0 {
 		return
@@ -885,6 +953,7 @@ fn (p &PlotView) draw_series_scatter(s PlotSeries, pr Rect, mut ctx RenderContex
 	}
 }
 
+// draw_labels рисует подписи делений осей по тем же nice_step, что и сетка: по X — под графиком по центру деления, по Y — слева от графика, по вертикали по центру линии.
 fn (p &PlotView) draw_labels(pr Rect, mut ctx RenderContext) {
 	font := ctx.get_font(.regular, 0)
 	fh := ctx.font_height_of(font)
@@ -924,6 +993,7 @@ fn (p &PlotView) draw_labels(pr Rect, mut ctx RenderContext) {
 	}
 }
 
+// draw_scrollbars рисует дорожки и ползунки (цвет зависит от перетаскивания/наведения).
 fn (p &PlotView) draw_scrollbars(mut ctx RenderContext) {
 	// Horizontal
 	htrack := p.hsb_rect()
@@ -966,6 +1036,10 @@ fn (p &PlotView) draw_scrollbars(mut ctx RenderContext) {
 
 // ─── Zoom centered on a screen point ───────────────────
 
+// zoom_at масштабирует вид в factor раз (>1 — приблизить) так, чтобы точка данных под
+// курсором (screen_x, screen_y) осталась на месте: сначала запоминается её координата и
+// относительное положение в области (fx, fy), затем новый размер и новое начало
+// подбираются от неё.
 fn (mut p PlotView) zoom_at(screen_x f32, screen_y f32, factor f32) {
 	pr := p.plot_rect()
 	if pr.w <= 0 || pr.h <= 0 {
@@ -989,6 +1063,12 @@ fn (mut p PlotView) zoom_at(screen_x f32, screen_y f32, factor f32) {
 
 // ─── Events ────────────────────────────────────────────
 
+// handle_event. Состояния обрабатываются по приоритету: идущее панорамирование и
+// перетаскивание полос поглощают ВСЕ события до отпускания левой кнопки; иначе —
+// наведение, нажатие (ползунок -> клик по дорожке = прыжок на 90% вида -> начало
+// панорамирования в области графика), колесо (Ctrl — зум к курсору, Shift —
+// горизонтальная прокрутка, иначе вертикальная; отключается полем wheel) и клавиши
+// при наведении (Home и Ctrl+0 — сброс, Ctrl+'+'/'-' — зум к центру).
 pub fn (mut p PlotView) handle_event(event &GuiEvent, app &App) bool {
 	if !p.visible || !p.enabled {
 		return false
@@ -1325,6 +1405,7 @@ pub fn parse_csv_points(text string, delimiter string, has_header bool, x_col in
 	return out
 }
 
+// csv_detect_delimiter выбирает из , ; \t | тот символ, которого больше в первой строке; нет ни одного — пробел.
 fn csv_detect_delimiter(line string) string {
 	candidates := [',', ';', '\t', '|']
 	mut best := ','
@@ -1342,6 +1423,7 @@ fn csv_detect_delimiter(line string) string {
 	return best
 }
 
+// csv_parse_number разбирает число; если разделитель полей не запятая, запятая считается десятичной ('1,5' -> 1.5). Результат — f32() строки: для нечисловой строки, по-видимому, 0, а не NaN (см. проверку на NaN в parse_csv_points).
 fn csv_parse_number(s string, delim string) f32 {
 	// If ',' is not the field separator, allow it as decimal separator
 	t := if delim != ',' { s.replace(',', '.') } else { s }
@@ -1349,6 +1431,7 @@ fn csv_parse_number(s string, delim string) f32 {
 }
 
 // Load a connected-line series from a CSV file.
+// add_points_from_csv читает CSV-файл и добавляет ломаную; возвращает число прочитанных точек. Ошибка чтения файла пробрасывается (!int).
 pub fn (mut p PlotView) add_points_from_csv(path string, delimiter string, has_header bool, x_col int, y_col int, color Color) !int {
 	text := os.read_file(path)!
 	pts := parse_csv_points(text, delimiter, has_header, x_col, y_col)

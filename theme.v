@@ -4,6 +4,31 @@ module vgui
 // Theme system
 // ═══════════════════════════════════════════════════════
 
+// Шапка файла.
+// Theme - единая палитра и параметры оформления всего GUI. Окно держит один
+// Theme (ctx.theme), каждый виджет при отрисовке берёт цвета из него. Файл
+// состоит из трёх частей: (1) структура Theme; (2) методы eff_* - «эффективные»
+// цвета с запасными значениями; (3) фабрики готовых тем (dark_theme(),
+// light_theme(), win11_theme(), macos_theme() и т.д.), каждая возвращает новый Theme.
+//
+// Двухуровневая модель цветов:
+//   1. ядро - базовые цвета (bg, surface, panel_bg, border, text_*, accent*,
+//      button_*, input_*, scrollbar_*) заданы в каждой теме обязательно;
+//   2. переопределения по виджетам (lb_*, tv_*, tr_*, cb_*, ... md_*) - необязательны.
+//      Нулевое значение Color{0, 0, 0, 0} (альфа == 0) означает «не задано»: виджет
+//      обращается к eff_<виджет>_<часть>(), и тот подставляет подходящий
+//      цвет из ядра (например, фон ListBox -> input_bg, цвет выделения -> accent).
+// Поэтому тема может задать только ядро, а переопределения добавлять точечно там, где
+// универсальный запасной цвет выглядит плохо (светлые темы Windows/KDE/GTK, где
+// заголовки таблиц и чередование строк подкрашены отдельно).
+//
+// Следствие: цвет с альфой 0 нельзя использовать как «намеренно прозрачный» в
+// переопределении - он всегда читается как «не задано».
+//
+// Не-цветовые параметры: border_radius (скругление всех виджетов; у «плоских»
+// тем 0), control_height (стандартная высота контролов для measure()), тень
+// (shadow_color/offset/layers/blur - offset == 0 отключает тень), кольцо фокуса
+// (focus_ring_*) и цвет подложки модальных диалогов (modal_backdrop_color).
 pub struct Theme {
 pub mut:
 	// ── Core ──────────────────────────────────────────
@@ -65,6 +90,14 @@ pub mut:
 	// Per-widget overrides  (a=0 → inherit from core)
 	// ══════════════════════════════════════════════════
 	// ── ListBox ───────────────────────────────────────
+	// Блок «Per-widget overrides» (до конца структуры): для каждого виджета набор
+	// необязательных цветов с префиксом-сокращением (lb - ListBox, tv - TableView,
+	// tr - TreeView, cb - ComboBox, pg - PropertyGrid, tab - TabBox, acc - Accordion,
+	// menu/menubar, tooltip, notif - Notification, slider, prog - ProgressBar, chk -
+	// CheckBox, rad - RadioButton, tog - ToggleSwitch, spin - Spinner, spinbox, ce -
+	// CodeEditor, brc - Breadcrumbs, sep, splitter, plot, md - MarkdownView).
+	// По умолчанию все равны Color{0, 0, 0, 0} = «не задано». Запасные значения для
+	// каждого - в соответствующем eff_*() ниже.
 	lb_bg            Color = Color{0, 0, 0, 0}
 	lb_border        Color = Color{0, 0, 0, 0}
 	lb_header_bg     Color = Color{0, 0, 0, 0}
@@ -266,6 +299,21 @@ pub mut:
 	md_table_header_bg Color = Color{0, 0, 0, 0}
 }
 
+// Группа методов eff_<виджет>_<часть>(): для каждого необязательного цвета возвращают
+// значение, заданное в теме (альфа > 0), иначе запасной цвет из ядра. Все методы
+// однотипны (помечены @[inline]), поэтому комментируется группа, а не каждый
+// метод. Типичные запасные значения по смыслу цвета:
+//   фон списков/полей/редакторов  -> input_bg;      их рамка -> input_border;
+//   фон заголовков/полос          -> panel_bg;      разделители, сетка -> border;
+//   фон выпадающих меню/подсказок -> surface;
+//   подсветка наведения           -> button_hover;  выделенная строка/пункт -> accent;
+//   текст на выделении            -> accent_text;   основной текст -> text_primary;
+//   вторичный текст, стрелки      -> text_secondary; направляющие/неактивное -> text_disabled.
+// Исключения с вычислением: eff_tab_active_bg (bg, подмешано 6% text_primary),
+// eff_ce_selection (accent с альфой 80), eff_*_row_alt_bg (запасной - основной цвет
+// строки, т.е. без чередования), eff_focus_ring_color (accent.brighten(0.3)).
+// Замечание: eff_tv_bg() и eff_tv_border() для TableView в текущем коде table.v не
+// используются (фон берётся из eff_tv_row_bg(), рамка - из input_border).
 // ─── eff_* helpers ────────────────────────────────────────────────────────
 // Each returns the widget-specific override if set (a>0), else the core fallback.
 
@@ -955,6 +1003,15 @@ pub fn (t &Theme) eff_focus_ring_color() Color {
 // VS Code Dark
 // ═══════════════════════════════════════════════════════
 
+// Фабрики тем. Каждая возвращает полностью заполненное ядро и при необходимости
+// отдельные переопределения. Правила, общие для всех:
+//   - возвращается новый Theme по значению: изменение копии на другие окна не влияет;
+//   - shadow_offset == 0 - плоская тема без теней; border_radius == 0 - острые углы;
+//   - plot_* заданы в каждой теме, т.к. у графиков нет универсальных запасных цветов;
+//   - в тёмных темах переопределений по виджетам почти нет (запасные цвета
+//     ядра там и так подходят), в светлых - добавлены для контраста заголовков,
+//     сетки и чередования строк.
+// Тема dark_theme - «VS Code Dark»: тёмно-серый фон, синий акцент (0,122,204), радиус 6.
 pub fn dark_theme() Theme {
 	return Theme{
 		bg:                     Color{30, 30, 30, 255}
@@ -1006,6 +1063,8 @@ pub fn dark_theme() Theme {
 // Generic Light  — improved contrast
 // ═══════════════════════════════════════════════════════
 
+// Светлая нейтральная тема с повышенным контрастом; много точечных переопределений
+// (заголовки списков/таблиц/PropertyGrid, чередование строк, подсказки жёлтые).
 pub fn light_theme() Theme {
 	return Theme{
 		bg:                     Color{240, 240, 240, 255}
@@ -1099,6 +1158,7 @@ pub fn light_theme() Theme {
 // Monokai
 // ═══════════════════════════════════════════════════════
 
+// Monokai: тёмно-оливковый фон, салатовый акцент (166,226,46), без теней.
 pub fn monokai_theme() Theme {
 	return Theme{
 		bg:                     Color{39, 40, 34, 255}
@@ -1148,6 +1208,7 @@ pub fn monokai_theme() Theme {
 // Windows 10 — flat Segoe UI style, sharp corners
 // ═══════════════════════════════════════════════════════
 
+// Windows 10: плоская, острые углы (радиус 0), без теней, синий акцент (0,120,215).
 pub fn win10_theme() Theme {
 	return Theme{
 		bg:                     Color{240, 240, 240, 255}
@@ -1219,6 +1280,7 @@ pub fn win10_theme() Theme {
 // Windows 10 Dark — dark mode variant
 // ═══════════════════════════════════════════════════════
 
+// Тёмный вариант Windows 10: тот же акцент, острые углы, без теней.
 pub fn win10_dark_theme() Theme {
 	return Theme{
 		bg:                     Color{32, 32, 32, 255}
@@ -1268,6 +1330,9 @@ pub fn win10_dark_theme() Theme {
 // Windows 11 — Mica/Acrylic feel, rounded, lighter
 // ═══════════════════════════════════════════════════════
 
+// Windows 11 (стиль Mica): светлая, мягкие серые поверхности, акцент (0,95,184).
+// В коде border_radius и shadow_offset заданы 0 - то есть углы острые, несмотря на
+// пометку «rounded» в заголовке блока выше.
 pub fn win11_theme() Theme {
 	return Theme{
 		bg:                     Color{243, 243, 243, 255}
@@ -1353,6 +1418,7 @@ pub fn win11_theme() Theme {
 // Windows 11 Dark — dark Mica variant
 // ═══════════════════════════════════════════════════════
 
+// Тёмный вариант Windows 11: светло-голубой акцент (96,205,255), острые углы.
 pub fn win11_dark_theme() Theme {
 	return Theme{
 		bg:                     Color{32, 32, 32, 255}
@@ -1402,6 +1468,7 @@ pub fn win11_dark_theme() Theme {
 // KDE Breeze Light — Plasma 5/6 default light
 // ═══════════════════════════════════════════════════════
 
+// KDE Breeze (светлая): голубой акцент Plasma (61,174,233), радиус 6, без теней.
 pub fn kde_breeze_theme() Theme {
 	return Theme{
 		bg:                     Color{239, 240, 241, 255}
@@ -1487,6 +1554,7 @@ pub fn kde_breeze_theme() Theme {
 // KDE Breeze Dark — Plasma dark variant
 // ═══════════════════════════════════════════════════════
 
+// KDE Breeze (тёмная): тот же акцент; радиус скругления здесь 0, в отличие от светлого варианта (6).
 pub fn kde_breeze_dark_theme() Theme {
 	return Theme{
 		bg:                     Color{49, 54, 59, 255}
@@ -1536,6 +1604,7 @@ pub fn kde_breeze_dark_theme() Theme {
 // GTK Adwaita Light — GNOME default
 // ═══════════════════════════════════════════════════════
 
+// GTK/GNOME Adwaita (светлая): синий акцент (53,132,228), радиус 6, без теней.
 pub fn gtk_adwaita_theme() Theme {
 	return Theme{
 		bg:                     Color{250, 250, 250, 255}
@@ -1621,6 +1690,7 @@ pub fn gtk_adwaita_theme() Theme {
 // GTK Adwaita Dark — GNOME dark variant
 // ═══════════════════════════════════════════════════════
 
+// GTK/GNOME Adwaita (тёмная): акцент (120,174,237); радиус 0, в отличие от светлого варианта (6).
 pub fn gtk_adwaita_dark_theme() Theme {
 	return Theme{
 		bg:                     Color{36, 36, 36, 255}
@@ -1672,6 +1742,7 @@ pub fn gtk_adwaita_dark_theme() Theme {
 // серые подписи, скругления. Плоско: vgui без материалов и размытия.
 // ═══════════════════════════════════════════════════════
 
+// Современный macOS (светлая): systemBlue (0,122,255), радиус 6, лёгкая тень (offset 1).
 pub fn macos_theme() Theme {
 	return Theme{
 		bg:                     Color{236, 236, 236, 255}
@@ -1758,6 +1829,7 @@ pub fn macos_theme() Theme {
 // systemBlue тёмного режима, системные цвета тёмной палитры
 // ═══════════════════════════════════════════════════════
 
+// Тёмный macOS (Dark Aqua): systemBlue тёмного режима (10,132,255), радиус 6.
 pub fn macos_dark_theme() Theme {
 	return Theme{
 		bg:                     Color{50, 50, 52, 255}
@@ -1818,6 +1890,7 @@ pub fn macos_dark_theme() Theme {
 // подсказки. Гелевые кнопки и полосатый фон - плоскими цветами.
 // ═══════════════════════════════════════════════════════
 
+// Ретро-тема Mac OS X Aqua (10.0-10.9): светло-серый фон, голубая гамма, радиус 8.
 pub fn mac_os_x_aqua_theme() Theme {
 	return Theme{
 		bg:                     Color{232, 232, 232, 255}
@@ -1905,6 +1978,7 @@ pub fn mac_os_x_aqua_theme() Theme {
 // скругления.
 // ═══════════════════════════════════════════════════════
 
+// Ретро-тема Mac OS 9 Platinum: платиново-серая, лавандовое выделение, чёрные рамки, радиус 3.
 pub fn mac_os_9_platinum_theme() Theme {
 	return Theme{
 		bg:                     Color{221, 221, 221, 255}

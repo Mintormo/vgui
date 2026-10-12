@@ -10,8 +10,21 @@ module vgui
 //   - Optional prefix/suffix text
 //   - Callbacks on value change
 // ═══════════════════════════════════════════════════════
+
+// Файл spinbox.v: Spinbox - поле ввода целого числа с кнопками [-] и [+] справа. Устроен как
+// составной виджет: рамку, фон и кнопки рисует сам Spinbox, а редактирование текста делегируется
+// внутреннему TextInput (text_input) в "плоском" режиме. Поэтому фокус и клавиатурный ввод живут
+// в text_input (Spinbox сам в фокус-менеджере не регистрируется), а Spinbox лишь подсвечивает
+// рамку по состоянию text_input. Связи: раскладка - bounds выставляет контейнер, ширина текстового
+// поля = ширина - 2 * высота (две квадратные кнопки со стороной = высоте); тема - eff_spinbox_*;
+// анимация кольца фокуса - Anim (anim.v). Тег типа kind_spinbox - widget_tag.v.
+
 import strconv
 
+// Целочисленный счётчик. value всегда держится в [min, max] (set_value ограничивает); step -
+// шаг кнопок и стрелок. prefix/suffix добавляются к числу в тексте (например "$" и " шт.").
+// hovered_*/active_* - состояние кнопок (наведение/нажатие). on_change(value) вызывается при
+// каждом изменении значения - в том числе во время набора текста.
 @[heap]
 pub struct Spinbox {
 pub mut:
@@ -45,6 +58,11 @@ pub mut:
 
 // ─── Constructors ──────────────────────────────────────
 
+// Создаёт Spinbox (0..100, шаг 1) с внутренним TextInput: плоский (чтобы не было скруглённого
+// прямоугольника внутри скруглённого), максимум 16 символов, фильтр допускает только
+// цифры и ведущий минус. Колбэк text_input.on_change во время набора просто обновляет value
+// без ограничения диапазоном и форматирования: ограничение посреди ввода запретило бы
+// промежуточные строки вроде "" или "-"; нормализация делается при потере фокуса.
 pub fn spinbox() &Spinbox {
 	mut s := &Spinbox{}
 	mut ti := text_input('')
@@ -80,6 +98,8 @@ pub fn spinbox() &Spinbox {
 
 // ─── Internal ──────────────────────────────────────────
 
+// Прямоугольники кнопок (уменьшение, увеличение): две квадратные кнопки со стороной = высоте
+// виджета у правого края. (Имя "init_" историческое - функция ничего не инициализирует.)
 fn (mut s Spinbox) init_buttons_bounds() (Rect, Rect) {
 	btn_w := s.bounds.h
 	dec_r := Rect{s.bounds.x + s.bounds.w - btn_w * 2, s.bounds.y, btn_w, s.bounds.h}
@@ -87,10 +107,13 @@ fn (mut s Spinbox) init_buttons_bounds() (Rect, Rect) {
 	return dec_r, inc_r
 }
 
+// Текст для поля: prefix + число + suffix.
 fn (s &Spinbox) format_value() string {
 	return '${s.prefix}${s.value}${s.suffix}'
 }
 
+// Синхронизирует текст поля со значением; set_text вызывается только при расхождении, чтобы
+// не сбрасывать курсор и выделение лишний раз.
 fn (mut s Spinbox) update_text_input() {
 	if s.text_input != unsafe { nil } {
 		txt := s.format_value()
@@ -103,6 +126,10 @@ fn (mut s Spinbox) update_text_input() {
 
 // ─── Drawing ───────────────────────────────────────────
 
+// Порядок: анимация кольца фокуса (по фокусу text_input) -> фон -> рамка (цвет input_focus при
+// фокусе) -> кольцо фокуса -> внутренний TextInput (ему здесь же назначаются bounds, т.е. раскладка
+// дочернего поля делается прямо в draw) -> подсветка нажатых/наведённых кнопок в клипе по общей
+// форме -> знаки "-" и "+" линиями.
 pub fn (mut s Spinbox) draw(mut ctx RenderContext) {
 	if !s.visible {
 		return
@@ -202,6 +229,12 @@ pub fn (mut s Spinbox) draw(mut ctx RenderContext) {
 
 // ─── Events ────────────────────────────────────────────
 
+// События. Кнопки "нажимаются" по паре mouse_down/mouse_up: на down запоминается active_dec/inc,
+// шаг выполняется на up (отпускание может быть и вне кнопки - состояние сбрасывается всегда).
+// Остальное делегируется text_input. Клавиши при фокусе в поле: Up/Down - шаг, Home/End -
+// min/max, Tab/Escape - управление фокусом. Потеря фокуса полем (переход true -> false)
+// запускает normalize_text() ровно один раз. Возвращает true для событий над кнопками и когда
+// событие обработал text_input.
 pub fn (mut s Spinbox) handle_event(event &GuiEvent, app &App) bool {
 	if !s.visible || !s.enabled {
 		return false
@@ -241,12 +274,14 @@ pub fn (mut s Spinbox) handle_event(event &GuiEvent, app &App) bool {
 		}
 		.mouse_up {
 			if event.mouse_btn == .left {
+				// handled - отпускание кнопки, начатое нажатием на [-]/[+]: событие поглощаем.
 				handled := s.active_dec || s.active_inc
 				// Commit any text the user typed but never blurred. If
 				// the typed value was out of range, clamping it counts
 				// as the user action — don't ALSO step. Stepping only
 				// happens when the typed value was already valid (or
 				// the field hadn't been edited).
+				// Переменная названа по смыслу "значение было принудительно исправлено при коммите текста".
 				mut stepped_value_was_clamped := false
 				if handled {
 					before := s.value
@@ -356,6 +391,8 @@ pub fn (s &Spinbox) get_value() int {
 	return s.value
 }
 
+// Задаёт значение с ограничением [min, max]. Если значение изменилось - обновляет текст и
+// вызывает on_change; если нет (в том числе после ограничения до прежнего) - ничего не делает.
 pub fn (mut s Spinbox) set_value(v int) {
 	mut clamped := v
 	if clamped < s.min {
@@ -376,6 +413,8 @@ pub fn (mut s Spinbox) set_value(v int) {
 }
 
 // min > max меняются местами — так же, как в Slider.set_range.
+// Текущее значение подтягивается в новый диапазон через set_value, поэтому on_change
+// вызывается, если значение пришлось изменить.
 pub fn (mut s Spinbox) set_range(min int, max int) {
 	s.min = if min <= max { min } else { max }
 	s.max = if min <= max { max } else { min }
@@ -387,12 +426,14 @@ pub fn (mut s Spinbox) set_range(min int, max int) {
 	}
 }
 
+// Шаг должен быть положительным; нулевой и отрицательный игнорируются.
 pub fn (mut s Spinbox) set_step(step int) {
 	if step > 0 {
 		s.step = step
 	}
 }
 
+// Префикс и суффикс текста (например единицы измерения); поле обновляется сразу.
 pub fn (mut s Spinbox) set_prefix(p string) {
 	s.prefix = p
 	if s.text_input != unsafe { nil } {

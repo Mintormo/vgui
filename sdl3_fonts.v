@@ -4,9 +4,23 @@ module vgui
 // SDL3 implementation — fonts, text rendering, measurement
 // ═══════════════════════════════════════════════════════
 
+// Файл sdl3_fonts.v: шрифты и текст на уровне RenderContext. Содержит (1) выбор и ленивое
+// открытие шрифтов нужного стиля/размера (get_font, get_font_immut, init_fonts); (2) отрисовку
+// текста через кэш готовых текстур (draw_text_with_font); (3) измерение текста (measure_text_with_font,
+// font_height_of, Window.measure_text); (4) поворотный текст (draw_text_rotated_center).
+// Наборы шрифтов (FontSet) общие для окон и живут в g_font_cache со счётчиком ссылок (sdl3_render.v /
+// PROJECT.md, «Архитектура рендеринга»): здесь шрифты только открываются и используются, а закрывает
+// их destroy_font_cache. Кэш текстур текста (ctx.text_cache) привязан к рендереру окна и очищается
+// в clear_text_cache.
+
+// Константы хэша FNV-1a (64 бита): смещение и простое число из спецификации алгоритма.
+// Хэш нужен для ключа кэша текстур текста.
 const fnv1a_offset = u64(14695981039346656037)
 const fnv1a_prime = u64(1099511628211)
 
+// Ключ кэша текстуры текста: FNV-1a по байтам текста, размеру шрифта, стилю и четырём каналам
+// цвета. Цвет входит в ключ, потому что текст запекается в текстуру уже с цветом. Ключ - только
+// хэш, коллизии возможны; draw_text_with_font дополнительно сверяет поля записи.
 @[inline]
 fn text_cache_key(text string, font_size int, style_int int, c Color) u64 {
 	mut h := fnv1a_offset
@@ -22,6 +36,8 @@ fn text_cache_key(text string, font_size int, style_int int, c Color) u64 {
 	return h
 }
 
+// Уничтожает все закэшированные текстуры текста и иконок и пересоздаёт кэши пустыми. Вызывать нужно, пока
+// рендерер жив (текстура принадлежит рендереру).
 pub fn (mut ctx RenderContext) clear_text_cache() {
 	for _, entry in ctx.text_cache {
 		if unsafe { entry.texture != nil } {
@@ -37,6 +53,9 @@ pub fn (mut ctx RenderContext) clear_text_cache() {
 	ctx.icon_cache = map[string]voidptr{}
 }
 
+// Вытеснение по давности использования (LRU), когда кэш достиг cache_max: удаляются записи с
+// last_used не новее 25-го перцентиля, т.е. примерно четверть самых старых. Пачкой, а не по
+// одной, чтобы не пересчитывать порядок на каждую вставку.
 fn (mut ctx RenderContext) evict_text_cache_lru() {
 	if ctx.text_cache.len == 0 {
 		return
@@ -64,6 +83,10 @@ fn (mut ctx RenderContext) evict_text_cache_lru() {
 	}
 }
 
+// Возвращает TTF_Font для стиля и логического размера (size <= 0 - размер окна). Базовый размер
+// берётся из заранее открытого набора. Для других размеров шрифт открывается лениво и кэшируется
+// в fonts.size_cache; при ошибке открытия отдаётся regular. Шрифт НЕ нужно закрывать и хранить в
+// полях виджетов: им владеет FontSet (PROJECT.md, «Архитектура рендеринга»).
 pub fn (mut ctx RenderContext) get_font(style FontStyle, size int) voidptr {
 	effective_size := if size <= 0 { ctx.fonts.size } else { size }
 
@@ -88,6 +111,7 @@ pub fn (mut ctx RenderContext) get_font(style FontStyle, size int) voidptr {
 	} else {
 		effective_size
 	}
+	// В ключ входят и логический, и физический (open_size) размеры - см. комментарий выше.
 	key := '${int(style)}_${effective_size}_${open_size}'
 	if key in ctx.fonts.size_cache {
 		cached := ctx.fonts.size_cache[key] or { unsafe { nil } }
@@ -97,6 +121,8 @@ pub fn (mut ctx RenderContext) get_font(style FontStyle, size int) voidptr {
 	}
 
 	is_mono := style == .mono || style == .mono_bold
+	// Выбор источника шрифта: если для стиля задан отдельный файл (bold_path и т.п.) - берём его,
+	// иначе открываем базовый (regular или mono) и синтезируем стиль флагами TTF ниже.
 	dedicated_path := match style {
 		.bold { ctx.fonts.bold_path }
 		.italic { ctx.fonts.italic_path }
@@ -141,6 +167,9 @@ pub fn (mut ctx RenderContext) get_font(style FontStyle, size int) voidptr {
 	return font
 }
 
+// Версия get_font, не меняющая ctx (для const-методов вроде измерения). Не открывает новых
+// шрифтов: если шрифта нужного размера ещё нет в кэше, возвращает regular. Поэтому размер должен
+// быть заранее "прогрет" вызовом get_font.
 pub fn (ctx &RenderContext) get_font_immut(style FontStyle, size int) voidptr {
 	effective_size := if size <= 0 { ctx.fonts.size } else { size }
 
@@ -173,6 +202,9 @@ pub fn (ctx &RenderContext) get_font_immut(style FontStyle, size int) voidptr {
 
 // open_font_for_role opens a TTF font at `size`.
 // Priority: explicit `data` bytes → `path` on disk → built-in embedded default.
+// Размер size - в физических пикселях (уже умноженный на dpi/ui scale). Возвращает nil при ошибке.
+// Для данных из памяти SDL_IOFromConstMem не копирует байты: буфер должен жить, пока жив шрифт
+// (они лежат в FontSet / встроены в бинарник). closeio=true - поток закроет сам SDL3_ttf.
 fn open_font_for_role(is_mono bool, path string, data []u8, size int) voidptr {
 	mut font := unsafe { voidptr(nil) }
 	if data.len > 0 {
@@ -223,6 +255,12 @@ fn load_style_font(path string, data []u8, base_path string, base_data []u8, is_
 	return font
 }
 
+// Открывает шесть базовых шрифтов набора ctx.fonts (regular, bold, italic, bold_italic, mono,
+// mono_bold) и заполняет handle_map (указатель шрифта -> стиль и размер): по нему
+// draw_text_with_font узнаёт стиль шрифта для ключа кэша. Пути пустые - используются данные в
+// ctx.fonts.*_data, а если и их нет - встроенные шрифты. Возвращает false, если не открылся
+// regular или mono (остальные стили деградируют до синтеза и ошибкой не считаются).
+// У моноширинного набора только два стиля: mono и mono_bold.
 pub fn (mut ctx RenderContext) init_fonts(regular_path string, bold_path string, italic_path string, bold_italic_path string, mono_path string, mono_bold_path string, size int, mono_size int) bool {
 	ctx.fonts.size = size
 	ctx.fonts.mono_size = mono_size
@@ -274,6 +312,13 @@ pub fn (mut ctx RenderContext) cleanup_fonts() {
 
 // ─── Text rendering ───
 
+// Рисует text в логической точке (x, y) (левый верхний угол) цветом c шрифтом font.
+// Алгоритм: (1) координаты привязываются к целым физическим пикселям; (2) по ключу ищется
+// текстура в кэше, при попадании сверяются текст/размер/стиль/цвет (защита от коллизии хэша -
+// поля верификации удалять нельзя); (3) при промахе текст рендерится в surface (Blended - с
+// антиалиасингом), превращается в текстуру, размеры берутся у TTF; перед вставкой при
+// переполнении кэша вытесняются старые записи; (4) текстура рисуется в логических единицах
+// (физические размеры делятся на dpi*ui scale). Пустой текст и nil-шрифт - ничего не делают.
 pub fn (mut ctx RenderContext) draw_text_with_font(text string, x f32, y f32, c Color, font voidptr) {
 	if text.len == 0 || unsafe { font == nil } {
 		return
@@ -287,12 +332,14 @@ pub fn (mut ctx RenderContext) draw_text_with_font(text string, x f32, y f32, c 
 	px_f := f32(int(x * s + 0.5)) * inv_s
 	py_f := f32(int(y * s + 0.5)) * inv_s
 
+	// Для неизвестного шрифта (не из handle_map) стиль = 99: ключ кэша всё равно уникален по размеру.
 	info := ctx.fonts.handle_map[font] or { FontHandleInfo{99, ctx.fonts.size} }
 	font_size := info.font_size
 	style_int := info.style_int
 
 	key := text_cache_key(text, font_size, style_int, c)
 
+	// cache_tick - монотонный "счётчик времени" кэша; last_used хранит его значение для LRU.
 	ctx.cache_tick++
 
 	cached := ctx.text_cache[key] or {
@@ -390,6 +437,8 @@ pub fn (mut ctx RenderContext) draw_text_with_font(text string, x f32, y f32, c 
 
 // ─── Measurement ───
 
+// Размер текста в ЛОГИЧЕСКИХ единицах (физический размер от TTF делится на dpi*ui scale).
+// Рендерер не используется. Пустой текст - нулевой размер.
 pub fn (ctx &RenderContext) measure_text_with_font(text string, font voidptr) Vec2 {
 	if text.len == 0 || unsafe { font == nil } {
 		return Vec2{0, 0}
@@ -404,6 +453,7 @@ pub fn (ctx &RenderContext) measure_text_with_font(text string, font voidptr) Ve
 	return Vec2{f32(tw), f32(th)}
 }
 
+// Высота строки шрифта в логических единицах; для nil-шрифта - заглушка 16.
 pub fn (ctx &RenderContext) font_height_of(font voidptr) f32 {
 	if unsafe { font == nil } {
 		return 16.0
@@ -437,6 +487,11 @@ pub fn (mut w Window) measure_text(text string, cfg TextMeasure) Vec2 {
 
 // ─── Rotated text rendering ───
 
+// Рисует text, повёрнутый на angle градусов (по часовой стрелке в SDL; -90 - снизу вверх),
+// так, что центр текста оказывается в (cx, cy). Результат НЕ кэшируется: на каждый вызов
+// создаётся и сразу уничтожается текстура. Текст вписывается в квадрат со стороной max(w, h),
+// чтобы вращение вокруг центра квадрата не обрезало углы. Размер в логических единицах считается
+// делением на dpi*ui scale.
 pub fn (mut ctx RenderContext) draw_text_rotated_center(text string, cx f32, cy f32, angle f64, c Color, font voidptr) {
 	if text.len == 0 || unsafe { font == nil } {
 		return
@@ -452,6 +507,8 @@ pub fn (mut ctx RenderContext) draw_text_rotated_center(text string, cx f32, cy 
 	mut th := 0
 	C.TTF_GetStringSize(font, text.str, usize(0), &tw, &th)
 
+	// Сторона квадратной подложки: у повёрнутого текста при любом угле габарит не превышает max(w, h)
+	// по каждой оси.
 	pad_side := if tw > th { tw } else { th }
 
 	// SDL3: SDL_CreateSurface instead of SDL_CreateRGBSurfaceWithFormat

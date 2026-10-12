@@ -1,5 +1,22 @@
 module vgui
 
+// Шапка файла.
+// TextInput - однострочное поле ввода: выделение мышью и с Shift, перемещение по
+// словам (Ctrl+стрелки), буфер обмена, undo/redo (UndoHistory[RuneSnap]), режим
+// пароля, плейсхолдер, ограничение длины и фильтр вводимых символов по regexp.
+//
+// Связь с остальной библиотекой:
+//   - раскладка: bounds выдаёт контейнер; поле `chars` (ширина в символах) и
+//     measure() живут в layout_measure.v;
+//   - отрисовка: шрифт подбирается под высоту виджета (fit_font_size), текст
+//     клипируется внутри bounds с отступом pad, прокрутка по X - scroll_x;
+//   - фокус: каждый draw регистрирует поле в ctx.focus (focus.v); Tab/Escape
+//     передаются FocusManager'у;
+//   - события: handle_event() -> on_mouse_*/on_text/on_key; true = событие поглощено;
+//   - колбэки on_change (при каждом изменении текста, в т.ч. undo/redo) и on_submit (Enter).
+//
+// Текст хранится как []rune (индексы курсора и выделения - в рунах, не в байтах).
+// Выделение - пара sel_a (якорь) / sel_b (подвижный конец); -1 = нет выделения.
 import regex
 
 // ═══════════════════════════════════════════════════════════
@@ -8,6 +25,9 @@ import regex
 
 const ti_max_undo = 100
 
+// Коды клавиш/сканкодов для Home/End (в т.ч. цифровой блок KP 7/KP 1), которых нет
+// среди общих sdl_k_* констант. Сканкоды нужны потому, что keycode зависит от
+// раскладки, а физическая клавиша - нет. Используются также из tree_view.v.
 const sdl_k_kp_1 = 1073741913
 const sdl_k_kp_7 = 1073741919
 
@@ -25,12 +45,25 @@ const ti_sc_letter_v = 25
 const ti_sc_letter_x = 27
 const ti_sc_letter_z = 29
 
+// Режим фильтра input_filter (регулярное выражение V-модуля regex):
+// whitelist/blacklist фильтруют каждый вводимый символ отдельно, pattern проверяет
+// всю строку целиком после вставки.
 pub enum InputFilterMode {
 	whitelist // разрешить только символы, совпадающие с паттерном
 	blacklist // запретить символы, совпадающие с паттерном
 	pattern   // вся строка должна соответствовать паттерну после вставки
 }
 
+// TextInput - поле ввода. Примечания к полям:
+//   buf       - текст как руны; pw_mode показывает вместо символов точки (см. disp);
+//   max_len   - предельная длина в рунах (вставка обрезается);
+//   chars     - ширина в символах для раскладки (0 - занять всё место);
+//   cur       - позиция курсора (0..buf.len);
+//   sel_a/b   - выделение (-1 = нет); drag - идёт выделение мышью;
+//   scroll_x  - горизонтальная прокрутка текста, когда он не помещается;
+//   focus_t   - анимация фокуса (0..1) для рамки;
+//   flat      - рисовать без фона и рамки (встраивание в другие виджеты);
+//   cursor_color - прозрачный (a == 0) = акцентный цвет темы.
 @[heap]
 pub struct TextInput {
 pub mut:
@@ -82,6 +115,8 @@ pub fn (t &TextInput) get_text() string {
 	return t.buf.string()
 }
 
+// Программно задаёт текст: курсор в конец, выделение и прокрутка сброшены, история
+// undo очищена. Колбэк on_change НЕ вызывается.
 pub fn (mut t TextInput) set_text(s string) {
 	t.buf = s.runes()
 	t.cur = t.buf.len
@@ -93,6 +128,9 @@ pub fn (mut t TextInput) set_text(s string) {
 
 // ───────────── undo / redo ─────────────────────────────
 
+// Undo/redo: снимок (буфер, курсор) кладётся в историю ПЕРЕД каждой правкой
+// (save_undo), а undo()/redo() обменивают текущее состояние со снимком.
+// restore() после отката вызывает on_change, как и обычная правка.
 fn (t &TextInput) snap() RuneSnap {
 	return RuneSnap{
 		buf: t.buf.clone()
@@ -140,6 +178,8 @@ pub fn (mut t TextInput) clear_undo() {
 
 // ───────────── low-level rune ops ──────────────────────
 
+// rslice - безопасная подстрока рун [a, b): индексы зажимаются в границы, пустой
+// или перевёрнутый диапазон даёт ''.
 fn rslice(r []rune, a int, b int) string {
 	s := clamp_int(a, 0, r.len)
 	e := clamp_int(b, s, r.len)
@@ -149,6 +189,8 @@ fn rslice(r []rune, a int, b int) string {
 	return r[s..e].string()
 }
 
+// rsplice - новый срез рун: src с заменой диапазона [a, b) на ins (удаление - пустой
+// ins, вставка - a == b). Исходный срез не меняется.
 fn rsplice(src []rune, a int, b int, ins []rune) []rune {
 	s := clamp_int(a, 0, src.len)
 	e := clamp_int(b, s, src.len)
@@ -167,6 +209,8 @@ fn rsplice(src []rune, a int, b int, ins []rune) []rune {
 
 // ───────────── display helpers ─────────────────────────
 
+// Отображаемые руны: в режиме пароля - маркеры «•» (U+2022) вместо символов.
+// Позиции курсора совпадают с buf, т.к. длина одинакова.
 fn (t &TextInput) disp() []rune {
 	if t.pw_mode && t.buf.len > 0 {
 		mut o := []rune{cap: t.buf.len}
@@ -197,6 +241,8 @@ fn (mut t TextInput) clear_sel() {
 	t.sel_b = -1
 }
 
+// Если выделения нет, заводит выделение нулевой длины в позиции курсора - точку
+// отсчёта для расширения Shift+стрелкой/Home/End.
 fn (mut t TextInput) ensure_sel() {
 	if t.sel_a < 0 {
 		t.sel_a = t.cur
@@ -213,6 +259,9 @@ fn (t &TextInput) selected_text() string {
 
 // ───────────── font size for widget height ─────────────
 
+// Размер шрифта под высоту виджета: доступная высота (h - 2*pad) делится на 1.25
+// (отношение высоты строки к кеглю), результат зажат в [8, 72]. Благодаря этому
+// поле, растянутое по высоте, получает крупный текст.
 fn (t &TextInput) fit_font_size() int {
 	avail := t.bounds.h - t.pad * 2.0
 	if avail < 6 {
@@ -230,6 +279,13 @@ fn (t &TextInput) fit_font_size() int {
 
 // ───────────── drawing ─────────────────────────────────
 
+// Отрисовка поля. Порядок: регистрация в FocusManager и синхронизация focused ->
+// перезаказ анимации курсора -> проверка клипа -> фон/рамка/кольцо фокуса (если не
+// flat) -> текст под клипом области содержимого: плейсхолдер (пусто, нет фокуса),
+// одинокий курсор (пусто, есть фокус) или текст с выделением и курсором. У
+// нефокусного поля прокрутка сбрасывается в 0 и текст рисуется вторичным цветом.
+// Курсор мигает с периодом 1060 мс (видим первые 530 мс); поэтому у сфокусированного
+// поля каждый кадр заказывается перерисовка его области (mark_anim_rect).
 pub fn (mut t TextInput) draw(mut ctx RenderContext) {
 	if !t.visible {
 		return
@@ -346,6 +402,9 @@ pub fn (mut t TextInput) draw(mut ctx RenderContext) {
 	ctx.pop_clip()
 }
 
+// Подбирает scroll_x так, чтобы курсор оставался в видимой области ширины cw (с
+// запасом 20 px при сдвиге); если весь текст помещается - прокрутка 0.
+// Вызывается из draw(), т.е. отрисовка меняет состояние виджета.
 fn (mut t TextInput) fix_scroll(ctx &RenderContext, cw f32, dr []rune, font voidptr) {
 	cx := ctx.measure_text_with_font(rslice(dr, 0, t.cur), font).x
 	if cx - t.scroll_x > cw - 2 {
@@ -365,6 +424,8 @@ fn (mut t TextInput) fix_scroll(ctx &RenderContext, cw f32, dr []rune, font void
 
 // ───────────── event dispatch ──────────────────────────
 
+// Диспетчер событий; true - событие поглощено. Нефокусное или скрытое/выключенное
+// поле события не берёт (mouse_move обновляет hovered даже без фокуса).
 pub fn (mut t TextInput) handle_event(ev &GuiEvent, app &App) bool {
 	if !t.visible || !t.enabled {
 		return false
@@ -400,6 +461,8 @@ pub fn (mut t TextInput) handle_event(ev &GuiEvent, app &App) bool {
 	}
 }
 
+// Движение: обновляет hovered; при перетаскивании двигает конец выделения. Событие
+// поглощается только во время выделения мышью.
 fn (mut t TextInput) on_mouse_move(ev &GuiEvent, app &App) bool {
 	t.hovered = t.bounds.contains(ev.mouse_x, ev.mouse_y)
 	if t.drag && t.focused {
@@ -410,6 +473,9 @@ fn (mut t TextInput) on_mouse_move(ev &GuiEvent, app &App) bool {
 	return false
 }
 
+// Левая кнопка: внутри поля - взять фокус (через FocusManager), поставить курсор
+// под мышью и начать выделение; вне поля при наличии фокуса - снять фокус. Клик
+// снаружи не поглощается (false), чтобы он дошёл до других виджетов.
 fn (mut t TextInput) on_mouse_down(ev &GuiEvent, app &App) bool {
 	if ev.mouse_btn != .left {
 		return false
@@ -441,6 +507,8 @@ fn (mut t TextInput) on_mouse_down(ev &GuiEvent, app &App) bool {
 	return false
 }
 
+// Конец перетаскивания; пустое выделение (a == b) сбрасывается, чтобы не рисовалась
+// подсветка нулевой ширины.
 fn (mut t TextInput) on_mouse_up(ev &GuiEvent) bool {
 	if ev.mouse_btn != .left {
 		return false
@@ -455,6 +523,7 @@ fn (mut t TextInput) on_mouse_up(ev &GuiEvent) bool {
 	return false
 }
 
+// Ввод символов (SDL text_input): вставка с учётом фильтра и max_len.
 fn (mut t TextInput) on_text(ev &GuiEvent) bool {
 	if !t.focused {
 		return false
@@ -463,6 +532,8 @@ fn (mut t TextInput) on_text(ev &GuiEvent) bool {
 	return true
 }
 
+// Home/End: срабатывают по keycode и по scancode (раскладко-независимо), включая
+// KP 7 / KP 1 цифрового блока. Используются также TableView (table.v).
 fn is_home_key(keycode int, scancode int) bool {
 	return keycode == sdl_k_home || keycode == sdl_k_kp_7 || scancode == sc_home
 		|| scancode == sc_kp_7
@@ -473,6 +544,14 @@ fn is_end_key(keycode int, scancode int) bool {
 		|| scancode == sc_kp_1
 }
 
+// Обработка нажатий клавиш (только при фокусе). Порядок: Tab (передать фокус) ->
+// Home/End -> Ctrl+буква по scancode -> остальные клавиши по keycode.
+// Ctrl+A/C/X/V/Z проверяются по ФИЗИЧЕСКОМУ scancode, чтобы шорткаты работали и при
+// нелатинской раскладке (keycode там - кириллическая буква); ветки sdl_k_a/c/x/v/z
+// ниже - запасной путь по keycode. Ctrl+Shift+Z - redo. Ctrl+Insert копирует,
+// Shift+Insert вставляет. Enter вызывает on_submit, Escape снимает фокус. Возвращает
+// false для неизвестных клавиш, чтобы их обработали выше (например, горячие клавиши
+// окна).
 fn (mut t TextInput) on_key(ev &GuiEvent, app &App) bool {
 	if !t.focused {
 		return false
@@ -638,6 +717,9 @@ fn (mut t TextInput) on_key(ev &GuiEvent, app &App) bool {
 
 // ───────────── key actions ─────────────────────────────
 
+// Backspace/Delete: с выделением удаляют его; без выделения - один символ, а с
+// Ctrl - слово слева (wl) / справа (wr). Перед правкой сохраняется undo, после -
+// вызывается on_change.
 fn (mut t TextInput) key_backspace(ctrl bool) {
 	if t.has_sel() {
 		t.save_undo()
@@ -682,6 +764,8 @@ fn (mut t TextInput) key_delete(ctrl bool) {
 	}
 }
 
+// Стрелки: Ctrl - по словам, Shift - расширяют выделение. Без Shift при активном
+// выделении стрелка схлопывает его к соответствующему краю, не двигая курсор дальше.
 fn (mut t TextInput) key_left(ctrl bool, shift bool) {
 	if shift {
 		t.ensure_sel()
@@ -748,6 +832,12 @@ fn (mut t TextInput) key_end(shift bool) {
 
 // ───────────── editing helpers ─────────────────────────
 
+// Вставка текста в позицию курсора с заменой выделения. Порядок: режим pattern
+// уходит в отдельную проверку всей строки; иначе текст фильтруется посимвольно
+// (whitelist/blacklist), считается свободное место до max_len (выделение при
+// замене освобождает место), и вставляется то, что поместилось. Если вставлять
+// нечего (всё отфильтровано / нет места) - правка не происходит: ни undo-снимка,
+// ни удаления выделения, ни on_change.
 fn (mut t TextInput) insert(s string) {
 	if s.len == 0 {
 		return
@@ -773,6 +863,11 @@ fn (mut t TextInput) insert(s string) {
 	t.fire()
 }
 
+// Режим pattern: собирается строка-кандидат «как будет после вставки» и целиком
+// проверяется regexp'ом; если не совпала - вставка отклоняется. При некорректном
+// регулярном выражении ввод молча игнорируется (regex_opt вернул ошибку).
+// Замечание: проверяется весь кандидат, поэтому паттерн должен допускать и
+// промежуточные состояния ввода.
 fn (mut t TextInput) insert_with_pattern_check(s string) {
 	mut re := regex.regex_opt(t.input_filter) or { return }
 	lo := if t.has_sel() { t.sel_lo() } else { t.cur }
@@ -796,6 +891,8 @@ fn (mut t TextInput) insert_with_pattern_check(s string) {
 	t.fire()
 }
 
+// Посимвольный фильтр whitelist/blacklist. При некорректном регулярном выражении
+// текст проходит без фильтрации.
 fn (t &TextInput) filter_runes(rr []rune) []rune {
 	mut re := regex.regex_opt(t.input_filter) or { return rr }
 	mut out := []rune{cap: rr.len}
@@ -810,6 +907,8 @@ fn (t &TextInput) filter_runes(rr []rune) []rune {
 	return out
 }
 
+// Удаляет выделение без записи в undo - вызывающий уже сделал save_undo() (так одна
+// операция «заменить выделение» откатывается одним шагом). on_change не вызывается.
 fn (mut t TextInput) del_sel_no_undo() {
 	if !t.has_sel() {
 		return
@@ -821,6 +920,7 @@ fn (mut t TextInput) del_sel_no_undo() {
 	t.clear_sel()
 }
 
+// Вызывает on_change с текущим текстом, если колбэк задан.
 fn (mut t TextInput) fire() {
 	if t.on_change != unsafe { nil } {
 		t.on_change(t.get_text())
@@ -829,12 +929,18 @@ fn (mut t TextInput) fire() {
 
 // ───────────── word boundaries ─────────────────────────
 
+// Символ «слова» для Ctrl+стрелок, Ctrl+Backspace/Delete и двойного клика:
+// латиница, цифры, «_» и кириллица. Другие алфавиты (греческий и т.д.) считаются
+// разделителями. Используется также в tree_view.v и text_area.v.
 fn is_word(r rune) bool {
 	return (r >= `a` && r <= `z`) || (r >= `A` && r <= `Z`) || (r >= `0` && r <= `9`)
 		|| r == `_` || (r >= `а` && r <= `я`) || (r >= `А` && r <= `Я`)
 		|| r == `ё` || r == `Ё`
 }
 
+// Границы слов: wl - начало слова слева от курсора (сначала пропускает разделители
+// слева, затем само слово); wr - позиция начала СЛЕДУЮЩЕГО слова справа (пропускает
+// остаток слова и разделители после него), либо конец текста.
 fn (t &TextInput) wl() int {
 	if t.cur == 0 {
 		return 0
@@ -864,6 +970,7 @@ fn (t &TextInput) wr() int {
 	return p
 }
 
+// Выделяет слово под курсором (двойной клик). В пустом буфере ничего не делает.
 fn (mut t TextInput) select_word() {
 	if t.buf.len == 0 {
 		return
@@ -884,6 +991,10 @@ fn (mut t TextInput) select_word() {
 
 // ───────────── hit-test (mouse → rune index) ──────────
 
+// Переводит x-координату мыши в индекс руны: из локальной x (с учётом pad и
+// scroll_x) перебором префиксов выбирается ближайшая граница между рунами.
+// O(n) измерений текста на вызов (нажатие/движение при выделении). Без активного
+// контекста возвращает 0.
 fn (mut t TextInput) hit_pos(mx f32, app &App) int {
 	lx := mx - t.bounds.x - t.pad + t.scroll_x
 	dr := t.disp()

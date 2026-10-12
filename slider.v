@@ -1,29 +1,44 @@
 module vgui
 
+// Файл slider.v: виджет Slider - ползунок выбора числа из диапазона [min, max], горизонтальный
+// или вертикальный. Состоит из дорожки (track), закрашенной части (fill), ручки (thumb), по
+// желанию - засечек шагов (ticks) и текстовой подписи значения. Значение хранится в value (f32),
+// шаг step > 0 привязывает значение к сетке min + n*step, step == 0 - непрерывное значение.
+// Связи: фокус - register_slider / focus_slider в focus.v; цвета - eff_slider_* темы (поля
+// *_color с нулевой альфой означают "брать из темы"); анимации наведения/фокуса - Anim (anim.v);
+// рисование - примитивы RenderContext. Тег типа kind_slider - widget_tag.v.
+
+// Направление ползунка. У вертикального минимум внизу, максимум наверху.
 pub enum SliderDir {
 	horizontal
 	vertical
 }
 
+// Ползунок. bounds выставляет контейнер в arrange(). Служебное состояние: hovered (мышь над
+// bounds), dragging (ручка захвачена, пока не отпущена кнопка), focused (зеркало решения
+// фокус-менеджера). Колбэки: on_change(value) - при каждом изменении значения (в том числе
+// во время перетаскивания); on_release(value) - один раз при отпускании после перетаскивания.
 @[heap]
 pub struct Slider {
 pub mut:
 	type_tag int = kind_slider // тег типа, см. widget_tag.v
 	// Колесо мыши: false - виджет его не берёт (прокрутка уходит
 	// контейнеру, например панели в ScrollBox)
-	wheel       bool = true
-	bounds      Rect
-	dir         SliderDir = .horizontal
-	value       f32
-	min         f32
-	max         f32 = 100.0
-	step        f32 // 0 = continuous
-	big_step    f32  = 10
-	visible     bool = true
-	enabled     bool = true
-	hovered     bool
-	dragging    bool
-	focused     bool
+	wheel  bool = true
+	bounds Rect
+	dir    SliderDir = .horizontal
+	value  f32
+	min    f32
+	max    f32 = 100.0
+	step   f32 // 0 = continuous
+	// big_step - шаг для PageUp/PageDown (при big_step <= 0 берётся 10% диапазона).
+	big_step f32  = 10
+	visible  bool = true
+	enabled  bool = true
+	hovered  bool
+	dragging bool
+	focused  bool
+	// Анимации наведения и фокуса: плавно 0..1, управляют "ореолом" вокруг ручки и кольцом фокуса.
 	focus_anim  Anim = Anim{
 		tau_ms:  anim_tau_focus
 		epsilon: 0.02
@@ -34,6 +49,8 @@ pub mut:
 	}
 	focus_group int
 	// Visual
+	// Внешний вид: толщина дорожки, диаметр ручки, show_value - рисовать подпись значения
+	// (формат value_format: '%d' или '%.Nf'), show_ticks - засечки (только при step > 0).
 	track_thickness f32 = 6
 	thumb_size      f32 = 16
 	show_value      bool
@@ -56,6 +73,9 @@ pub mut:
 
 // ─── Constructors ──────────────────────────────────────
 
+// Фабрики: slider() - со значениями по умолчанию (0..100); slider_horizontal / slider_vertical
+// принимают диапазон (при min > max границы меняются местами) и начальное значение, которое
+// ограничивается диапазоном.
 pub fn slider() &Slider {
 	return &Slider{}
 }
@@ -86,6 +106,8 @@ pub fn (s &Slider) get_value() f32 {
 	return s.value
 }
 
+// Программно задаёт значение: ограничивает диапазоном, привязывает к сетке step и вызывает
+// on_change, только если значение действительно изменилось. Кадр сам не инвалидируется.
 pub fn (mut s Slider) set_value(v f32) {
 	new_v := slider_snap(s.min, s.max, s.step, clamp_f32(v, s.min, s.max))
 	if new_v != s.value {
@@ -98,6 +120,8 @@ pub fn (mut s Slider) set_value(v f32) {
 
 // min > max меняются местами — так же, как в Spinbox.set_range: у одинакового
 // входа должен быть одинаковый результат.
+// Текущее значение value ограничивается новым диапазоном; on_change при этом НЕ вызывается,
+// даже если значение сдвинулось.
 pub fn (mut s Slider) set_range(min f32, max f32) {
 	s.min, s.max = ordered_range_f32(min, max)
 	s.value = clamp_f32(s.value, s.min, s.max)
@@ -105,10 +129,13 @@ pub fn (mut s Slider) set_range(min f32, max f32) {
 
 // ─── Helpers ───────────────────────────────────────────
 
+// Возвращает пару (меньшее, большее).
 fn ordered_range_f32(a f32, b f32) (f32, f32) {
 	return if a <= b { a, b } else { b, a }
 }
 
+// Привязка значения к сетке: ближайшее min + n*step (округление "половина вверх"), результат
+// ограничен диапазоном. step <= 0 - значение возвращается как есть.
 fn slider_snap(min f32, max f32, step f32, v f32) f32 {
 	if step <= 0 {
 		return v
@@ -117,6 +144,7 @@ fn slider_snap(min f32, max f32, step f32, v f32) f32 {
 	return clamp_f32(min + n * step, min, max)
 }
 
+// Положение значения в диапазоне как доля 0..1; для вырожденного диапазона (max <= min) - 0.
 fn (s &Slider) normalized() f32 {
 	if s.max <= s.min {
 		return 0
@@ -128,6 +156,9 @@ fn (s &Slider) label_text() string {
 	return slider_format_value(s.value, s.value_format)
 }
 
+// Форматирует значение для подписи по mini-формату: пусто или '%d' - округлённое целое,
+// '%.Nf' - N знаков после запятой (через slider_format_f32); любой другой формат - значение
+// как есть. Не полноценный printf: поддерживаются только перечисленные формы.
 fn slider_format_value(v f32, fmt string) string {
 	if fmt.len == 0 || fmt == '%d' {
 		if v >= 0 {
@@ -142,6 +173,9 @@ fn slider_format_value(v f32, fmt string) string {
 	return '${v}'
 }
 
+// Округляет v до digits знаков (половина от нуля) и всегда выводит ровно digits знаков после
+// точки, добавляя нули или обрезая лишнее (так подпись не "прыгает" по ширине). Обрезка
+// строки идёт после округления, поэтому артефакты f32 вида 0.30000001 отсекаются.
 pub fn slider_format_f32(v f32, digits int) string {
 	if digits <= 0 {
 		if v >= 0 {
@@ -174,6 +208,9 @@ pub fn slider_format_f32(v f32, digits int) string {
 	return s
 }
 
+// Ширина, резервируемая под подпись (горизонтальный слайдер): максимум из ширин подписей
+// для min и max плюс зазор. Считается по краям диапазона, чтобы дорожка не меняла длину
+// при изменении значения.
 fn (s &Slider) value_label_width(ctx &RenderContext) f32 {
 	if !s.show_value {
 		return 0
@@ -186,6 +223,9 @@ fn (s &Slider) value_label_width(ctx &RenderContext) f32 {
 	return max_f32(w1, w2) + s.value_gap
 }
 
+// Прямоугольник дорожки внутри bounds. Отступ thumb_size/2 с каждого конца оставлен под ручку,
+// чтобы она в крайних положениях не вылезала за bounds (иначе была бы обрезана). Справа
+// (горизонтальный) или снизу (вертикальный) резервируется место под подпись значения.
 fn (s &Slider) track_rect(ctx &RenderContext) Rect {
 	label_w := s.value_label_width(ctx)
 	match s.dir {
@@ -208,6 +248,7 @@ fn (s &Slider) track_rect(ctx &RenderContext) Rect {
 	}
 }
 
+// Центр ручки (x, y) по текущему значению.
 fn (s &Slider) thumb_center(ctx &RenderContext) (f32, f32) {
 	trk := s.track_rect(ctx)
 	norm := s.normalized()
@@ -222,6 +263,8 @@ fn (s &Slider) thumb_center(ctx &RenderContext) (f32, f32) {
 	}
 }
 
+// Область, где клик начинает перетаскивание: дорожка, расширенная на радиус ручки + 2 px
+// вдоль оси и на всю высоту/ширину bounds поперёк (чтобы попасть было легко).
 fn (s &Slider) hit_rect(ctx &RenderContext) Rect {
 	trk := s.track_rect(ctx)
 	expand := s.thumb_size * 0.5 + 2
@@ -235,6 +278,8 @@ fn (s &Slider) hit_rect(ctx &RenderContext) Rect {
 	}
 }
 
+// Переводит координаты мыши в значение (с привязкой к сетке). Для нулевой дорожки - min.
+// Вертикальный слайдер инвертирован: чем выше мышь, тем больше значение.
 fn (s &Slider) value_from_pos(mx f32, my f32, ctx &RenderContext) f32 {
 	trk := s.track_rect(ctx)
 	match s.dir {
@@ -257,6 +302,8 @@ fn (s &Slider) value_from_pos(mx f32, my f32, ctx &RenderContext) f32 {
 
 // ─── Colors ────────────────────────────────────────────
 
+// Эффективные цвета: свой, если задан (альфа > 0), иначе из темы. Для засечек цвет темы
+// дополнительно делается полупрозрачным (alpha 140).
 fn (s &Slider) eff_track_color(ctx &RenderContext) Color {
 	if s.track_color.a > 0 {
 		return s.track_color
@@ -287,6 +334,9 @@ fn (s &Slider) eff_tick_color(ctx &RenderContext) Color {
 
 // ─── Tick marks ────────────────────────────────────────
 
+// Засечки по одной на каждый шаг (count+1 штук, включая оба конца), рисуются рядом с дорожкой.
+// Не рисуются без шага/диапазона и при count > 200 - иначе засечки слились бы в сплошную
+// полосу, а цикл стал бы дорогим.
 fn (s &Slider) draw_ticks(trk Rect, mut ctx RenderContext) {
 	if !s.show_ticks || s.step <= 0 {
 		return
@@ -326,6 +376,9 @@ fn (s &Slider) draw_ticks(trk Rect, mut ctx RenderContext) {
 
 // ─── Drawing ───────────────────────────────────────────
 
+// Порядок рисования: регистрация в фокусе -> анимации (при движении - mark_anim_rect в пределах
+// bounds) -> дорожка -> закрашенная часть -> засечки -> ореол ручки -> ручка с контуром ->
+// кольцо фокуса -> подпись значения. Выключенный слайдер рисуется затемнёнными цветами.
 pub fn (mut s Slider) draw(mut ctx RenderContext) {
 	if !s.visible {
 		return
@@ -357,6 +410,8 @@ pub fn (mut s Slider) draw(mut ctx RenderContext) {
 	// Background track (always drawn — both for horizontal & vertical)
 	bg_c := if s.enabled { track_c } else { track_c.darken(0.1) }
 	if trk.w >= 2 && trk.h >= 2 {
+		// Если дорожка тоньше двух радиусов скругления, обычный rounded_rect даст артефакты -
+		// используем "таблетку" (pill) с полным скруглением.
 		if min_f32(trk.w, trk.h) <= track_rad * 2 {
 			ctx.fill_pill_rect(trk, bg_c, track_rad)
 		} else {
@@ -381,6 +436,7 @@ pub fn (mut s Slider) draw(mut ctx RenderContext) {
 				}
 			}
 			.vertical {
+				// У вертикального слайдера закрашена часть от центра ручки вниз до конца дорожки.
 				fill_top := cy
 				fill_h := trk.y + trk.h - fill_top
 				if fill_h > 0.5 {
@@ -404,6 +460,7 @@ pub fn (mut s Slider) draw(mut ctx RenderContext) {
 	halo_strength := max_f32(s.hover_anim.value, s.focus_anim.value)
 	if halo_strength > 0.05 && s.enabled {
 		halo_r := thumb_radius + 4 + halo_strength * 2
+		// Ореол вокруг ручки: растёт и становится плотнее вместе с анимацией hover/focus.
 		halo_a := u8(60.0 * halo_strength)
 		ctx.fill_circle(cx, cy, halo_r, thumb_c.with_alpha(halo_a))
 	}
@@ -452,6 +509,13 @@ pub fn (mut s Slider) draw(mut ctx RenderContext) {
 
 // ─── Events ────────────────────────────────────────────
 
+// Обработка событий. Во время перетаскивания (dragging) слайдер поглощает ВСЕ события: движение
+// мыши меняет значение (on_change), левая кнопка вверх завершает перетаскивание (on_release).
+// Вне перетаскивания: mouse_move обновляет hovered; левый mouse_down в hit_rect даёт фокус,
+// начинает перетаскивание и сразу ставит значение под курсором; клик мимо снимает фокус;
+// колесо (если wheel и мышь над слайдером) меняет значение на шаг; клавиши (при фокусе):
+// стрелки - шаг, PageUp/PageDown - big_step, Home/End - min/max, Tab - следующий фокус,
+// Escape - снять фокус. Без шага (step == 0) шаг колеса/стрелок - 1% диапазона.
 pub fn (mut s Slider) handle_event(event &GuiEvent, app &App) bool {
 	if !s.visible || !s.enabled {
 		return false
@@ -536,6 +600,7 @@ pub fn (mut s Slider) handle_event(event &GuiEvent, app &App) bool {
 			big := if s.big_step > 0 { s.big_step } else { (s.max - s.min) * 0.1 }
 
 			match event.keycode {
+				// Стрелки вниз/влево уменьшают, вверх/вправо увеличивают - независимо от ориентации.
 				sdl_k_left, sdl_k_down {
 					s.set_value(s.value - step)
 					return true

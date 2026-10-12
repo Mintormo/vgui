@@ -1,5 +1,19 @@
 module vgui
 
+// Шапка файла.
+// ToggleSwitch - переключатель «вкл/выкл» в виде таблетки с ползунком (в стиле iOS)
+// и подписью справа. Состояние - булево поле on. Переключение - по клику
+// (срабатывает при ОТПУСКАНИИ кнопки над виджетом, как у Button) или клавишами
+// Space/Enter при фокусе.
+//
+// Связь с библиотекой: размер считает measure() (layout_measure.v,
+// labeled_control_size - вместе с CheckBox/RadioButton); bounds выдаёт контейнер;
+// фокус - FocusManager (register_toggle_switch / focus_toggle_switch); цвета -
+// тема (eff_tog_*); колбэк on_change(новое_состояние); C-ABI - vgui_toggle_switch_*.
+// Поля: on - текущее состояние; slide_anim - плавное движение ползунка (0 = выкл,
+// 1 = вкл), им же смешиваются цвета дорожки; focus_anim - кольцо фокуса;
+// pressed - левая кнопка нажата над виджетом; track_w/track_h - размеры
+// дорожки-таблетки; gap - зазор между дорожкой и подписью.
 @[heap]
 pub struct ToggleSwitch {
 pub mut:
@@ -36,10 +50,14 @@ pub fn (ts &ToggleSwitch) is_on() bool {
 	return ts.on
 }
 
+// Программно задаёт состояние: колбэк on_change НЕ вызывается, а анимация ползунка
+// запустится при следующей отрисовке (кадр сам не инвалидируется).
 pub fn (mut ts ToggleSwitch) set_on(v bool) {
 	ts.on = v
 }
 
+// Инвертирует состояние и вызывает on_change(новое_состояние). Именно этот метод
+// вызывают клик и клавиши.
 pub fn (mut ts ToggleSwitch) toggle() {
 	ts.on = !ts.on
 	if ts.on_change != unsafe { nil } {
@@ -47,12 +65,20 @@ pub fn (mut ts ToggleSwitch) toggle() {
 	}
 }
 
+// Прямоугольник дорожки: по вертикали по центру bounds, по горизонтали у левого края
+// (со сдвигом 1 px).
 fn (ts &ToggleSwitch) track_rect() Rect {
 	ty := ts.bounds.y + (ts.bounds.h - ts.track_h) * 0.5
 	// Inset by 1px so the outer border contour doesn't get clipped by the container.
 	return Rect{ts.bounds.x + 1, ty, ts.track_w, ts.track_h}
 }
 
+// Отрисовка: регистрация в FocusManager -> обновление анимаций фокуса и ползунка
+// (пока хоть одна не дошла до цели - mark_anim_rect) -> дорожка (цвет плавно переходит
+// между «выкл» и «вкл», при наведении подмешивается цвет hover) -> контур ->
+// кольцо фокуса -> круглый ползунок (его центр движется по линии между краями
+// дорожки) -> подпись справа под клипом bounds. У выключенного (disabled) виджета
+// цвета приглушены.
 pub fn (mut ts ToggleSwitch) draw(mut ctx RenderContext) {
 	if !ts.visible {
 		return
@@ -111,6 +137,8 @@ pub fn (mut ts ToggleSwitch) draw(mut ctx RenderContext) {
 	// expanded(4) so the inset ring lands at the original expanded(2) geometry around the pill
 	ctx.draw_focus_ring(trk.expanded(4), track_rad + 4, ts.focus_anim.value)
 
+	// Ползунок: радиус = половина высоты дорожки минус отступ thumb_pad; крайние положения
+	// центра отстоят от краёв дорожки на thumb_pad + радиус, между ними интерполяция по slide_anim.
 	thumb_pad := f32(2)
 	thumb_r := (trk.h - thumb_pad * 2) * 0.5
 	thumb_min_x := trk.x + thumb_pad + thumb_r
@@ -132,6 +160,10 @@ pub fn (mut ts ToggleSwitch) draw(mut ctx RenderContext) {
 	}
 }
 
+// События (true = поглощено): mouse_move обновляет hovered и отменяет начатый клик,
+// если мышь ушла; mouse_down по виджету берёт фокус и взводит pressed;
+// mouse_up над виджетом при pressed вызывает toggle(); key_down при наличии
+// фокуса: Tab - передать фокус, Space/Enter - переключить.
 pub fn (mut ts ToggleSwitch) handle_event(event &GuiEvent, app &App) bool {
 	if !ts.visible || !ts.enabled {
 		return false

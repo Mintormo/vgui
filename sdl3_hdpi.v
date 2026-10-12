@@ -6,8 +6,19 @@ module vgui
 // Use SDL_GetWindowSizeInPixels to get physical pixel count.
 // ═══════════════════════════════════════════════════════
 
+// Файл sdl3_hdpi.v: определение плотности пикселей (HiDPI) окна. Библиотека рисует в ЛОГИЧЕСКИХ
+// координатах, а SDL умножает их на render scale. Здесь вычисляется системная часть масштаба
+// (dpi_scale): отношение физического размера окна в пикселях к логическому. Пользовательский
+// масштаб ui_scale накладывается поверх (Window.set_ui_scale, sdl3_window.v); итоговый масштаб
+// рендера = dpi_scale * ui_scale. Шрифты под HiDPI пересоздаёт Window.reload_scaled_fonts.
+
+// Объявление дублирует такое же в sdl3_bindings.v.
 fn C.SDL_SetRenderScale(renderer voidptr, scale_x f32, scale_y f32) bool
 
+// Результат detect_dpi: scale - отношение физических пикселей к логическим по ширине;
+// logical_*/physical_* - размеры окна в логических/физических пикселях; dpi - приблизительное
+// значение (scale * 96), настоящий DPI в SDL3 недоступен; is_hidpi - масштаб заметно больше 1
+// (порог 1.1 отсекает погрешность округления).
 pub struct DpiInfo {
 pub:
 	scale      f32
@@ -19,6 +30,8 @@ pub:
 	is_hidpi   bool
 }
 
+// Измеряет окно: SDL_GetWindowSize (логические пиксели) против SDL_GetWindowSizeInPixels
+// (физические). При нулевой логической ширине масштаб считается равным 1.
 pub fn detect_dpi(window voidptr) DpiInfo {
 	mut lw := 0
 	mut lh := 0
@@ -48,6 +61,10 @@ pub fn detect_dpi(window voidptr) DpiInfo {
 	}
 }
 
+// Первичная настройка HiDPI контекста: запоминает DpiInfo, ставит ctx.dpi_scale и, если экран
+// HiDPI, включает SDL_SetRenderScale и берёт screen_width/height в логических пикселях.
+// На обычном экране (scale ~1) ничего не меняет. Шрифты НЕ перезагружает (причина - в
+// комментарии ниже). Ничего не делает при nil-окне. Требует уже созданного ctx.renderer.
 pub fn (mut ctx RenderContext) init_hidpi(window voidptr) {
 	if window == unsafe { nil } {
 		return
@@ -69,6 +86,8 @@ pub fn (mut ctx RenderContext) init_hidpi(window voidptr) {
 	}
 }
 
+// Три простых пересчёта логических величин в физические пиксели умножением на dpi_scale
+// (ui_scale не учитывают).
 pub fn (ctx &RenderContext) logical_to_physical(x f32, y f32) (f32, f32) {
 	return x * ctx.dpi_scale, y * ctx.dpi_scale
 }

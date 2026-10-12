@@ -138,7 +138,8 @@ pub fn abs_f32(v f32) f32 {
 	return if v < 0 { -v } else { v }
 }
 
-// clamp_f32 - ограничить v отрезком [lo, hi]. При lo > hi результат - lo.
+// clamp_f32 - ограничить v отрезком [lo, hi]. При lo > hi результат зависит от v (v < lo -> lo, иначе v > hi -> hi), поэтому
+// вызывающий должен сам следить, чтобы lo <= hi.
 pub fn clamp_f32(v f32, lo f32, hi f32) f32 {
 	if v < lo {
 		return lo
@@ -157,7 +158,8 @@ pub fn min_int(a int, b int) int {
 	return if a < b { a } else { b }
 }
 
-// clamp_int - ограничить v отрезком [lo, hi]. При lo > hi результат - lo.
+// clamp_int - ограничить v отрезком [lo, hi]. При lo > hi результат зависит от v (v < lo -> lo, иначе v > hi -> hi), поэтому
+// вызывающий должен сам следить, чтобы lo <= hi.
 pub fn clamp_int(v int, lo int, hi int) int {
 	if v < lo {
 		return lo

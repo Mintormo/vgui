@@ -37,6 +37,11 @@ pub mut:
 	on_toggle fn (bool) = unsafe { nil }
 }
 
+// Tray - обёртка над SDL_Tray: корневое меню, все созданные записи и подменю. entries
+// держит записи живыми, пока работает процесс (SDL хранит указатели на них как
+// userdata колбэков), поэтому записи из списка не удаляются даже при
+// destroy(). Если SDL_CreateTray не удался (платформа без трея), create_tray
+// возвращает Tray с nil-handle - все методы в этом случае безопасно ничего не делают.
 pub struct Tray {
 pub mut:
 	handle   voidptr      // SDL_Tray*
@@ -52,8 +57,14 @@ pub mut:
 // though tray clicks (delivered via DBus) generate no SDL event. Without this,
 // a callback that does win.show() leaves the window shown by SDL but never
 // painted by vgui — it appears blank or stays invisible.
+// Порядок в файле: комментарий выше описывает сам tray_entry_trampoline, а
+// глобальный флаг g_tray_activity объявлен между ним и функцией. Флаг взводится
+// trampoline'ом и читается главным циклом (sdl3_app.v), чтобы перерисовать окна
+// после клика по пункту. Сбрасывает его цикл событий, не этот файл.
 __global g_tray_activity = false
 
+// Для чекбоксов актуальное состояние берётся у SDL (SDL_GetTrayEntryChecked), а не
+// хранится в TrayEntry. Записи-подменю и разделители колбэка не имеют.
 fn tray_entry_trampoline(userdata voidptr, entry voidptr) {
 	if userdata == unsafe { nil } {
 		return
@@ -103,6 +114,7 @@ pub fn create_tray_embedded(data []u8, tooltip string) &Tray {
 	return t
 }
 
+// Меняет подсказку и иконку трея. При nil-handle (трей не создался или уничтожен) - no-op.
 pub fn (mut t Tray) set_tooltip(tooltip string) {
 	if t.handle == unsafe { nil } {
 		return
@@ -130,6 +142,8 @@ pub fn (mut t Tray) set_icon_data(data []u8) {
 	}
 }
 
+// Выбор меню для вставки: nil означает корневое меню трея, иначе - переданное
+// подменю (результат add_submenu).
 fn (mut t Tray) target_menu(menu voidptr) voidptr {
 	if menu == unsafe { nil } {
 		return t.menu
@@ -192,7 +206,7 @@ pub fn (mut t Tray) add_separator(menu voidptr) {
 }
 
 // add_submenu inserts a submenu-bearing entry and returns its SDL_TrayMenu*,
-// which callers pass back as the `menu` argument of add_item/add_checkbox.
+// which callers pass back as the `menu` argument of on_item/on_checkbox.
 pub fn (mut t Tray) add_submenu(menu voidptr, label string) voidptr {
 	target := t.target_menu(menu)
 	if target == unsafe { nil } {
@@ -210,6 +224,9 @@ pub fn (mut t Tray) add_submenu(menu voidptr, label string) voidptr {
 	return sub
 }
 
+// Уничтожает системную иконку (SDL_DestroyTray, вместе с меню и записями на стороне
+// SDL). Идемпотентно: повторный вызов ничего не делает. Список entries остаётся,
+// но handle'ы записей после этого невалидны.
 pub fn (mut t Tray) destroy() {
 	if t.handle == unsafe { nil } {
 		return

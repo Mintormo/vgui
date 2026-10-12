@@ -22,6 +22,7 @@ module vgui
 //   - Registered in FocusManager → participates in Tab chain
 // ═══════════════════════════════════════════════════════
 
+// PropertyKind — тип свойства: определяет, какое из полей Property хранит значение и каким редактором оно правится. group — не значение, а раскрываемая группа детей.
 pub enum PropertyKind {
 	group
 	string_val
@@ -35,6 +36,13 @@ pub enum PropertyKind {
 	choice
 }
 
+// Property — одна строка таблицы свойств (или группа). Не виджет раскладки: хранится в
+// PropertyGrid.roots либо в children группы; тег типа нужен для C-ABI. Значение лежит
+// в поле, соответствующем kind: str_val (string/file/folder), int_val, float_val,
+// bool_val, color_val, year/month/day (date), choices + choice_idx (choice).
+// parent выставляет Property.add (нужен для клавиши Left); user_data — произвольный
+// указатель приложения; hovered — служебный признак подсветки строки; readonly
+// запрещает редактирование (переключение bool-флажка readonly НЕ блокирует).
 @[heap]
 pub struct Property {
 pub mut:
@@ -59,6 +67,7 @@ pub mut:
 	readonly   bool
 }
 
+// Конструкторы property_* создают лист нужного вида (без родителя); property_group — раскрытую группу. property_choice клонирует список вариантов.
 // ─── Property constructors ─────────────────────────────
 
 pub fn property_string(name string, value string) &Property {
@@ -144,6 +153,7 @@ pub fn property_group(name string) &Property {
 	}
 }
 
+// Иерархия: add прикрепляет ребёнка к группе (и проставляет ему parent); add_* — то же с созданием свойства нужного вида, возвращают созданное, чтобы читать/менять его позже.
 // ─── Property hierarchy methods ────────────────────────
 
 pub fn (mut p Property) add(child &Property) {
@@ -216,6 +226,10 @@ pub fn (mut p Property) add_group(name string) &Property {
 // PropertyGrid widget
 // ═══════════════════════════════════════════════════════
 
+// Геометрия PropertyGrid (логические px): доля ширины под колонку имён по
+// умолчанию, минимальная ширина колонки, зона захвата разделителя, высота строки,
+// отступ на уровень вложенности, размер стрелки группы, горизонтальный отступ
+// текста, размер кнопки, толщина полосы прокрутки.
 const pg_default_split = f32(0.4)
 const pg_min_col_width = f32(50)
 const pg_splitter_width = f32(6)
@@ -226,21 +240,35 @@ const pg_pad_h = f32(6)
 const pg_btn_size = f32(20)
 const pg_sb_w = f32(12)
 
+// PropertyGrid — двухколоночный редактор свойств (имя | значение) с иерархией групп,
+// редактированием по месту, разделителем колонок и вертикальной прокруткой.
+// Возможности — в шапке файла.
+//
+// Модель: roots — дерево Property; для рисования и попаданий оно каждый раз
+// разворачивается в плоский список видимых строк (build_flat -> PgFlatRow), строка i
+// стоит на y = data_rect.y + i*row_height - scroll_y (виртуализации нет, пересчёт
+// на каждый вызов). Редактирование: для строковых/числовых свойств создаётся
+// временный TextInput (edit_text_input) поверх ячейки значения, который забирает фокус
+// (FocusManager) до Enter/Escape/клика мимо; для color/date/file/folder открываются
+// модальные диалоги (нужен App: set_app либо из события). bool переключается
+// кликом/Enter. Любое изменение значения пользователем вызывает on_change(prop).
+// Размер — measure() в layout_measure.v, фокус — register_property_grid.
 @[heap]
 pub struct PropertyGrid {
 pub mut:
 	type_tag int = kind_property_grid // тег типа, см. widget_tag.v
 	// Колесо мыши: false - виджет его не берёт (прокрутка уходит
 	// контейнеру, например панели в ScrollBox)
-	wheel                 bool = true
-	bounds                Rect
-	roots                 []&Property
-	visible               bool = true
-	enabled               bool = true
-	hovered               bool
-	focused               bool
-	focus_anim            Anim = anim_smooth(anim_tau_focus)
-	focus_group           int
+	wheel       bool = true
+	bounds      Rect
+	roots       []&Property
+	visible     bool = true
+	enabled     bool = true
+	hovered     bool
+	focused     bool
+	focus_anim  Anim = anim_smooth(anim_tau_focus)
+	focus_group int
+	// selected — выделенная строка (nil — нет); edit_prop/edit_text_input — свойство в редакторе и его временное поле ввода; edit_combo сейчас не используется
 	selected              &Property = unsafe { nil }
 	split_ratio           f32       = pg_default_split
 	row_height            f32       = pg_row_height
@@ -259,35 +287,40 @@ pub mut:
 	vsb_hovered           bool
 	vsb_drag_start_y      f32
 	vsb_drag_start_scroll f32
-	app_ref               &App           = unsafe { nil }
-	bg_color              Color          = Color{0, 0, 0, 0}
-	header_bg             Color          = Color{0, 0, 0, 0}
-	header_text           Color          = Color{0, 0, 0, 0}
-	row_bg_even           Color          = Color{0, 0, 0, 0}
-	row_bg_odd            Color          = Color{0, 0, 0, 0}
-	row_text              Color          = Color{0, 0, 0, 0}
-	row_hover_bg          Color          = Color{0, 0, 0, 0}
-	row_sel_bg            Color          = Color{0, 0, 0, 0}
-	grid_color            Color          = Color{0, 0, 0, 0}
-	splitter_color        Color          = Color{0, 0, 0, 0}
-	group_bg              Color          = Color{0, 0, 0, 0}
-	on_change             fn (&Property) = unsafe { nil }
+	// app_ref — запасная ссылка на App (set_app) для диалогов, когда из события App недоступен (см. find_app)
+	app_ref        &App           = unsafe { nil }
+	bg_color       Color          = Color{0, 0, 0, 0}
+	header_bg      Color          = Color{0, 0, 0, 0}
+	header_text    Color          = Color{0, 0, 0, 0}
+	row_bg_even    Color          = Color{0, 0, 0, 0}
+	row_bg_odd     Color          = Color{0, 0, 0, 0}
+	row_text       Color          = Color{0, 0, 0, 0}
+	row_hover_bg   Color          = Color{0, 0, 0, 0}
+	row_sel_bg     Color          = Color{0, 0, 0, 0}
+	grid_color     Color          = Color{0, 0, 0, 0}
+	splitter_color Color          = Color{0, 0, 0, 0}
+	group_bg       Color          = Color{0, 0, 0, 0}
+	on_change      fn (&Property) = unsafe { nil }
 }
 
+// property_grid создаёт пустую таблицу.
 pub fn property_grid() &PropertyGrid {
 	return &PropertyGrid{}
 }
 
 // ─── Public API ────────────────────────────────────────
 
+// set_app запоминает App для открытия диалогов color/date/file/folder.
 pub fn (mut pg PropertyGrid) set_app(app &App) {
 	pg.app_ref = unsafe { app }
 }
 
+// add добавляет корневое свойство или группу.
 pub fn (mut pg PropertyGrid) add(prop &Property) {
 	pg.roots << unsafe { prop }
 }
 
+// add_* создают свойство соответствующего вида в корне таблицы и возвращают его.
 pub fn (mut pg PropertyGrid) add_string(name string, value string) &Property {
 	p := property_string(name, value)
 	pg.add(p)
@@ -348,6 +381,7 @@ pub fn (mut pg PropertyGrid) add_group(name string) &Property {
 	return p
 }
 
+// clear отменяет редактирование и удаляет все свойства, сбрасывает выделение и прокрутку.
 pub fn (mut pg PropertyGrid) clear() {
 	pg.cancel_edit()
 	pg.roots.clear()
@@ -355,6 +389,7 @@ pub fn (mut pg PropertyGrid) clear() {
 	pg.scroll_y = 0
 }
 
+// find ищет свойство по имени обходом в глубину (первое совпадение; имена не обязаны быть уникальными). Нет такого — nil.
 pub fn (pg &PropertyGrid) find(name string) &Property {
 	for r in pg.roots {
 		if found := pg_find_recursive(r, name) {
@@ -376,6 +411,10 @@ fn pg_find_recursive(p &Property, name string) ?&Property {
 	return none
 }
 
+// Чтение/запись значений по имени (через find). Если свойства нет — get_* возвращают
+// нулевое значение (get_choice — -1), set_* молча ничего не делают. Тип свойства не
+// проверяется: get_int на строковом свойстве вернёт его (нулевое) int_val. set_* не
+// вызывают on_change и не инвалидируют кадр; set_choice нет.
 // ─── Get/Set values by name ────────────────────────────
 
 pub fn (pg &PropertyGrid) get_string(name string) string {
@@ -480,6 +519,7 @@ pub fn (mut pg PropertyGrid) set_date(name string, year int, month int, day int)
 
 // ─── Editing helpers ───────────────────────────────────
 
+// cancel_edit закрывает inline-редактор без сохранения: снимает фокус с поля ввода и обнуляет editing/edit_*.
 fn (mut pg PropertyGrid) cancel_edit() {
 	if pg.editing && unsafe { pg.edit_text_input != nil } {
 		mut ti := pg.edit_text_input
@@ -491,6 +531,9 @@ fn (mut pg PropertyGrid) cancel_edit() {
 	pg.edit_combo = unsafe { nil }
 }
 
+// commit_edit применяет текст редактора к свойству по его типу (строки как есть, int/float
+// — разбором текста: нечисловой ввод даст 0), зовёт on_change и закрывает редактор.
+// Для остальных видов (choice) значение не меняется.
 fn (mut pg PropertyGrid) commit_edit() {
 	if !pg.editing {
 		return
@@ -518,6 +561,7 @@ fn (mut pg PropertyGrid) commit_edit() {
 	pg.cancel_edit()
 }
 
+// editor_rect — прямоугольник ячейки значения редактируемой строки с отступом 1 px; пустой Rect, если не редактируем или строка свёрнута (не видна).
 fn (pg &PropertyGrid) editor_rect() Rect {
 	if !pg.editing || unsafe { pg.edit_prop == nil } {
 		return Rect{}
@@ -539,6 +583,7 @@ fn (pg &PropertyGrid) editor_rect() Rect {
 	return Rect{sx + 1, row_y + 1, dr.x + dr.w - sx - 2, pg.row_height - 2}
 }
 
+// editor_rect_for — то же для произвольного свойства (используется при создании редактора, когда editing ещё false).
 fn (pg &PropertyGrid) editor_rect_for(prop &Property) Rect {
 	flat := pg.build_flat()
 	mut idx := -1
@@ -559,6 +604,7 @@ fn (pg &PropertyGrid) editor_rect_for(prop &Property) Rect {
 
 // ─── Find App reference ────────────────────────────────
 
+// find_app выбирает App: переданный из события, иначе запомненный через set_app, иначе nil.
 fn (pg &PropertyGrid) find_app(active_app &App) &App {
 	if unsafe { active_app != nil } {
 		return unsafe { active_app }
@@ -571,6 +617,11 @@ fn (pg &PropertyGrid) find_app(active_app &App) &App {
 
 // ─── Open dialogs for special property types ──────────
 
+// open_color_dialog открывает модальный диалог выбора цвета над текущим активным окном
+// (им может быть и диалог); при подтверждении пишет цвет в свойство и зовёт on_change.
+// Окно-родитель ищется по совпадению контекста: сначала среди окон, потом среди диалогов.
+// Нет App/активного контекста/окна — ничего не делает. open_file_dialog и
+// open_folder_dialog устроены так же (поиск родителя дублируется).
 fn (mut pg PropertyGrid) open_color_dialog(prop &Property, app &App) {
 	if unsafe { app == nil } {
 		return
@@ -611,6 +662,7 @@ fn (mut pg PropertyGrid) open_color_dialog(prop &Property, app &App) {
 	}
 }
 
+// open_date_dialog открывает диалог DatePicker с текущей датой свойства; по выбору обновляет year/month/day и зовёт on_change.
 fn (mut pg PropertyGrid) open_date_dialog(prop &Property, app &App) {
 	if unsafe { app == nil } {
 		return
@@ -630,6 +682,7 @@ fn (mut pg PropertyGrid) open_date_dialog(prop &Property, app &App) {
 	dp_open_dialog(mut dp, app)
 }
 
+// open_file_dialog: диалог выбора файла (собственный, не нативный) со стартовой папкой из значения; непустой результат записывается и вызывает on_change.
 fn (mut pg PropertyGrid) open_file_dialog(prop &Property, app &App) {
 	if unsafe { app == nil } {
 		return
@@ -672,6 +725,7 @@ fn (mut pg PropertyGrid) open_file_dialog(prop &Property, app &App) {
 	}
 }
 
+// open_folder_dialog: то же для выбора папки.
 fn (mut pg PropertyGrid) open_folder_dialog(prop &Property, app &App) {
 	if unsafe { app == nil } {
 		return
@@ -768,11 +822,13 @@ fn (mut pg PropertyGrid) begin_edit(prop &Property, app &App) {
 
 // ─── Flatten visible properties ────────────────────────
 
+// PgFlatRow — строка плоского списка видимых свойств: само свойство и глубина вложенности (для отступа).
 struct PgFlatRow {
 	prop  &Property
 	depth int
 }
 
+// build_flat разворачивает дерево roots в список видимых строк (дети свёрнутой группы пропускаются). Вызывается на каждое рисование/попадание — для больших таблиц это O(n).
 fn (pg &PropertyGrid) build_flat() []PgFlatRow {
 	mut result := []PgFlatRow{cap: 32}
 	for r in pg.roots {
@@ -781,6 +837,7 @@ fn (pg &PropertyGrid) build_flat() []PgFlatRow {
 	return result
 }
 
+// pg_flatten — рекурсивный помощник build_flat: добавляет свойство и, если это раскрытая группа, её детей.
 fn pg_flatten(p &Property, depth int, mut out []PgFlatRow) {
 	out << PgFlatRow{
 		prop:  p
@@ -795,10 +852,12 @@ fn pg_flatten(p &Property, depth int, mut out []PgFlatRow) {
 
 // ─── Geometry ──────────────────────────────────────────
 
+// inner_rect — bounds без внутреннего отступа pad.
 fn (pg &PropertyGrid) inner_rect() Rect {
 	return pg.bounds.shrunk(pg.pad)
 }
 
+// header_rect — полоса заголовка 'Property | Value' (пустой Rect, если show_header = false).
 fn (pg &PropertyGrid) header_rect() Rect {
 	if !pg.show_header {
 		return Rect{}
@@ -807,6 +866,7 @@ fn (pg &PropertyGrid) header_rect() Rect {
 	return Rect{inner.x, inner.y, inner.w, pg.header_height}
 }
 
+// data_rect — область строк: inner без заголовка и без полосы прокрутки (если она нужна).
 fn (pg &PropertyGrid) data_rect() Rect {
 	inner := pg.inner_rect()
 	hdr_h := if pg.show_header { pg.header_height } else { f32(0) }
@@ -817,22 +877,26 @@ fn (pg &PropertyGrid) data_rect() Rect {
 	return Rect{inner.x, inner.y + hdr_h, w, inner.h - hdr_h}
 }
 
+// total_height — высота всех видимых строк (число строк * row_height).
 fn (pg &PropertyGrid) total_height() f32 {
 	flat := pg.build_flat()
 	return f32(flat.len) * pg.row_height
 }
 
+// max_scroll — максимум scroll_y (0, если всё помещается).
 fn (pg &PropertyGrid) max_scroll() f32 {
 	dr := pg.data_rect()
 	return max_f32(0, pg.total_height() - dr.h)
 }
 
+// has_vsb — нужна ли полоса прокрутки (содержимое выше области под строки). От неё зависит ширина data_rect и split_x.
 fn (pg &PropertyGrid) has_vsb() bool {
 	inner := pg.inner_rect()
 	hdr_h := if pg.show_header { pg.header_height } else { f32(0) }
 	return pg.total_height() > inner.h - hdr_h
 }
 
+// split_x — x границы колонок: доля split_ratio от ширины данных, но обе колонки не уже pg_min_col_width.
 fn (pg &PropertyGrid) split_x() f32 {
 	inner := pg.inner_rect()
 	mut data_w := inner.w
@@ -842,12 +906,14 @@ fn (pg &PropertyGrid) split_x() f32 {
 	return inner.x + clamp_f32(data_w * pg.split_ratio, pg_min_col_width, data_w - pg_min_col_width)
 }
 
+// splitter_rect — зона захвата разделителя (6 px вокруг split_x на всю высоту).
 fn (pg &PropertyGrid) splitter_rect() Rect {
 	inner := pg.inner_rect()
 	sx := pg.split_x()
 	return Rect{sx - pg_splitter_width * 0.5, inner.y, pg_splitter_width, inner.h}
 }
 
+// vsb_rects возвращает (дорожка, ползунок) полосы прокрутки: высота ползунка пропорциональна видимой доле (не меньше 20), положение — доле scroll_y/max_scroll. Пустые Rect, если полосы нет.
 fn (pg &PropertyGrid) vsb_rects() (Rect, Rect) {
 	if !pg.has_vsb() {
 		return Rect{}, Rect{}
@@ -875,6 +941,7 @@ fn (pg &PropertyGrid) vsb_rects() (Rect, Rect) {
 
 // ─── Hit testing ───────────────────────────────────────
 
+// hit_row — индекс строки плоского списка под y мыши или -1 (вне области данных или ниже последней строки).
 fn (pg &PropertyGrid) hit_row(my f32) int {
 	dr := pg.data_rect()
 	if my < dr.y || my > dr.y + dr.h {
@@ -889,6 +956,7 @@ fn (pg &PropertyGrid) hit_row(my f32) int {
 	return -1
 }
 
+// hit_arrow — индекс строки-группы, если точка попала в её стрелку раскрытия (стрелка смещена на depth*pg_indent), иначе -1.
 fn (pg &PropertyGrid) hit_arrow(mx f32, my f32) int {
 	idx := pg.hit_row(my)
 	if idx < 0 {
@@ -909,12 +977,14 @@ fn (pg &PropertyGrid) hit_arrow(mx f32, my f32) int {
 	return -1
 }
 
+// row_rect — прямоугольник строки idx с учётом прокрутки.
 fn (pg &PropertyGrid) row_rect(idx int) Rect {
 	dr := pg.data_rect()
 	return Rect{dr.x, dr.y + f32(idx) * pg.row_height - pg.scroll_y, dr.w, pg.row_height}
 }
 
 // Hit test for the value column area (right of splitter, within row)
+// hit_value_area — индекс строки, если точка в колонке значений (правее разделителя), иначе -1.
 fn (pg &PropertyGrid) hit_value_area(mx f32, my f32) int {
 	idx := pg.hit_row(my)
 	if idx < 0 {
@@ -929,6 +999,7 @@ fn (pg &PropertyGrid) hit_value_area(mx f32, my f32) int {
 
 // ─── Format value ──────────────────────────────────────
 
+// pg_format_value — текст значения для показа и для начального содержимого редактора: float с 2 знаками, цвет как #RRGGBB, дата ГГГГ-ММ-ДД, choice — выбранный вариант ('' при неверном индексе); у группы пусто.
 fn pg_format_value(p &Property) string {
 	return match p.kind {
 		.group {
@@ -969,6 +1040,7 @@ fn pg_format_value(p &Property) string {
 	}
 }
 
+// Эффективные цвета: заданный вручную (a > 0) либо цвет темы (eff_pg_*). Чередующийся фон строк берётся по чётности индекса строки.
 // ─── Effective colors ──────────────────────────────────
 
 fn (pg &PropertyGrid) eff_bg(ctx &RenderContext) Color {
@@ -1060,6 +1132,7 @@ fn (pg &PropertyGrid) flat_index_of(prop &Property) int {
 	return -1
 }
 
+// ensure_visible прокручивает так, чтобы выделенная строка полностью попала в область данных (минимальным сдвигом).
 fn (mut pg PropertyGrid) ensure_visible() {
 	if unsafe { pg.selected == nil } {
 		return
@@ -1082,6 +1155,12 @@ fn (mut pg PropertyGrid) ensure_visible() {
 
 // ─── Drawing ───────────────────────────────────────────
 
+// draw: регистрирует виджет в фокус-учёте, синхронизирует focused (кроме времени
+// редактирования — тогда фокус у поля ввода), шагает focus_anim, зажимает scroll_y,
+// рисует фон/рамку, заголовок, видимые строки (фон, подсветка наведения и выбора,
+// стрелка группы, имя, значение; цвет — образец + hex, bool — флажок), разделитель,
+// полосу прокрутки и поверх всего — активный редактор. Строки вне области данных
+// пропускаются.
 pub fn (mut pg PropertyGrid) draw(mut ctx RenderContext) {
 	if !pg.visible {
 		return
@@ -1112,11 +1191,13 @@ pub fn (mut pg PropertyGrid) draw(mut ctx RenderContext) {
 		ctx.mark_anim_rect('propertygrid', pg.bounds.expanded(1))
 	}
 
+	// Зажимаем прокрутку каждый кадр: строк могло стать меньше (свёртка группы, clear) или область изменилась.
 	pg.scroll_y = clamp_f32(pg.scroll_y, 0, pg.max_scroll())
 
 	// Background + border
 	ctx.fill_rect(pg.bounds, pg.eff_bg(ctx))
 	bc := ctx.theme.input_border.blend(ctx.theme.input_focus, pg.focus_anim.value)
+	// Рамка плавно перекрашивается в цвет фокуса по focus_anim.
 	ctx.draw_rect(pg.bounds, bc)
 
 	if pg.focus_anim.value > 0.05 {
@@ -1149,6 +1230,7 @@ pub fn (mut pg PropertyGrid) draw(mut ctx RenderContext) {
 	flat := pg.build_flat()
 	sx := pg.split_x()
 
+	// Рисуем только строки, попадающие в область данных (виртуализации нет, но невидимые пропускаются).
 	for i, row in flat {
 		row_y := dr.y + f32(i) * pg.row_height - pg.scroll_y
 		if row_y + pg.row_height < dr.y || row_y > dr.y + dr.h {
@@ -1269,6 +1351,7 @@ pub fn (mut pg PropertyGrid) draw(mut ctx RenderContext) {
 	}
 
 	// Active editor on top
+	// Редактор рисуется последним, поверх строк; его bounds пересчитываются каждый кадр — строка могла сдвинуться прокруткой.
 	if pg.editing && unsafe { pg.edit_text_input != nil } {
 		mut ti := pg.edit_text_input
 		ti.bounds = pg.editor_rect()
@@ -1276,6 +1359,7 @@ pub fn (mut pg PropertyGrid) draw(mut ctx RenderContext) {
 	}
 }
 
+// point_in_active_editor: точка внутри поля ввода активного редактора (false, если редактора нет).
 fn (pg &PropertyGrid) point_in_active_editor(mx f32, my f32) bool {
 	if !pg.editing {
 		return false
@@ -1289,6 +1373,14 @@ fn (pg &PropertyGrid) point_in_active_editor(mx f32, my f32) bool {
 
 // ─── Event handling ────────────────────────────────────
 
+// handle_event. Порядок приоритетов: (1) активный inline-редактор (Enter — применить,
+// Escape — отменить, клик вне него — применить и обработать клик как обычно, прочие
+// события — полю ввода; клавиши и текст при редактировании съедаются); (2) идущее
+// перетаскивание разделителя; (3) идущее перетаскивание полосы прокрутки; (4) обычная
+// обработка — клик (фокус, разделитель, ползунок, стрелка группы, выбор строки,
+// переключение bool в колонке значений), двойной клик (раскрыть группу / переключить
+// bool / начать редактирование), наведение, колесо и клавиатура (стрелки, Home/End,
+// F2/Enter, Tab) при focused.
 pub fn (mut pg PropertyGrid) handle_event(event &GuiEvent, app &App) bool {
 	if !pg.visible || !pg.enabled {
 		return false
@@ -1345,6 +1437,7 @@ pub fn (mut pg PropertyGrid) handle_event(event &GuiEvent, app &App) bool {
 		}
 	}
 
+	// Ниже — режимы «захвата»: пока тянем разделитель или ползунок, остальные события игнорируются (поглощаются) до отпускания кнопки.
 	// ── Splitter drag in progress ──
 	if pg.splitter_dragging {
 		match event.typ {
@@ -1436,6 +1529,7 @@ pub fn (mut pg PropertyGrid) handle_event(event &GuiEvent, app &App) bool {
 				}
 			}
 
+			// (Порядок проверок при клике важен: разделитель и ползунок перекрывают строки, стрелка — часть строки-группы.)
 			// Arrow toggle (group expand/collapse)
 			ar := pg.hit_arrow(mx, my)
 			if ar >= 0 {
@@ -1586,6 +1680,7 @@ pub fn (mut pg PropertyGrid) handle_event(event &GuiEvent, app &App) bool {
 			// ── Left key ──
 			//   on group     → collapse (or jump to parent if already collapsed)
 			//   on leaf      → jump to parent group
+			// Left/Right всегда поглощаются при фокусе, даже если выделения нет.
 			if event.keycode == sdl_k_left {
 				if unsafe { pg.selected != nil } {
 					if pg.selected.kind == .group && pg.selected.expanded {
@@ -1682,6 +1777,7 @@ pub fn (mut pg PropertyGrid) handle_event(event &GuiEvent, app &App) bool {
 	return false
 }
 
+// pg_clear_hover рекурсивно снимает признак наведения со свойства и всех его потомков.
 fn pg_clear_hover(p &Property) {
 	mut mp := unsafe { p }
 	mp.hovered = false

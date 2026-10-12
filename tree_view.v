@@ -1,3 +1,25 @@
+// Шапка файла.
+// TreeView - иерархическое дерево (проводник, структура документа): узлы TreeNode с
+// иконками, раскрытие/сворачивание, выделение, inline-переименование узла (F2 или
+// двойной клик), клавиатурная навигация, пунктирные направляющие линии, две
+// полосы прокрутки.
+//
+// Связь с остальной библиотекой:
+//   - раскладка: bounds выдаёт контейнер (Layouted/Arrangeable в widget_tree.v);
+//   - отрисовка: draw() строит плоский список видимых узлов и рисует только те
+//     строки, что попадают в клип (виртуализация по Y);
+//   - фокус: виджет регистрируется в ctx.focus при каждом draw (register_tree_view),
+//     Tab/Escape делегируются FocusManager'у (focus.v);
+//   - цвета: ctx.theme.eff_tr_* (тема), узлам можно задать свои text_color/bg_color;
+//   - undo/redo редактирования - UndoHistory[RuneSnap] (общий для TextInput/Table);
+//   - TreeNode - тоже объект C-ABI (kind_tree_node): узел добавляется во
+//     владельца (TreeView или другой узел), а не в контейнер.
+//
+// Модель: дерево хранится как связанные TreeNode (children + parent), а для
+// отрисовки, hit-test и навигации каждый раз разворачивается в плоский список
+// FlatNode (build_flat) - только раскрытые ветки, по одной строке на узел. Индекс в
+// плоском списке = номер строки на экране, поэтому y-координата -> узел считается
+// делением на item_height (строки одной высоты).
 module vgui
 
 // ═══════════════════════════════════════════════════════
@@ -6,6 +28,11 @@ module vgui
 // selection modes, inline editing
 // ═══════════════════════════════════════════════════════
 
+// TreeNode - узел дерева. Поле parent задаётся методами add/insert_at (корневые
+// узлы TreeView имеют parent = nil). expanded по умолчанию true - новые ветки
+// показываются раскрытыми. Нулевой цвет (a == 0) в text_color/bg_color означает
+// «по умолчанию из темы». Узлы сами не освобождаются деревом: владение/якоря GC
+// обеспечивает реестр в vgui_capi.
 @[heap]
 pub struct TreeNode {
 pub mut:
@@ -20,6 +47,8 @@ pub mut:
 	bg_color   Color = Color{0, 0, 0, 0}
 }
 
+// Фабрики узла: без иконки / с иконкой (icon_path - путь к файлу картинки, текстуру
+// отрисовщик загружает и кэширует сам, см. load_icon_texture).
 pub fn tree_node(text string) &TreeNode {
 	return &TreeNode{
 		text: text
@@ -33,12 +62,16 @@ pub fn tree_node_icon(text string, icon_path string) &TreeNode {
 	}
 }
 
+// Добавляет дочерний узел в конец и проставляет ему parent. Не проверяет, что
+// child уже не лежит в другом месте дерева и не является предком n (цикл
+// сломает flatten бесконечной рекурсией).
 pub fn (mut n TreeNode) add(child &TreeNode) {
 	mut c := unsafe { child }
 	c.parent = unsafe { n }
 	n.children << unsafe { child }
 }
 
+// Создаёт узел, добавляет и возвращает его - удобно для построения цепочкой.
 pub fn (mut n TreeNode) add_child(text string) &TreeNode {
 	c := tree_node(text)
 	n.add(c)
@@ -51,12 +84,16 @@ pub fn (mut n TreeNode) add_child_icon(text string, icon_path string) &TreeNode 
 	return c
 }
 
+// Удаляет дочерний узел по индексу (вне диапазона - игнорируется). У удалённого
+// узла поле parent НЕ сбрасывается.
 pub fn (mut n TreeNode) remove_at(idx int) {
 	if idx >= 0 && idx < n.children.len {
 		n.children.delete(idx)
 	}
 }
 
+// Вставляет дочерний узел на позицию idx; значения вне диапазона зажимаются
+// (idx <= 0 - в начало, idx >= len - в конец).
 pub fn (mut n TreeNode) insert_at(idx int, child &TreeNode) {
 	mut c := unsafe { child }
 	c.parent = unsafe { n }
@@ -77,6 +114,8 @@ pub fn (n &TreeNode) has_children() bool {
 // Selection style
 // ═══════════════════════════════════════════════════════
 
+// Как подсвечивается выделенная/наведённая строка: full_row - на всю ширину
+// строки, text_rect - только вокруг текста (с иконкой).
 pub enum TreeSelectStyle {
 	full_row
 	text_rect
@@ -93,6 +132,18 @@ const tv_edit_pad = f32(24)
 
 const tv_max_edit_undo = 50
 
+// TreeView - само дерево. Группы полей:
+//   roots/selected/hover_node - корневые узлы, выделенный узел, узел под мышью
+//     (сырые указатели, nil = нет; оба обязаны обнуляться, если узел уничтожен);
+//   item_height/indent/icon_*/pad - геометрия строки: indent - ширина одного
+//     уровня вложенности (в первом indent-слоте рисуется стрелка раскрытия);
+//   show_lines/line_* - направляющие линии иерархии;
+//   scroll_x/scroll_y - прокрутка в логических пикселях;
+//   on_* - колбэки: выбор, двойной клик, раскрытие (узел, новое состояние),
+//     начало/подтверждение (узел, старый, новый текст)/отмена правки;
+//   editing/edit_* - состояние inline-редактора: узел, буфер рун, курсор,
+//     горизонтальная прокрутка, исходный текст (для отмены), выделение
+//     (edit_sel_a/b, -1 = нет), признак drag-выделения мышью и история undo.
 @[heap]
 pub struct TreeView {
 pub mut:
@@ -162,16 +213,20 @@ pub mut:
 	hsb_drag_start_scroll f32
 }
 
+// Конструктор: пустое дерево, редактирование включено (editable = true).
 pub fn tree_view() &TreeView {
 	return &TreeView{}
 }
 
 // ─── Public API ────────────────────────────────────────
 
+// Добавляет корневой узел (parent у него не выставляется - остаётся nil).
 pub fn (mut tv TreeView) add_root(node &TreeNode) {
 	tv.roots << unsafe { node }
 }
 
+// Убирает все корни, отменяет правку (с откатом текста), сбрасывает выделение,
+// hover и прокрутку. Сами узлы не уничтожаются.
 pub fn (mut tv TreeView) clear() {
 	tv.cancel_edit()
 	tv.roots.clear()
@@ -192,6 +247,8 @@ pub fn (tv &TreeView) get_selected_text() string {
 	return ''
 }
 
+// Программно выделяет узел: не вызывает on_select, не раскрывает предков и не
+// прокручивает к узлу.
 pub fn (mut tv TreeView) set_selected(node &TreeNode) {
 	tv.selected = unsafe { node }
 }
@@ -206,6 +263,7 @@ pub fn (mut tv TreeView) set_item_icon(node &TreeNode, icon_path string) {
 	n.icon_path = icon_path
 }
 
+// Раскрыть/свернуть все узлы рекурсивно. Колбэк on_expand не вызывается.
 pub fn (mut tv TreeView) expand_all() {
 	for r in tv.roots {
 		tv_set_expanded_recursive(r, true)
@@ -226,6 +284,9 @@ pub fn (tv &TreeView) get_edit_node() &TreeNode {
 	return tv.edit_node
 }
 
+// Начинает inline-редактирование текста узла: запоминает исходный текст (для
+// отмены), загружает его в буфер, курсор в конец, выделения нет. Игнорируется для
+// nil-узла и при editable = false. Вызывает on_edit_start.
 pub fn (mut tv TreeView) begin_edit(node &TreeNode) {
 	if unsafe { node == nil } || !tv.editable {
 		return
@@ -245,6 +306,9 @@ pub fn (mut tv TreeView) begin_edit(node &TreeNode) {
 	}
 }
 
+// Подтверждает правку: записывает новый текст в узел, снимает режим редактирования и
+// вызывает on_edit_commit(узел, старый, новый). Колбэк вызывается после
+// editing = false, но до обнуления edit_node.
 pub fn (mut tv TreeView) commit_edit() {
 	if !tv.editing {
 		return
@@ -260,6 +324,8 @@ pub fn (mut tv TreeView) commit_edit() {
 	tv.edit_node = unsafe { nil }
 }
 
+// Отменяет правку: возвращает узлу исходный текст и вызывает on_edit_cancel.
+// Ничего не делает, если редактирования нет.
 pub fn (mut tv TreeView) cancel_edit() {
 	if !tv.editing {
 		return
@@ -284,12 +350,18 @@ fn tv_set_expanded_recursive(node &TreeNode, val bool) {
 
 // ─── Flat list of visible nodes ────────────────────────
 
+// Элемент плоского списка видимых узлов: сам узел, глубина вложенности и для
+// каждого уровня признак «предок на этом уровне - последний ребёнок своего
+// родителя» (нужен, чтобы решить, продолжать ли вертикальную направляющую).
 struct FlatNode {
 	node    &TreeNode
 	depth   int
 	is_last []bool // for each depth level: is ancestor the last child?
 }
 
+// Разворачивает дерево в плоский список видимых узлов (обход в глубину; свёрнутые
+// ветки пропускаются). Вызывается на каждый draw/hit-test/клавишу - O(число
+// видимых узлов).
 fn (tv &TreeView) build_flat() []FlatNode {
 	mut result := []FlatNode{cap: 64}
 	for r in tv.roots {
@@ -319,6 +391,10 @@ fn tv_flatten_with_last(node &TreeNode, depth int, parent_last []bool, mut out [
 
 // ─── Content size ──────────────────────────────────────
 
+// Размер содержимого (ширина самой длинной строки, суммарная высота) - основа для
+// расчёта прокрутки и полос. Ширина строки = отступ уровня + место под стрелку +
+// (иконка) + текст + pad. Измеряет текст всех видимых узлов, поэтому не дёшев: его
+// зовут и has_vsb/max_scroll_*.
 fn (tv &TreeView) content_size(ctx &RenderContext) (f32, f32) {
 	flat := tv.build_flat()
 	h := f32(flat.len) * tv.item_height
@@ -339,10 +415,12 @@ fn (tv &TreeView) content_size(ctx &RenderContext) (f32, f32) {
 	return max_w, h
 }
 
+// Область содержимого: bounds, уменьшенный на pad со всех сторон.
 fn (tv &TreeView) inner_rect() Rect {
 	return tv.bounds.shrunk(tv.pad)
 }
 
+// Максимальная прокрутка = размер содержимого минус размер видимой области.
 fn (tv &TreeView) max_scroll_y(ctx &RenderContext) f32 {
 	_, ch := tv.content_size(ctx)
 	return max_f32(0, ch - tv.inner_rect().h)
@@ -367,6 +445,11 @@ fn (tv &TreeView) has_hsb(ctx &RenderContext) bool {
 
 const tv_sb_w = f32(10)
 
+// Геометрия полос прокрутки: (дорожка, ползунок) либо пустые Rect, если полоса не
+// нужна. Длина ползунка пропорциональна видимой доле (не меньше 20 px). Полосы
+// рисуются поверх содержимого (внутри inner_rect), место у содержимого не
+// отнимают - в отличие от TableView. У горизонтальной видимая ширина уменьшена на
+// вертикальную полосу, если та показана.
 fn (tv &TreeView) vsb_rects(ctx &RenderContext) (Rect, Rect) {
 	inner := tv.inner_rect()
 	_, ch := tv.content_size(ctx)
@@ -419,6 +502,8 @@ fn (tv &TreeView) hsb_rects(ctx &RenderContext) (Rect, Rect) {
 
 // ─── Hit test ──────────────────────────────────────────
 
+// Узел под y-координатой окна и его глубина; (nil, 0), если строки там нет. X не
+// учитывается - строка считается кликнутой по всей ширине. Параметр ctx не используется.
 fn (tv &TreeView) hit_node(my f32, ctx &RenderContext) (&TreeNode, int) {
 	_ = ctx
 	inner := tv.inner_rect()
@@ -431,6 +516,8 @@ fn (tv &TreeView) hit_node(my f32, ctx &RenderContext) (&TreeNode, int) {
 	return unsafe { &TreeNode(nil) }, 0
 }
 
+// Попал ли клик в стрелку раскрытия: возвращает узел-ветку или nil. Область
+// стрелки - первый indent-слот строки (с учётом scroll_x); у листьев стрелки нет.
 fn (tv &TreeView) hit_expand_btn(mx f32, my f32, ctx &RenderContext) &TreeNode {
 	_ = ctx
 	inner := tv.inner_rect()
@@ -453,6 +540,8 @@ fn (tv &TreeView) hit_expand_btn(mx f32, my f32, ctx &RenderContext) &TreeNode {
 	return unsafe { nil }
 }
 
+// Прямоугольник вокруг текста (с иконкой) строки idx для стиля text_rect; поля
+// +-2 px по горизонтали и +-1 по вертикали - просто визуальный воздух.
 fn (tv &TreeView) node_text_rect(fn_ FlatNode, idx int, ctx &RenderContext) Rect {
 	inner := tv.inner_rect()
 	font := ctx.get_font_immut(.regular, 0)
@@ -472,6 +561,8 @@ fn (tv &TreeView) node_text_rect(fn_ FlatNode, idx int, ctx &RenderContext) Rect
 
 // ─── Keyboard helpers ──────────────────────────────────
 
+// Индекс узла в плоском списке видимых или -1 (узел скрыт в свёрнутой ветке). Сравнение
+// по адресу.
 fn (tv &TreeView) flat_index_of(node &TreeNode) int {
 	flat := tv.build_flat()
 	for i, fn_ in flat {
@@ -482,6 +573,7 @@ fn (tv &TreeView) flat_index_of(node &TreeNode) int {
 	return -1
 }
 
+// Прокручивает по Y так, чтобы выделенный узел был полностью виден.
 fn (mut tv TreeView) ensure_visible(ctx &RenderContext) {
 	if unsafe { tv.selected == nil } {
 		return
@@ -502,6 +594,7 @@ fn (mut tv TreeView) ensure_visible(ctx &RenderContext) {
 	tv.scroll_y = clamp_f32(tv.scroll_y, 0, tv.max_scroll_y(ctx))
 }
 
+// Вызывает on_select для текущего выделенного узла (если он есть).
 fn (mut tv TreeView) fire_select() {
 	if tv.on_select != unsafe { nil } && unsafe { tv.selected != nil } {
 		tv.on_select(tv.selected)
@@ -510,6 +603,9 @@ fn (mut tv TreeView) fire_select() {
 
 // ─── Edit selection helpers ────────────────────────────
 
+// Хелперы выделения редактора: пара (edit_sel_a - якорь, edit_sel_b - подвижный
+// конец), выделение пусто, если индекс -1 или a == b; edit_ensure_sel заводит
+// выделение нулевой длины в позиции курсора перед расширением Shift+стрелкой.
 fn (tv &TreeView) edit_has_sel() bool {
 	return tv.edit_sel_a >= 0 && tv.edit_sel_b >= 0 && tv.edit_sel_a != tv.edit_sel_b
 }
@@ -548,6 +644,11 @@ fn (tv &TreeView) edit_selected_text() string {
 
 // ─── Home/End key detection (same logic as text_input.v) ──
 
+// Клавиши Home/End/PageUp/PageDown. Проверяются и по keycode, и по scancode, и
+// включая цифровой блок (KP 7/1/9/3 трактуются как Home/End/PageUp/PageDown, как
+// при выключенном NumLock). Проверка по scancode нужна, потому что keycode зависит
+// от раскладки. Та же логика, что в is_home_key/is_end_key в text_input.v;
+// константы sc_kp_9/sc_kp_3 объявлены ниже, в этом же файле.
 fn tv_is_home_key(keycode int, scancode int) bool {
 	return keycode == sdl_k_home || keycode == sdl_k_kp_7 || scancode == sc_home
 		|| scancode == sc_kp_7
@@ -571,6 +672,8 @@ fn tv_is_pagedown_key(keycode int, scancode int) bool {
 
 // ─── Edit undo/redo ────────────────────────────────────
 
+// Undo/redo редактора - как в TableView: снимок (буфер, курсор) в историю перед
+// каждым изменением и обмен текущего состояния со снимком при откате.
 fn (mut tv TreeView) edit_save_undo() {
 	tv.edit_history.save(RuneSnap{
 		buf: tv.edit_buf.clone()
@@ -600,6 +703,7 @@ fn (mut tv TreeView) edit_perform_redo() {
 
 // ─── Edit text operations ──────────────────────────────
 
+// Удаляет выделение из буфера (курсор на начало). Undo сохраняет вызывающий.
 fn (mut tv TreeView) edit_delete_sel() {
 	if !tv.edit_has_sel() {
 		return
@@ -618,6 +722,7 @@ fn (mut tv TreeView) edit_delete_sel() {
 	tv.edit_clear_sel()
 }
 
+// Вставка в позицию курсора с заменой выделения; один снимок undo на операцию.
 fn (mut tv TreeView) edit_insert(s string) {
 	if s.len == 0 {
 		return
@@ -641,6 +746,10 @@ fn (mut tv TreeView) edit_insert(s string) {
 	tv.edit_cur += rr.len
 }
 
+// Подбирает горизонтальную прокрутку edit_scroll_x поля ввода так, чтобы курсор
+// оставался виден (с запасом 20 px при сдвиге), а если весь текст помещается в
+// avail_w - сбрасывает её в 0. Вызывается из draw() каждый кадр, т.е. draw здесь
+// меняет состояние виджета.
 fn (mut tv TreeView) edit_fix_scroll(ctx &RenderContext, avail_w f32) {
 	font := ctx.get_font_immut(.regular, 0)
 	text_before := if tv.edit_cur > 0 && tv.edit_cur <= tv.edit_buf.len {
@@ -665,6 +774,8 @@ fn (mut tv TreeView) edit_fix_scroll(ctx &RenderContext, avail_w f32) {
 	}
 }
 
+// Ширина поля ввода: ширина текста + tv_edit_pad, не меньше tv_min_edit_w и не
+// шире доступного места до правого края (но всё же не меньше минимума).
 fn (tv &TreeView) calc_edit_width(ctx &RenderContext, content_x f32) f32 {
 	font := ctx.get_font_immut(.regular, 0)
 	text_w := if tv.edit_buf.len > 0 {
@@ -680,6 +791,11 @@ fn (tv &TreeView) calc_edit_width(ctx &RenderContext, content_x f32) f32 {
 
 // ─── Guide lines drawing ───────────────────────────────
 
+// Рисует направляющие для строки i. Две части: (1) вертикальные линии «колонок»
+// предков, чьё поддерево продолжается ниже (предок не последний ребёнок -
+// is_last[d] == false); (2) для самого узла - горизонтальный отросток от колонки
+// родителя к узлу и вертикальная линия родителя: до середины строки у последнего
+// ребёнка (получается уголок), на всю высоту у остальных.
 fn (tv &TreeView) draw_guide_lines(fn_ FlatNode, i int, inner Rect, mut ctx RenderContext) {
 	lc := if tv.line_color.a > 0 {
 		tv.line_color
@@ -715,6 +831,9 @@ fn (tv &TreeView) draw_guide_lines(fn_ FlatNode, i int, inner Rect, mut ctx Rend
 	}
 }
 
+// Вертикальная/горизонтальная линия толщиной 1 px: сплошная при line_solid, иначе
+// пунктир (штрих line_dash, пробел line_gap_px), последний штрих обрезается по
+// концу отрезка.
 fn (tv &TreeView) draw_vdash(x f32, y1 f32, y2 f32, c Color, mut ctx RenderContext) {
 	if tv.line_solid {
 		ctx.fill_rect(Rect{x, y1, 1, y2 - y1}, c)
@@ -749,6 +868,13 @@ fn (tv &TreeView) draw_hdash(x1 f32, x2 f32, y f32, c Color, mut ctx RenderConte
 
 // ─── Drawing ───────────────────────────────────────────
 
+// Отрисовка. Шаги: (1) регистрация в FocusManager и синхронизация флага focused
+// (если фокус потерян - правка отменяется, кроме случая, когда редактор уже
+// активен: менеджер фокуса мог ещё не обновиться после программного begin_edit);
+// (2) анимация фокуса и рамка; (3) ограничение прокрутки допустимым диапазоном;
+// (4) под клипом inner_rect рисуются только видимые строки: направляющие -> фон узла ->
+// выделение/наведение -> стрелка -> иконка -> текст или поле ввода; (5) полосы
+// прокрутки поверх.
 pub fn (mut tv TreeView) draw(mut ctx RenderContext) {
 	if !tv.visible {
 		return
@@ -800,6 +926,10 @@ pub fn (mut tv TreeView) draw(mut ctx RenderContext) {
 	font := ctx.get_font(.regular, 0)
 	fh := ctx.font_height_of(font)
 
+	// Цикл по строкам: строки выше области пропускаются, ниже - цикл прерывается.
+	// iy - y верхнего края строки с учётом прокрутки. Приоритет подсветки: выделение
+	// выше наведения (else if); у редактируемой строки подсветок нет - вместо них
+	// поле ввода.
 	for i, fn_ in flat {
 		iy := inner.y + f32(i) * tv.item_height - tv.scroll_y
 		if iy + tv.item_height < inner.y {
@@ -862,6 +992,8 @@ pub fn (mut tv TreeView) draw(mut ctx RenderContext) {
 			}
 		}
 
+		// Стрелка рисуется треугольником в первом indent-слоте: вниз для раскрытого узла,
+		// вправо для свёрнутого.
 		// ── Expand/collapse arrow ──
 		if fn_.node.has_children() {
 			ac := ctx.theme.eff_tr_arrow()
@@ -889,6 +1021,10 @@ pub fn (mut tv TreeView) draw(mut ctx RenderContext) {
 		// ── Text or edit field ──
 		ty := iy + (tv.item_height - fh) * 0.5
 
+		// Режим правки: поле ввода (фон + рамка accent) шириной calc_edit_width; в нём под
+		// собственным клипом - выделение, текст со сдвигом edit_scroll_x и мигающий
+		// курсор (период 1060 мс, видим первые 530 мс; перерисовку по таймеру этот код не
+		// запрашивает).
 		if is_editing {
 			// Dynamic width edit field
 			edit_w := tv.calc_edit_width(ctx, content_x)
@@ -984,6 +1120,12 @@ pub fn (mut tv TreeView) draw(mut ctx RenderContext) {
 
 // ─── Events ────────────────────────────────────────────
 
+// Обработка событий; true - событие поглощено. Порядок: синхронизация focused с
+// FocusManager (нужна для Tab-навигации), затем режимы, забирающие все события
+// (редактирование, перетаскивание ползунков), затем обычные: наведение, нажатие
+// (фокус -> ползунок -> стрелка раскрытия -> выбор узла), двойной клик (раскрытие
+// или начало правки), колесо, клавиши. Нажатие в области дерева всегда поглощается;
+// клик мимо при фокусе снимает фокус.
 pub fn (mut tv TreeView) handle_event(event &GuiEvent, app &App) bool {
 	if !tv.visible || !tv.enabled {
 		return false
@@ -1084,6 +1226,8 @@ pub fn (mut tv TreeView) handle_event(event &GuiEvent, app &App) bool {
 				tv.focused = false
 			}
 		}
+		// Двойной клик: по стрелке - раскрыть/свернуть; по узлу - начать правку (если
+		// editable) либо раскрыть ветку; затем всегда on_dbl_click.
 		.mouse_dbl_click {
 			if tv.hovered && tv.focused && unsafe { ctx_ptr != nil } {
 				node, _ := tv.hit_node(event.mouse_y, ctx_ptr)
@@ -1114,6 +1258,9 @@ pub fn (mut tv TreeView) handle_event(event &GuiEvent, app &App) bool {
 				return true
 			}
 		}
+		// Колесо работает только у сфокусированного дерева (!tv.focused - вернуть false),
+		// Shift - горизонтальная прокрутка. Возвращает true лишь при реальном сдвиге,
+		// иначе колесо уходит родителю.
 		.mouse_wheel {
 			if !tv.wheel {
 				return false
@@ -1154,6 +1301,12 @@ pub fn (mut tv TreeView) handle_event(event &GuiEvent, app &App) bool {
 
 // ─── Inline edit event handler ─────────────────────────
 
+// События в режиме правки (однострочный редактор): ввод текста, Home/End,
+// Enter (подтвердить), Escape (отмена), Backspace/Delete, стрелки с Shift
+// (выделение), Ctrl+A/C/X/V/Z (+Shift - redo), Ctrl+Insert / Shift+Insert, Tab
+// (подтвердить и передать фокус дальше), мышь (позиционирование курсора, выделение
+// перетаскиванием, двойной клик - выделить слово). Клик вне редактируемой строки
+// подтверждает правку и возвращает false, чтобы тот же клик отработал как обычный.
 fn (mut tv TreeView) handle_edit_event(event &GuiEvent, app &App, ctx_ptr &RenderContext) bool {
 	match event.typ {
 		.text_input {
@@ -1307,6 +1460,7 @@ fn (mut tv TreeView) handle_edit_event(event &GuiEvent, app &App, ctx_ptr &Rende
 					if c {
 						cl := app.get_clipboard()
 						if cl.len > 0 {
+							// Однострочное поле: переводы строк из буфера обмена заменяются пробелами.
 							filtered := cl.replace('\n', ' ').replace('\r', '')
 							tv.edit_insert(filtered)
 						}
@@ -1420,6 +1574,8 @@ fn (mut tv TreeView) handle_edit_event(event &GuiEvent, app &App, ctx_ptr &Rende
 	return false
 }
 
+// Выделяет слово вокруг курсора (граница слова - is_word). Для пустого буфера
+// ничего не делает.
 fn (mut tv TreeView) edit_select_word() {
 	if tv.edit_buf.len == 0 {
 		return
@@ -1438,6 +1594,9 @@ fn (mut tv TreeView) edit_select_word() {
 	tv.edit_cur = b
 }
 
+// Ставит курсор редактора по x-координате мыши: из локальной x (с учётом
+// edit_scroll_x) выбирается ближайшая к ней граница между рунами - перебором
+// префиксов с измерением ширины (O(n) измерений текста на вызов).
 fn (mut tv TreeView) edit_hit_cursor(mx f32, ctx_ptr &RenderContext) {
 	if unsafe { ctx_ptr == nil } || unsafe { tv.edit_node == nil } {
 		return
@@ -1478,6 +1637,12 @@ fn (mut tv TreeView) edit_hit_cursor(mx f32, ctx_ptr &RenderContext) {
 
 // ─── Keyboard navigation (non-edit mode) ───────────────
 
+// Навигация клавишами вне правки. Работает по плоскому списку видимых узлов:
+// Up/Down - соседний узел (без выделения - выбрать первый), Home/End - первый/
+// последний, PageUp/PageDown - на высоту видимой области, Left - свернуть или
+// перейти к родителю, Right - раскрыть или перейти к первому ребёнку, Enter/Space -
+// переключить раскрытие, F2 - начать правку, Tab/Escape - передать/снять фокус.
+// Каждое перемещение прокручивает к узлу и вызывает on_select.
 fn (mut tv TreeView) handle_key(event &GuiEvent, ctx_ptr &RenderContext) bool {
 	flat := tv.build_flat()
 	idx := if unsafe { tv.selected != nil } { tv.flat_index_of(tv.selected) } else { -1 }
@@ -1639,6 +1804,9 @@ fn (mut tv TreeView) handle_key(event &GuiEvent, ctx_ptr &RenderContext) bool {
 
 // ─── Scrollbar drag handlers ───────────────────────────
 
+// Перетаскивание ползунка (вертикального/горизонтального): смещение мыши в пикселях
+// дорожки переводится в прокрутку пропорционально (макс. прокрутка / ход
+// ползунка). Пока флаг dragging взведён, функция поглощает все события.
 fn (mut tv TreeView) handle_vsb_drag(event &GuiEvent, ctx_ptr &RenderContext) bool {
 	match event.typ {
 		.mouse_move {

@@ -5,11 +5,24 @@ module vgui
 // single-line (with scroll) or multi-row layout
 // ═══════════════════════════════════════════════════════
 
+// Файл tab_box.v: виджет TabBox - контейнер со вкладками. Заголовок вкладок (полоса "header")
+// может стоять с любой из четырёх сторон (TabPos), быть одной строкой с прокруткой (single_line)
+// или переноситься на несколько рядов (multi_row). Показывается и раскладывается только
+// содержимое активной вкладки: arrange() даёт bounds одному активному ребёнку, draw() рисует
+// его же, события handle_event() отдаются ему же. Неактивные дети хранят устаревшие bounds
+// и в hit-test не участвуют (см. HitTestable в widget_tree.v).
+// Связи с библиотекой: фокус - FocusKind для TabBox в focus.v (register_tab_box / focus_tab_box,
+// вкладки переключаются стрелками), цвета - eff_tab_* у Theme, анимация фокуса - Anim (anim.v),
+// иконки вкладок - ctx.load_icon_texture. Тег типа kind_tab_box - widget_tag.v.
+
+// TabDir - наследие старого API (было только горизонтальное/вертикальное расположение);
+// оставлен для обратной совместимости, см. eff_pos(). В новом коде используйте TabPos.
 pub enum TabDir {
 	horizontal // legacy alias for pos = .top
 	vertical   // legacy alias for pos = .left
 }
 
+// Сторона, с которой стоит полоса заголовков вкладок.
 pub enum TabPos {
 	top
 	bottom
@@ -17,16 +30,21 @@ pub enum TabPos {
 	right
 }
 
+// Как заголовки размещаются вдоль основной оси: одной строкой (при нехватке места
+// появляются кнопки прокрутки) или переносятся на новые ряды/колонки (прокрутки нет).
 pub enum TabLayout {
 	single_line
 	multi_row
 }
 
+// Направление текста заголовка. vertical - текст повёрнут на -90 градусов (читается снизу вверх).
 pub enum TabTextDir {
 	horizontal
 	vertical
 }
 
+// Сторона вкладки, на которой рисуется полоска-индикатор активной вкладки.
+// auto - противоположная содержимому сторона (см. eff_indicator_pos()).
 pub enum IndicatorPos {
 	auto
 	top
@@ -35,6 +53,8 @@ pub enum IndicatorPos {
 	right
 }
 
+// Одна вкладка: заголовок, путь к иконке (пустой - без иконки), содержимое и флаг наведения
+// мыши (обновляется в handle_event по mouse_move, используется в draw для подсветки).
 struct TabEntry {
 mut:
 	title     string
@@ -43,14 +63,22 @@ mut:
 	hovered   bool
 }
 
+// Место заголовка вкладки в полосе: номер ряда (колонки для вертикальных), смещение вдоль
+// основной оси от начала ряда и размер вдоль основной оси. Без учёта прокрутки.
 struct TabPlacement {
 	row    int
 	offset f32
 	size   f32
 }
 
+// Размер (по основной оси) каждой из двух кнопок прокрутки "<" и ">" в режиме single_line.
 const tab_scroll_btn_sz = f32(22)
 
+// Контейнер со вкладками. Поля bounds/active/tabs задают раскладку и состояние; focus_group -
+// номер группы фокуса (Tab ходит внутри группы); поля Sizing/Indicator - внешний вид;
+// Scroll - состояние прокрутки single_line (scroll_offset в пикселях вдоль основной оси,
+// scroll_*_hov - наведение на кнопки прокрутки). Колбэки: on_change(индекс, заголовок) - после
+// смены активной вкладки; on_close(индекс, заголовок) - ПЕРЕД удалением вкладки.
 @[heap]
 pub struct TabBox {
 pub mut:
@@ -95,6 +123,7 @@ pub mut:
 
 // ─── Constructors ──────────────────────────────────────
 
+// Фабрики: вкладки сверху (по умолчанию) / слева / снизу / справа / с произвольной стороны.
 pub fn tab_box() &TabBox {
 	return &TabBox{}
 }
@@ -125,6 +154,8 @@ pub fn tab_box_at(pos TabPos) &TabBox {
 
 // ─── Public API ────────────────────────────────────────
 
+// Добавляет вкладку с текстовым заголовком. Активная вкладка не меняется (по умолчанию 0).
+// Виджет хранится по указателю: контейнер не владеет им в смысле освобождения.
 pub fn (mut tb TabBox) add_tab(title string, widget &Widget) {
 	tb.tabs << TabEntry{
 		title:  title
@@ -132,6 +163,7 @@ pub fn (mut tb TabBox) add_tab(title string, widget &Widget) {
 	}
 }
 
+// Вкладка с иконкой и текстом (иконка над текстом).
 pub fn (mut tb TabBox) add_tab_with_icon(title string, icon_path string, widget &Widget) {
 	tb.tabs << TabEntry{
 		title:     title
@@ -140,6 +172,7 @@ pub fn (mut tb TabBox) add_tab_with_icon(title string, icon_path string, widget 
 	}
 }
 
+// Вкладка только с иконкой, без текста.
 pub fn (mut tb TabBox) add_icon_tab(icon_path string, widget &Widget) {
 	tb.tabs << TabEntry{
 		icon_path: icon_path
@@ -147,6 +180,8 @@ pub fn (mut tb TabBox) add_icon_tab(icon_path string, widget &Widget) {
 	}
 }
 
+// Делает активной вкладку idx. Недопустимый индекс игнорируется; on_change не вызывается
+// (он вызывается только при смене пользователем и в close_*).
 pub fn (mut tb TabBox) set_active(idx int) {
 	if idx >= 0 && idx < tb.tabs.len {
 		tb.active = idx
@@ -164,6 +199,7 @@ pub fn (tb &TabBox) get_active_title() string {
 	return ''
 }
 
+// Вызывает on_change для текущей активной вкладки, если колбэк задан и индекс корректен.
 fn (mut tb TabBox) fire_change() {
 	if tb.on_change != unsafe { nil } && tb.active >= 0 && tb.active < tb.tabs.len {
 		tb.on_change(tb.active, tb.tabs[tb.active].title)
@@ -172,6 +208,7 @@ fn (mut tb TabBox) fire_change() {
 
 // ─── Geometry helpers ──────────────────────────────────
 
+// Реальная сторона заголовка с учётом устаревшего поля dir.
 fn (tb &TabBox) eff_pos() TabPos {
 	// Back-compat: legacy `.vertical` dir with default `.top` pos → `.left`
 	if tb.pos == .top && tb.dir == .vertical {
@@ -185,6 +222,7 @@ fn (tb &TabBox) std_tab_h(ctx &RenderContext) f32 {
 	return if tb.tab_height > 0 { tb.tab_height } else { ctx.control_h() }
 }
 
+// true, если полоса заголовков горизонтальна (сверху/снизу): основная ось вкладок - X.
 fn (tb &TabBox) is_horizontal() bool {
 	p := tb.eff_pos()
 	return p == .top || p == .bottom
@@ -198,6 +236,8 @@ fn (tb &TabBox) tab_has_text(idx int) bool {
 	return idx >= 0 && idx < tb.tabs.len && tb.tabs[idx].title.len > 0
 }
 
+// Высота содержимого заголовка вкладки idx: иконка + зазор + строка текста, либо что-то одно.
+// Используется для горизонтальной полосы, где иконка стоит над текстом.
 fn (tb &TabBox) tab_content_height(idx int, ctx &RenderContext) f32 {
 	has_icon := tb.tab_has_icon(idx)
 	has_text := tb.tab_has_text(idx)
@@ -214,12 +254,17 @@ fn (tb &TabBox) tab_content_height(idx int, ctx &RenderContext) f32 {
 	return f32(0)
 }
 
+// Размер текста заголовка вкладки idx обычным шрифтом (без поворота).
 fn (tb &TabBox) tab_text_size(idx int, ctx &RenderContext) Vec2 {
 	font := ctx.get_font_immut(.regular, 0)
 	return ctx.measure_text_with_font(tb.tabs[idx].title, font)
 }
 
 // Main-axis size of a tab (width for horizontal pos, height for vertical pos)
+// Для горизонтальной полосы с повёрнутым текстом ширина вкладки - высота строки шрифта
+// (повёрнутый текст "стоит" вертикально); для вертикальной полосы с повёрнутым текстом
+// высота вкладки - ширина текста. Иначе: ширина = max(текст, иконка) + поля, высота -
+// по содержимому, но не меньше стандартной.
 fn (tb &TabBox) tab_main_size(idx int, ctx &RenderContext) f32 {
 	if tb.is_horizontal() {
 		if tb.text_dir == .vertical {
@@ -246,6 +291,8 @@ fn (tb &TabBox) tab_main_size(idx int, ctx &RenderContext) f32 {
 }
 
 // Cross-axis size (height for horizontal pos, width for vertical pos)
+// Для всей полосы берётся максимум по всем вкладкам, чтобы ряды были одинаковой толщины.
+// Минимальная ширина колонки вертикальной полосы - 60 (магическая константа).
 fn (tb &TabBox) tab_cross_size(ctx &RenderContext) f32 {
 	if tb.is_horizontal() {
 		if tb.text_dir == .vertical {
@@ -295,6 +342,9 @@ fn (tb &TabBox) tab_cross_size(ctx &RenderContext) f32 {
 // ─── Layout computation ────────────────────────────────
 
 // Returns placements and number of rows (horizontal) or columns (vertical)
+// multi_row: вкладки укладываются в ряд, пока помещаются в доступную длину, иначе
+// переносятся на следующий ряд (первая вкладка ряда принимается всегда, даже если она
+// длиннее ряда). single_line: один ряд, вкладки подряд без переноса.
 fn (tb &TabBox) compute_placements(ctx &RenderContext) ([]TabPlacement, int) {
 	mut out := []TabPlacement{cap: tb.tabs.len}
 	if tb.tabs.len == 0 {
@@ -327,6 +377,7 @@ fn (tb &TabBox) compute_placements(ctx &RenderContext) ([]TabPlacement, int) {
 	return out, 1
 }
 
+// Полная длина самого длинного ряда (максимальный конец вкладки вдоль основной оси).
 fn (tb &TabBox) total_main(placements []TabPlacement) f32 {
 	if placements.len == 0 {
 		return 0
@@ -345,6 +396,8 @@ fn (tb &TabBox) total_main(placements []TabPlacement) f32 {
 
 // ─── Header/content rects ──────────────────────────────
 
+// Прямоугольник всей полосы заголовков: прижат к выбранной стороне bounds, толщина =
+// число рядов * толщина одного ряда.
 fn (tb &TabBox) header_rect(ctx &RenderContext) Rect {
 	_, rows := tb.compute_placements(ctx)
 	cross := tb.tab_cross_size(ctx)
@@ -366,6 +419,8 @@ fn (tb &TabBox) header_rect(ctx &RenderContext) Rect {
 	}
 }
 
+// Область содержимого: остаток bounds после полосы заголовков и зазора gap. Для bottom/right
+// размер ограничен снизу нулём, чтобы не получить отрицательный Rect при очень малых bounds.
 fn (tb &TabBox) content_rect(ctx &RenderContext) Rect {
 	hr := tb.header_rect(ctx)
 	pos := tb.eff_pos()
@@ -391,6 +446,7 @@ fn (tb &TabBox) content_rect(ctx &RenderContext) Rect {
 
 // ─── Scroll logic (single_line mode) ───────────────────
 
+// Длина полосы заголовков вдоль основной оси (включая место под кнопки прокрутки).
 fn (tb &TabBox) available_main(ctx &RenderContext) f32 {
 	hr := tb.header_rect(ctx)
 	return if tb.is_horizontal() { hr.w } else { hr.h }
@@ -401,6 +457,7 @@ fn (tb &TabBox) total_tabs_main(ctx &RenderContext) f32 {
 	return tb.total_main(placements)
 }
 
+// Прокрутка нужна только в single_line и только если вкладки не помещаются в полосу.
 fn (tb &TabBox) needs_scroll(ctx &RenderContext) bool {
 	if tb.layout != .single_line {
 		return false
@@ -408,16 +465,20 @@ fn (tb &TabBox) needs_scroll(ctx &RenderContext) bool {
 	return tb.total_tabs_main(ctx) > tb.available_main(ctx)
 }
 
+// Максимальный scroll_offset: суммарная длина вкладок минус видимое окно (полоса без двух кнопок).
 fn (tb &TabBox) max_scroll(ctx &RenderContext) f32 {
 	avail := tb.available_main(ctx) - tab_scroll_btn_sz * 2
 	total := tb.total_tabs_main(ctx)
 	return max_f32(0, total - avail)
 }
 
+// Удерживает scroll_offset в [0, max_scroll]; зовётся перед отрисовкой и после каждой прокрутки
+// (размеры могли измениться - ресайз окна, смена шрифта).
 fn (mut tb TabBox) clamp_scroll(ctx &RenderContext) {
 	tb.scroll_offset = clamp_f32(tb.scroll_offset, 0, tb.max_scroll(ctx))
 }
 
+// Кнопка прокрутки "назад" (левая/верхняя). Пустой Rect, если прокрутка не нужна.
 fn (tb &TabBox) scroll_prev_rect(ctx &RenderContext) Rect {
 	if !tb.needs_scroll(ctx) {
 		return Rect{}
@@ -430,6 +491,7 @@ fn (tb &TabBox) scroll_prev_rect(ctx &RenderContext) Rect {
 	return Rect{hr.x, hr.y, cross, tab_scroll_btn_sz}
 }
 
+// Кнопка прокрутки "вперёд" (правая/нижняя). Пустой Rect, если прокрутка не нужна.
 fn (tb &TabBox) scroll_next_rect(ctx &RenderContext) Rect {
 	if !tb.needs_scroll(ctx) {
 		return Rect{}
@@ -442,6 +504,8 @@ fn (tb &TabBox) scroll_next_rect(ctx &RenderContext) Rect {
 	return Rect{hr.x, hr.y + hr.h - tab_scroll_btn_sz, cross, tab_scroll_btn_sz}
 }
 
+// Подкручивает полосу так, чтобы активная вкладка целиком попала в видимое окно
+// (между кнопками прокрутки). Зовётся при смене активной вкладки кликом или клавишами.
 fn (mut tb TabBox) ensure_active_visible(ctx &RenderContext) {
 	if tb.layout != .single_line || !tb.needs_scroll(ctx) {
 		return
@@ -463,6 +527,9 @@ fn (mut tb TabBox) ensure_active_visible(ctx &RenderContext) {
 
 // ─── Tab rect / hit test ───────────────────────────────
 
+// Экранный прямоугольник заголовка вкладки idx: позиция из compute_placements плюс сдвиг
+// под левую кнопку прокрутки (pad_start) минус прокрутка. Может выходить за видимую область -
+// вызывающий код обрезает по header_content_rect().
 fn (tb &TabBox) tab_rect(idx int, ctx &RenderContext) Rect {
 	placements, _ := tb.compute_placements(ctx)
 	if idx < 0 || idx >= placements.len {
@@ -485,6 +552,7 @@ fn (tb &TabBox) tab_rect(idx int, ctx &RenderContext) Rect {
 }
 
 // Visible scroll area within the header (excluding scroll buttons)
+// Если прокрутки нет, совпадает со всей полосой.
 fn (tb &TabBox) header_content_rect(ctx &RenderContext) Rect {
 	hr := tb.header_rect(ctx)
 	if !tb.needs_scroll(ctx) {
@@ -496,6 +564,8 @@ fn (tb &TabBox) header_content_rect(ctx &RenderContext) Rect {
 	return Rect{hr.x, hr.y + tab_scroll_btn_sz, hr.w, hr.h - tab_scroll_btn_sz * 2}
 }
 
+// Индекс вкладки под точкой (mx, my) или -1. Кнопки прокрутки вкладками не считаются, а
+// вкладка, частично скрытая за краем видимой области, ловит клик только видимой частью.
 fn (tb &TabBox) hit_tab(mx f32, my f32, ctx &RenderContext) int {
 	if tb.needs_scroll(ctx) {
 		if tb.scroll_prev_rect(ctx).contains(mx, my) {
@@ -517,6 +587,7 @@ fn (tb &TabBox) hit_tab(mx f32, my f32, ctx &RenderContext) int {
 
 // ─── Effective indicator position ──────────────────────
 
+// Сторона индикатора: заданная явно или (auto) противоположная содержимому.
 fn (tb &TabBox) eff_indicator_pos() IndicatorPos {
 	if tb.indicator_pos != .auto {
 		return tb.indicator_pos
@@ -529,6 +600,7 @@ fn (tb &TabBox) eff_indicator_pos() IndicatorPos {
 	}
 }
 
+// Цвет индикатора: свой, если задан с ненулевой альфой, иначе из темы.
 fn (tb &TabBox) eff_indicator_color(ctx &RenderContext) Color {
 	if tb.indicator_color.a > 0 {
 		return tb.indicator_color
@@ -549,18 +621,25 @@ pub fn (mut tb TabBox) arrange(mut ctx RenderContext) {
 	}
 }
 
+// Рисование. Порядок: регистрация в фокус-менеджере -> синхронизация флага focused -> анимация
+// кольца фокуса -> фон полосы -> заголовки (с обрезкой по видимой области) -> разделитель ->
+// кнопки прокрутки -> содержимое активной вкладки (в своей обрезке) -> индикатор. Индикатор
+// рисуется последним, поверх содержимого, чтобы его не перекрывали границы потомков.
 pub fn (mut tb TabBox) draw(mut ctx RenderContext) {
 	if !tb.visible || tb.tabs.len == 0 {
 		return
 	}
+	// Нет пересечения с областью перерисовки (dirty region) - рисовать нечего.
 	if !ctx.is_in_clip(tb.bounds) {
 		return
 	}
 
+	// Регистрируемся в фокус-менеджере при каждой отрисовке; выключенный виджет в Tab-обход не попадает.
 	if tb.enabled {
 		ctx.focus.register_tab_box(&tb, tb.focus_group)
 	}
 
+	// Флаг focused в виджете - зеркало решения фокус-менеджера (его меняют Tab/клик).
 	should_focus := ctx.focus.is_focused(unsafe { &tb })
 	if tb.focused && !should_focus {
 		tb.focused = false
@@ -595,6 +674,7 @@ pub fn (mut tb TabBox) draw(mut ctx RenderContext) {
 		is_active := i == tb.active
 		is_hovered := tb.tabs[i].hovered && tb.enabled
 
+		// Фон вкладки: активная > под мышью > прозрачная.
 		tab_bg := if is_active {
 			ctx.theme.eff_tab_active_bg()
 		} else if is_hovered {
@@ -664,6 +744,8 @@ pub fn (mut tb TabBox) draw(mut ctx RenderContext) {
 	}
 }
 
+// Рисует две кнопки прокрутки со стрелками-треугольниками. На краю (at_start/at_end, допуск 0.5 px)
+// стрелка серая и подсветка наведения не показывается. as_ - полуразмер стрелки в px.
 fn (tb &TabBox) draw_scroll_buttons(mut ctx RenderContext) {
 	at_start := tb.scroll_offset <= 0.5
 	at_end := tb.scroll_offset >= tb.max_scroll(ctx) - 0.5
@@ -726,6 +808,9 @@ fn (tb &TabBox) draw_scroll_buttons(mut ctx RenderContext) {
 	ctx.fill_rect(Rect{next_r.x, next_r.y, 1, next_r.h}, ctx.theme.eff_tab_border())
 }
 
+// Рисует полоску-индикатор активной вкладки trk на выбранной стороне, обрезая по visible.
+// Отступ pad по краям уменьшается (max_pad), если вкладка слишком мала для двух отступов
+// и самой полоски - иначе ширина полоски ушла бы в отрицательные значения.
 fn (tb &TabBox) draw_indicator(trk Rect, visible Rect, mut ctx RenderContext) {
 	ic := tb.eff_indicator_color(ctx)
 	thick := tb.indicator_thickness
@@ -759,6 +844,9 @@ fn (tb &TabBox) draw_indicator(trk Rect, visible Rect, mut ctx RenderContext) {
 	ctx.pop_clip()
 }
 
+// Рисует содержимое заголовка (иконку и/или текст) по центру прямоугольника вкладки trk
+// цветом tc. Иконка + текст - столбиком (иконка сверху). Повёрнутый текст поддержан только
+// для вкладок без иконки.
 fn (tb &TabBox) draw_tab_content(idx int, trk Rect, tc Color, mut ctx RenderContext) {
 	has_icon := tb.tab_has_icon(idx)
 	has_text := tb.tab_has_text(idx)
@@ -800,11 +888,18 @@ fn (tb &TabBox) draw_tab_content(idx int, trk Rect, tc Color, mut ctx RenderCont
 
 // ─── Events ────────────────────────────────────────────
 
+// Сдвигает прокрутку на delta px и ограничивает диапазоном.
 fn (mut tb TabBox) scroll_by(delta f32, ctx &RenderContext) {
 	tb.scroll_offset += delta
 	tb.clamp_scroll(ctx)
 }
 
+// Обработка событий. Порядок приоритета: клик по кнопкам прокрутки -> клик по вкладке (фокус +
+// смена активной, on_change) -> колесо над полосой (если wheel и есть прокрутка) -> передача
+// активному ребёнку -> собственные mouse_move (hover) и клавиши (когда в фокусе): стрелки
+// (по основной оси), Home/End, Tab (переход фокуса), Escape (снять фокус). Возвращает true,
+// если событие поглощено. Контекст берётся через app.get_active_ctx() и может быть nil - тогда
+// геометрию посчитать нельзя и позиционные события пропускаются.
 pub fn (mut tb TabBox) handle_event(event &GuiEvent, app &App) bool {
 	if !tb.visible || !tb.enabled || tb.tabs.len == 0 {
 		return false
@@ -844,6 +939,7 @@ pub fn (mut tb TabBox) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	// Mouse wheel scroll over header
+	// wheel=false: колесо отдаём наружу (например, ScrollBox), даже над полосой.
 	if event.typ == .mouse_wheel && !tb.wheel {
 		return false
 	}
@@ -874,6 +970,7 @@ pub fn (mut tb TabBox) handle_event(event &GuiEvent, app &App) bool {
 				for i in 0 .. tb.tabs.len {
 					r := tb.tab_rect(i, ctx_ptr)
 					vis := tb.header_content_rect(ctx_ptr)
+					// Hover вкладки учитывает видимую область: скрытая под краем часть не подсвечивается.
 					tb.tabs[i].hovered = r.contains(event.mouse_x, event.mouse_y)
 						&& vis.intersects(r)
 				}
@@ -896,6 +993,7 @@ pub fn (mut tb TabBox) handle_event(event &GuiEvent, app &App) bool {
 			if !tb.focused {
 				return false
 			}
+			// Ось стрелок зависит от ориентации полосы.
 			prev_key := if tb.is_horizontal() { sdl_k_left } else { sdl_k_up }
 			next_key := if tb.is_horizontal() { sdl_k_right } else { sdl_k_down }
 
@@ -963,6 +1061,10 @@ pub fn (mut tb TabBox) handle_event(event &GuiEvent, app &App) bool {
 
 // Remove tab at index. Adjusts active index. Fires on_close
 // before removal for each tab that is actually closed.
+// Индекс активной вкладки: если закрыта вкладка левее активной - сдвигается вместе с ней
+// (on_change не вызывается, активная та же); если закрыта активная - активной становится
+// следующая на этом месте (или последняя), и on_change срабатывает. Последняя вкладка
+// закрыта - active=0, scroll_offset=0. Содержимое закрытой вкладки НЕ уничтожается.
 pub fn (mut tb TabBox) close_tab(idx int) {
 	if idx < 0 || idx >= tb.tabs.len {
 		return
@@ -988,6 +1090,7 @@ pub fn (mut tb TabBox) close_tab(idx int) {
 }
 
 // Close all tabs.
+// on_close вызывается для каждой вкладки с конца; on_change не вызывается.
 pub fn (mut tb TabBox) close_all_tabs() {
 	for i := tb.tabs.len - 1; i >= 0; i-- {
 		if tb.on_close != unsafe { nil } {
@@ -1000,6 +1103,7 @@ pub fn (mut tb TabBox) close_all_tabs() {
 }
 
 // Close every tab except the one at `keep_idx`.
+// Остаётся одна вкладка, она становится активной (индекс 0), всегда вызывается on_change.
 pub fn (mut tb TabBox) close_other_tabs(keep_idx int) {
 	if keep_idx < 0 || keep_idx >= tb.tabs.len {
 		return
@@ -1019,6 +1123,7 @@ pub fn (mut tb TabBox) close_other_tabs(keep_idx int) {
 }
 
 // Close all tabs with index < idx.
+// Активный индекс сдвигается на число закрытых (с ограничением), on_change вызывается всегда.
 pub fn (mut tb TabBox) close_tabs_before(idx int) {
 	if idx <= 0 {
 		return
@@ -1040,6 +1145,7 @@ pub fn (mut tb TabBox) close_tabs_before(idx int) {
 }
 
 // Close all tabs with index > idx.
+// Отрицательный idx - закрыть все. Если активная вкладка была закрыта, активной становится idx.
 pub fn (mut tb TabBox) close_tabs_after(idx int) {
 	if idx < 0 {
 		tb.close_all_tabs()

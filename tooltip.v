@@ -1,11 +1,31 @@
 module vgui
 
+// Шапка файла.
+// Tooltip - всплывающая подсказка, привязанная к другому виджету (attach). Сам
+// Tooltip не имеет места в раскладке и не рисуется в общем порядке виджетов:
+// его draw() лишь решает, пора ли показывать подсказку, и ставит себя в очередь
+// ctx.pending_tooltips; реальную отрисовку (tooltip_draw) окно делает ПОСЛЕ всех
+// остальных виджетов и оверлеев, чтобы подсказка легла поверх всего
+// (см. sdl3_window.v и PROJECT.md, «Инвалидация и dirty regions»).
+//
+// Состояние показа: наведение на target отслеживается двумя путями -
+// событиями mouse_move (handle_event) и страховочной проверкой позиции мыши из
+// ctx в каждом draw (если событие потерялось). Подсказка появляется через
+// delay_ms после начала наведения; любой клик, колесо или клавиша её скрывают.
+//
+// Константы: tt_pad - внутренний отступ; tt_max_w - максимальная ширина при
+// переносе слов; tt_offset_x/y - смещение окна подсказки от курсора (вниз-вправо).
 const tt_default_delay = u32(600)
 const tt_pad = f32(6)
 const tt_max_w = f32(280)
 const tt_offset_y = f32(16) // below cursor
 const tt_offset_x = f32(4) // slight right offset from cursor
 
+// Tooltip. Нулевой (a == 0) цвет в bg/text_color/border = взять из темы
+// (eff_tooltip_*). target - сырой указатель на виджет-цель (может быть nil до
+// attach(); тогда подсказка не показывается). hover_start - момент (мс SDL_GetTicks)
+// начала наведения, 0 = не наведено. showing - подсказка сейчас показывается.
+// Поле bounds в коде файла не используется.
 @[heap]
 pub struct Tooltip {
 pub mut:
@@ -25,6 +45,7 @@ pub mut:
 	bounds       Rect
 }
 
+// Фабрики: подсказка с задержкой по умолчанию (600 мс) / с заданной.
 pub fn tooltip(text string) &Tooltip {
 	return &Tooltip{
 		text: text
@@ -38,6 +59,9 @@ pub fn tooltip_delayed(text string, delay_ms u32) &Tooltip {
 	}
 }
 
+// Привязывает подсказку к виджету-цели. Подсказка не владеет целью и не следит за её
+// уничтожением: если цель уничтожена раньше, target станет висячим указателем
+// (владелец должен сам разорвать связь/уничтожить подсказку вместе с целью).
 pub fn (mut t Tooltip) attach(target &Widget) {
 	t.target = unsafe { target }
 }
@@ -65,6 +89,9 @@ fn tooltip_get_target_bounds(t &Tooltip) Rect {
 	return get_widget_bounds(t.target)
 }
 
+// Размер окна подсказки (ширина, высота): при wrap = false - одна строка, иначе текст
+// переносится по ширине max_width (минус отступы), а окно сжимается до самой
+// длинной получившейся строки. Пустой текст даёт (0, 0).
 fn tooltip_measure(t &Tooltip, ctx &RenderContext) (f32, f32) {
 	if t.text.len == 0 {
 		return f32(0), f32(0)
@@ -89,6 +116,10 @@ fn tooltip_measure(t &Tooltip, ctx &RenderContext) (f32, f32) {
 	return max_lw + tt_pad * 2, total_h
 }
 
+// Жадный перенос по словам: абзацы делятся по '\n' (пустой абзац сохраняется пустой
+// строкой), внутри абзаца слова добавляются в строку, пока она влезает в max_w.
+// Слово шире max_w не разрезается - оно займёт целую строку и выйдет за пределы
+// ширины.
 fn tooltip_wrap(text string, ctx &RenderContext, font voidptr, max_w f32) []string {
 	paragraphs := text.split('\n')
 	mut result := []string{cap: paragraphs.len * 2}
@@ -116,6 +147,10 @@ fn tooltip_wrap(text string, ctx &RenderContext, font voidptr, max_w f32) []stri
 	return result
 }
 
+// Рисует окно подсказки рядом с курсором (вызывается окном из очереди
+// pending_tooltips). Позиция: справа-снизу от мыши; если не помещается по высоте -
+// над курсором, по ширине - прижимается к правому краю; в любом случае не ближе 2 px
+// к краям экрана. Затем тень (если у темы она включена), фон, рамка и текст.
 fn tooltip_draw(t &Tooltip, mut ctx RenderContext) {
 	if !t.showing || t.text.len == 0 {
 		return
@@ -176,6 +211,14 @@ fn tooltip_draw(t &Tooltip, mut ctx RenderContext) {
 	}
 }
 
+// Вызывается при обходе виджетов в каждом кадре. Не рисует сама, а: (1) гасит
+// состояние, если подсказка скрыта/пуста/без цели; (2) пока идёт задержка, заказывает
+// анимацию (mark_anim) - иначе на статичном кадре таймер не тикал бы; (3) включает
+// showing по истечении delay_ms; (4) страховочно определяет наведение по позиции мыши
+// из ctx; (5) снимает подсказку, если мышь ушла с цели; (6) если showing - ставит себя в
+// ctx.pending_tooltips. Цель с нулевыми bounds считается «не показывать».
+// Замечание: после клика (handle_event сбрасывает target_hover) страховочная проверка
+// в draw снова обнаружит мышь над целью и запустит таймер заново.
 pub fn (mut t Tooltip) draw(mut ctx RenderContext) {
 	if !t.visible || t.text.len == 0 || unsafe { t.target == nil } {
 		t.showing = false
@@ -221,6 +264,10 @@ pub fn (mut t Tooltip) draw(mut ctx RenderContext) {
 	}
 }
 
+// Обновляет состояние наведения: mouse_move начинает отсчёт задержки при входе на
+// цель и скрывает подсказку при выходе; нажатие, колесо и клавиша скрывают подсказку.
+// Событие никогда не поглощается (всегда false) - подсказка не должна перехватывать
+// ввод у виджетов.
 pub fn (mut t Tooltip) handle_event(event &GuiEvent, app &App) bool {
 	if !t.visible || t.text.len == 0 || unsafe { t.target == nil } {
 		t.showing = false

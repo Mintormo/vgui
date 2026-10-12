@@ -4,6 +4,9 @@ module vgui
 // Menu system — MenuBar + ContextMenu
 // ═══════════════════════════════════════════════════════
 
+// MenuItemKind — тип пункта меню: action (обычный пункт с on_click), checkbox
+// (пункт с галочкой и on_toggle), separator (линия-разделитель, не выбирается),
+// submenu (пункт, раскрывающий children во вложенном попапе).
 pub enum MenuItemKind {
 	action
 	checkbox
@@ -11,12 +14,19 @@ pub enum MenuItemKind {
 	submenu
 }
 
+// MenuItem — один пункт меню. Не виджет в смысле раскладки: добавляется во
+// владельца (MenuBar.add_menu, ContextMenu.add, MenuButton.add, MenuItem.add для
+// подменю), а не в контейнер; тег типа нужен для C-ABI (vgui_resolve_widget).
+//
+// Меню общее для MenuBar, ContextMenu и MenuButton: все три рисуют попапы одними
+// и теми же функциями menu_* из этого файла и хранят состояние в MenuState.
 @[heap]
 pub struct MenuItem {
 pub mut:
 	type_tag  int = kind_menu_item // тег типа, см. widget_tag.v
 	text      string
 	icon_path string
+	// текст сочетания клавиш, например 'Ctrl+Shift+S'; и показывается справа в пункте, и разбирается menu_shortcut_matches
 	shortcut  string
 	kind      MenuItemKind = .action
 	enabled   bool         = true
@@ -24,10 +34,12 @@ pub mut:
 	children  []&MenuItem
 	on_click  fn ()     = unsafe { nil }
 	on_toggle fn (bool) = unsafe { nil }
-	hovered   bool
-	sub_open  bool
+	// hovered / sub_open — состояние отрисовки/навигации, меняется самим меню (menu_update_hover, open_submenu); снаружи не трогать
+	hovered  bool
+	sub_open bool
 }
 
+// menu_action создаёт обычный пункт. Действие задаётся полем on_click.
 pub fn menu_action(text string) &MenuItem {
 	return &MenuItem{
 		text: text
@@ -35,6 +47,7 @@ pub fn menu_action(text string) &MenuItem {
 	}
 }
 
+// menu_action_icon — обычный пункт с иконкой слева (icon_path — путь к картинке).
 pub fn menu_action_icon(text string, icon_path string) &MenuItem {
 	return &MenuItem{
 		text:      text
@@ -43,6 +56,7 @@ pub fn menu_action_icon(text string, icon_path string) &MenuItem {
 	}
 }
 
+// menu_checkbox создаёт пункт с галочкой; начальное состояние — checked, смена приходит в on_toggle(bool).
 pub fn menu_checkbox(text string, checked bool) &MenuItem {
 	return &MenuItem{
 		text:    text
@@ -51,12 +65,14 @@ pub fn menu_checkbox(text string, checked bool) &MenuItem {
 	}
 }
 
+// menu_separator создаёт разделитель (высота menu_sep_h, в навигации клавишами пропускается).
 pub fn menu_separator() &MenuItem {
 	return &MenuItem{
 		kind: .separator
 	}
 }
 
+// menu_submenu создаёт пункт-подменю; вложенные пункты добавляются через MenuItem.add.
 pub fn menu_submenu(text string) &MenuItem {
 	return &MenuItem{
 		text: text
@@ -64,10 +80,14 @@ pub fn menu_submenu(text string) &MenuItem {
 	}
 }
 
+// add добавляет дочерний пункт (имеет смысл для kind == .submenu; рекурсия не ограничена).
 pub fn (mut mi MenuItem) add(child &MenuItem) {
 	mi.children << unsafe { child }
 }
 
+// Геометрия попапа меню (логические пиксели, до ui_scale): высота пункта и
+// разделителя, внутренний отступ попапа, размер и ширина колонки иконки/галочки
+// (слева от текста), ширина колонки стрелки подменю, зазор перед шорткатом.
 const menu_item_h = f32(26)
 const menu_sep_h = f32(9)
 const menu_pad = f32(4)
@@ -77,6 +97,11 @@ const menu_arrow_w = f32(16)
 const menu_shortcut_gap = f32(24)
 const menu_check_sz = f32(12)
 
+// menu_popup_size считает размер попапа для items: высота — сумма высот пунктов и
+// разделителей плюс отступы; ширина — колонка иконки + самый широкий текст
+// (+ зазор и самый широкий шорткат, если они есть) + колонка стрелки, если есть
+// подменю, но не меньше 120. Шрифт берётся через get_font_immut
+// (ctx здесь неизменяемый).
 fn menu_popup_size(items []&MenuItem, ctx &RenderContext) Vec2 {
 	font := ctx.get_font_immut(.regular, 0)
 	mut max_text_w := f32(0)
@@ -117,6 +142,9 @@ fn menu_popup_size(items []&MenuItem, ctx &RenderContext) Vec2 {
 	return Vec2{w, total_h}
 }
 
+// menu_adjust_rect сдвигает прямоугольник попапа так, чтобы он помещался в окно
+// (ctx.screen_width/height) с зазором 2 px; приоритет у левого/верхнего края —
+// если попап больше окна, он прижмётся к (2, 2) и обрежется справа/снизу.
 fn menu_adjust_rect(x f32, y f32, w f32, h f32, ctx &RenderContext) Rect {
 	mut rx := x
 	mut ry := y
@@ -135,6 +163,9 @@ fn menu_adjust_rect(x f32, y f32, w f32, h f32, ctx &RenderContext) Rect {
 	return Rect{rx, ry, w, h}
 }
 
+// menu_item_rect возвращает прямоугольник пункта idx в попапе с углом (px, py) и
+// шириной popup_w (разделитель — на всю ширину, обычный пункт — с отступом
+// menu_pad по краям). Пустой Rect, если индекс вне списка.
 fn menu_item_rect(items []&MenuItem, idx int, px f32, py f32, popup_w f32) Rect {
 	mut iy := py + menu_pad
 	for i in 0 .. items.len {
@@ -154,6 +185,8 @@ fn menu_item_rect(items []&MenuItem, idx int, px f32, py f32, popup_w f32) Rect 
 	return Rect{}
 }
 
+// menu_hit_item возвращает индекс пункта под точкой (mx, my) или -1.
+// Разделители не попадаются (их высота пропускается, но не проверяется).
 fn menu_hit_item(items []&MenuItem, mx f32, my f32, px f32, py f32, popup_w f32) int {
 	mut iy := py + menu_pad
 	for i, mi in items {
@@ -170,6 +203,10 @@ fn menu_hit_item(items []&MenuItem, mx f32, my f32, px f32, py f32, popup_w f32)
 	return -1
 }
 
+// menu_draw_popup рисует один уровень меню: тень, фон с рамкой, затем пункты
+// сверху вниз. Отключённый пункт рисуется серым без подсветки и без иконки.
+// Подсвечен hovered-пункт и пункт с открытым подменю (sub_open). Шорткаты
+// выравниваются по общему правому краю sc_right, чтобы колонка была ровной.
 fn menu_draw_popup(items []&MenuItem, popup Rect, mut ctx RenderContext) {
 	rad := ctx.theme.border_radius
 	if ctx.theme.shadow_offset > 0 {
@@ -264,6 +301,7 @@ fn menu_draw_popup(items []&MenuItem, popup Rect, mut ctx RenderContext) {
 	}
 }
 
+// Помощники над списком пунктов. Пункты хранятся как []&MenuItem; мутация идёт через unsafe-копию указателя, потому что элементы массива неизменяемы по правилам V.
 // ─── MenuItem helpers ──────────────────────────────────
 
 fn menu_set_hovered(items []&MenuItem, idx int, val bool) {
@@ -273,6 +311,7 @@ fn menu_set_hovered(items []&MenuItem, idx int, val bool) {
 	}
 }
 
+// menu_clear_all_hover снимает подсветку со всех пунктов списка.
 fn menu_clear_all_hover(items []&MenuItem) {
 	for i in 0 .. items.len {
 		mut mi := unsafe { items[i] }
@@ -280,6 +319,7 @@ fn menu_clear_all_hover(items []&MenuItem) {
 	}
 }
 
+// menu_clear_all_state снимает подсветку и признак открытого подменю (при закрытии уровня).
 fn menu_clear_all_state(items []&MenuItem) {
 	for i in 0 .. items.len {
 		mut mi := unsafe { items[i] }
@@ -309,6 +349,7 @@ fn menu_get_checked(items []&MenuItem, idx int) bool {
 	return false
 }
 
+// menu_update_hover подсвечивает ровно один пункт found_idx (если он включён и не разделитель), у остальных подсветку снимает.
 fn menu_update_hover(items []&MenuItem, found_idx int) {
 	for i in 0 .. items.len {
 		mi := items[i]
@@ -319,6 +360,12 @@ fn menu_update_hover(items []&MenuItem, found_idx int) {
 
 // ─── Shortcut matching (NEW) ───────────────────────────
 
+// menu_shortcut_matches проверяет, соответствует ли key_down-событие строке
+// шортката вида 'Ctrl+Shift+S', 'Alt+F4', 'F5'. Регистр не важен, части делятся
+// по '+'. Модификаторы должны совпадать ТОЧНО (лишний Shift — не совпадение).
+// Одиночный символ сравнивается с keycode как есть (SDL-коды букв и цифр
+// совпадают с ASCII в нижнем регистре); именованные клавиши — через таблицу
+// ниже; неизвестное имя клавиши — не совпадение.
 fn menu_shortcut_matches(shortcut string, event &GuiEvent) bool {
 	if shortcut.len == 0 {
 		return false
@@ -406,6 +453,10 @@ fn menu_shortcut_matches(shortcut string, event &GuiEvent) bool {
 	return event.keycode == expected
 }
 
+// menu_try_shortcut ищет в items (с обходом подменю в глубину) включённый пункт
+// с подходящим шорткатом и выполняет его: у checkbox переключает галочку и зовёт
+// on_toggle, у action зовёт on_click. Возвращает true, если пункт сработал
+// (тогда событие считается обработанным). Зовётся, когда попап закрыт.
 fn menu_try_shortcut(items []&MenuItem, event &GuiEvent) bool {
 	for mi in items {
 		if mi.kind == .separator || !mi.enabled {
@@ -437,6 +488,10 @@ fn menu_try_shortcut(items []&MenuItem, event &GuiEvent) bool {
 
 // ─── Navigate selectable items (NEW) ───────────────────
 
+// menu_next_selectable ищет следующий выбираемый пункт (не разделитель и
+// включённый) от позиции from в направлении dir (+1/-1) с циклическим
+// переходом через края. from = -1 при dir = 1 даёт первый пункт. Возвращает -1,
+// если выбирать нечего.
 fn menu_next_selectable(items []&MenuItem, from int, dir int) int {
 	n := items.len
 	if n == 0 {
@@ -461,6 +516,12 @@ fn menu_next_selectable(items []&MenuItem, from int, dir int) int {
 
 // ─── Activate hovered item (NEW) ───────────────────────
 
+// menu_activate_hovered выполняет пункт idx уровня level (Enter/Space или клик).
+// submenu — раскрывает (меню остаётся открытым); checkbox — переключает галочку,
+// зовёт on_toggle и закрывает меню; action — СНАЧАЛА закрывает меню, потом
+// зовёт on_click (так обработчик, открывающий другой попап, видит уже
+// свободный слот оверлея). Отключённый пункт: возвращает true и
+// ничего не делает. false — только при неверных level/idx.
 fn menu_activate_hovered(mut ms MenuState, level int, idx int, mut ctx RenderContext) bool {
 	if level >= ms.levels.len || idx < 0 || idx >= ms.levels[level].items.len {
 		return false
@@ -491,11 +552,17 @@ fn menu_activate_hovered(mut ms MenuState, level int, idx int, mut ctx RenderCon
 	return true
 }
 
+// Transit zone — защита от «схлопывания» подменю при диагональном движении мыши.
+// Когда курсор едет от пункта-родителя к раскрывшемуся подменю, он на пути
+// пересекает другие пункты родителя, и без защиты подменю закрылось бы. Поэтому
+// mouse_move внутри «коридора» (треугольника от середины края пункта-родителя до
+// ближней стороны подменю + прямоугольник зазора) игнорируется.
 // ─── Transit zone: точная проверка треугольником ───────
 // Проверяет, находится ли мышь в треугольном "коридоре"
 // от правого края parent item к child popup.
 // Это предотвращает закрытие при движении мыши по диагонали.
 
+// point_in_triangle: точка (px, py) внутри (или на границе) треугольника ABC — по знакам трёх векторных произведений (все одного знака => внутри).
 fn point_in_triangle(px f32, py f32, ax f32, ay f32, bx f32, by f32, cx f32, cy f32) bool {
 	d1 := (px - bx) * (ay - by) - (ax - bx) * (py - by)
 	d2 := (px - cx) * (by - cy) - (bx - cx) * (py - cy)
@@ -505,6 +572,11 @@ fn point_in_triangle(px f32, py f32, ax f32, ay f32, bx f32, by f32, cx f32, cy 
 	return !(has_neg && has_pos)
 }
 
+// menu_in_submenu_transit: true, если точка (mx, my) лежит в коридоре перехода от
+// подсвеченного пункта любого уровня к следующему уровню. Подменю может открыться
+// справа или слева (если справа не хватило места) — направление определяется
+// сравнением cp.x и pp.x. v_pad = 12 расширяет коридор по вертикали, gap_pad — по
+// горизонтали, перекрывая 2-пиксельный зазор между попапами.
 fn menu_in_submenu_transit(ms &MenuState, mx f32, my f32) bool {
 	if ms.levels.len < 2 {
 		return false
@@ -572,6 +644,8 @@ fn menu_in_submenu_transit(ms &MenuState, mx f32, my f32) bool {
 // MenuState
 // ═══════════════════════════════════════════════════════
 
+// MenuLevel — один открытый уровень меню (корневой попап или подменю): список
+// пунктов, прямоугольник попапа на экране и индекс подсвеченного пункта (-1 — нет).
 struct MenuLevel {
 mut:
 	items     []&MenuItem
@@ -579,6 +653,11 @@ mut:
 	hover_idx int = -1
 }
 
+// MenuState — состояние открытого меню владельца (MenuBar/ContextMenu/MenuButton).
+// levels — стек открытых уровней (levels[0] — корень, последний — самое глубокое
+// подменю); open — меню показано; bar_active — индекс активного заголовка
+// MenuBar (-1 для остальных). Живёт внутри структуры владельца, поэтому
+// замыкания оверлея держат mut-ссылку на него.
 @[heap]
 struct MenuState {
 mut:
@@ -590,6 +669,9 @@ mut:
 	owner voidptr
 }
 
+// close_all закрывает все уровни, сбрасывает подсветки и снимает оверлей, если
+// он принадлежит owner (clear_overlay сам проверяет владельца, так что вызов на
+// уже вытесненном меню безопасен). Идемпотентна. Кадр не инвалидирует.
 fn (mut ms MenuState) close_all(mut ctx RenderContext) {
 	for lvl in ms.levels {
 		menu_clear_all_state(lvl.items)
@@ -600,6 +682,7 @@ fn (mut ms MenuState) close_all(mut ctx RenderContext) {
 	ctx.clear_overlay(ms.owner)
 }
 
+// close_submenus_from закрывает все уровни глубже level (сам level остаётся) и снимает sub_open с пунктов-родителей.
 fn (mut ms MenuState) close_submenus_from(level int) {
 	for i := ms.levels.len - 1; i > level; i-- {
 		menu_clear_all_state(ms.levels[i].items)
@@ -613,6 +696,10 @@ fn (mut ms MenuState) close_submenus_from(level int) {
 	}
 }
 
+// open_submenu раскрывает подменю пункта item_idx уровня level: помечает пункт
+// sub_open и добавляет новый MenuLevel справа от родителя (если справа не
+// помещается — слева), по вертикали выровненный по пункту. Пустое подменю
+// (children.len == 0) не открывается.
 fn (mut ms MenuState) open_submenu(level int, item_idx int, ctx &RenderContext) {
 	if level >= ms.levels.len {
 		return
@@ -645,6 +732,13 @@ fn (mut ms MenuState) open_submenu(level int, item_idx int, ctx &RenderContext) 
 
 // ─── Install overlay (CHANGED: transit zone + keyboard nav) ─
 
+// menu_install_overlay включает отрисовку и обработку событий уже подготовленного
+// ms.levels через слот оверлея окна (overlay.v): ставит draw-замыкание (рисует все
+// уровни), ev-замыкание (мышь, клавиши, переход в подменю) и close-хук
+// (close_all). ms.owner должен быть выставлен заранее — это ключ слота.
+// Используется ContextMenu; MenuBar и MenuButton содержат собственные копии
+// этого же кода (с добавками: переключение заголовков бара, клик по самой
+// кнопке). События ev в оверлее приходят раньше обычных виджетов окна.
 fn menu_install_overlay(mut ms MenuState, mut ctx RenderContext) {
 	ms.open = true
 
@@ -662,6 +756,8 @@ fn menu_install_overlay(mut ms MenuState, mut ctx RenderContext) {
 			return false
 		}
 
+		// Для колеса позиция курсора берётся из ctx (последняя известная), для
+		// остальных событий — из самого события.
 		mx := if event.typ == .mouse_wheel { ctx.mouse_x } else { event.mouse_x }
 		my := if event.typ == .mouse_wheel { ctx.mouse_y } else { event.mouse_y }
 
@@ -673,6 +769,7 @@ fn menu_install_overlay(mut ms MenuState, mut ctx RenderContext) {
 					return true
 				}
 
+				// Ищем попап под курсором, начиная с самого глубокого уровня (он рисуется поверх).
 				mut in_any_popup := false
 				mut found_level := -1
 				mut found_idx := -1
@@ -687,6 +784,8 @@ fn menu_install_overlay(mut ms MenuState, mut ctx RenderContext) {
 					}
 				}
 
+				// Курсор над попапом: если подсвеченный пункт сменился, уровни глубже закрываются;
+				// пункт-подменю раскрывается сразу при наведении.
 				if in_any_popup {
 					if found_level < ms.levels.len - 1 {
 						current_hover := ms.levels[found_level].hover_idx
@@ -706,6 +805,8 @@ fn menu_install_overlay(mut ms MenuState, mut ctx RenderContext) {
 					return true
 				}
 
+				// Курсор вне всех попапов: подсветка последнего уровня снимается, но меню остаётся
+				// открытым, событие не поглощаем (false).
 				// Mouse is outside everything
 				if ms.levels.len > 0 {
 					last := ms.levels.len - 1
@@ -714,11 +815,15 @@ fn menu_install_overlay(mut ms MenuState, mut ctx RenderContext) {
 				}
 				return false
 			}
+			// Не левая кнопка: закрываем меню и пропускаем событие дальше (false), чтобы,
+			// например, правый клик мог открыть другое контекстное меню.
 			.mouse_down {
 				if event.mouse_btn != .left {
 					ms.close_all(mut ctx)
 					return false
 				}
+				// Клик внутри попапа: по пункту — выполнить; мимо пункта (отступ/разделитель) —
+				// поглотить. Клик вне всех попапов закрывает меню и НЕ поглощается.
 				for li := ms.levels.len - 1; li >= 0; li-- {
 					lvl := ms.levels[li]
 					if lvl.popup.contains(mx, my) {
@@ -733,6 +838,10 @@ fn menu_install_overlay(mut ms MenuState, mut ctx RenderContext) {
 				ms.close_all(mut ctx)
 				return false
 			}
+			// Клавиатура: Esc закрывает самый глубокий уровень (или всё меню), Вверх/Вниз двигают
+			// подсветку по выбираемым пунктам, Вправо раскрывает подменю и подсвечивает его
+			// первый пункт, Влево закрывает подменю, Enter/Space выполняют подсвеченный пункт.
+			// Перечисленные клавиши поглощаются (true); остальные идут дальше.
 			.key_down {
 				match event.keycode {
 					sdl_k_escape {
@@ -825,6 +934,11 @@ fn menu_install_overlay(mut ms MenuState, mut ctx RenderContext) {
 // ContextMenu
 // ═══════════════════════════════════════════════════════
 
+// ContextMenu — контекстное меню по правому клику. Хитбокс — bounds виджета target
+// (attach), а у несвязанного меню — собственный bounds. ВАЖНО: само меню должно
+// быть добавлено в окно через win.add_widget(menu), иначе события к нему не
+// дойдут (draw() у него пустой — рисует оверлей). Шорткаты пунктов работают,
+// пока меню закрыто.
 @[heap]
 pub struct ContextMenu {
 pub mut:
@@ -841,18 +955,22 @@ pub mut:
 	on_open fn (f32, f32) = unsafe { nil }
 }
 
+// context_menu создаёт пустое контекстное меню.
 pub fn context_menu() &ContextMenu {
 	return &ContextMenu{}
 }
 
+// add добавляет пункт верхнего уровня.
 pub fn (mut cm ContextMenu) add(item &MenuItem) {
 	cm.items << unsafe { item }
 }
 
+// attach привязывает меню к виджету: правый клик открывает меню только в его bounds.
 pub fn (mut cm ContextMenu) attach(target &Widget) {
 	cm.target = unsafe { target }
 }
 
+// show открывает меню в точке (x, y), сдвигая его так, чтобы оно поместилось в окно. Пустое меню не открывается. Закрывает ранее открытое меню этого владельца.
 pub fn (mut cm ContextMenu) show(x f32, y f32, mut ctx RenderContext) {
 	if cm.items.len == 0 {
 		return
@@ -868,14 +986,17 @@ pub fn (mut cm ContextMenu) show(x f32, y f32, mut ctx RenderContext) {
 	menu_install_overlay(mut cm.state, mut ctx)
 }
 
+// close закрывает меню (если открыто).
 pub fn (mut cm ContextMenu) close(mut ctx RenderContext) {
 	cm.state.close_all(mut ctx)
 }
 
+// is_open: меню сейчас показано.
 pub fn (cm &ContextMenu) is_open() bool {
 	return cm.state.open
 }
 
+// draw ничего не рисует: попап рисует оверлей окна.
 pub fn (mut cm ContextMenu) draw(mut ctx RenderContext) {
 }
 
@@ -889,6 +1010,7 @@ pub fn (mut cm ContextMenu) draw(mut ctx RenderContext) {
 // единственный источник правды для bounds любого Widget-типа; cm.bounds
 // остаётся только запасным вариантом для nil target (меню, ни к чему
 // не привязанное — попадание по всему cm.bounds осталось намеренным).
+// context_menu_get_target_bounds возвращает область, в которой правый клик открывает меню (подробности — комментарий ниже).
 fn context_menu_get_target_bounds(cm &ContextMenu) Rect {
 	if unsafe { cm.target == nil } {
 		return cm.bounds
@@ -896,6 +1018,9 @@ fn context_menu_get_target_bounds(cm &ContextMenu) Rect {
 	return get_widget_bounds(cm.target)
 }
 
+// handle_event: правый клик в хитбоксе открывает меню (предварительно зовётся
+// on_open с координатами клика); key_down при закрытом меню проверяет шорткаты
+// пунктов. Пока меню открыто, события обрабатывает оверлей, а не этот метод.
 pub fn (mut cm ContextMenu) handle_event(event &GuiEvent, app &App) bool {
 	if !cm.visible || !cm.enabled {
 		return false
@@ -933,6 +1058,7 @@ pub fn (mut cm ContextMenu) handle_event(event &GuiEvent, app &App) bool {
 // MenuBar
 // ═══════════════════════════════════════════════════════
 
+// MenuBarEntry — один заголовок строки меню ('Файл', 'Правка') с его пунктами; hovered — наведение на заголовок.
 struct MenuBarEntry {
 mut:
 	title   string
@@ -940,6 +1066,11 @@ mut:
 	hovered bool
 }
 
+// MenuBar — горизонтальная строка меню (заголовки + выпадающие попапы).
+// Заголовки идут слева направо подряд, ширина = текст + 2*pad. Высота полосы —
+// max(bar_height, bounds.h). Попап рисуется оверлеем окна; пока он открыт,
+// наведение на другой заголовок переключает меню (как в десктопных ОС), а
+// стрелки влево/вправо листают заголовки.
 @[heap]
 pub struct MenuBar {
 pub mut:
@@ -957,10 +1088,12 @@ pub mut:
 	keys_when_hidden bool
 }
 
+// menu_bar создаёт пустую строку меню.
 pub fn menu_bar() &MenuBar {
 	return &MenuBar{}
 }
 
+// add_menu добавляет заголовок title с выпадающим списком items.
 pub fn (mut mb MenuBar) add_menu(title string, items []&MenuItem) {
 	mb.entries << MenuBarEntry{
 		title: title
@@ -987,6 +1120,7 @@ fn (mb &MenuBar) eff_bar_height() f32 {
 	return mb.bar_height
 }
 
+// entry_rect возвращает прямоугольник заголовка idx: ширина по тексту + pad с обеих сторон, высота — eff_bar_height. Пустой Rect, если индекс вне списка. Позиции считаются заново на каждый вызов (кэша нет).
 fn (mb &MenuBar) entry_rect(idx int, ctx &RenderContext) Rect {
 	font := ctx.get_font_immut(.regular, 0)
 	mut x := mb.bounds.x
@@ -1001,6 +1135,7 @@ fn (mb &MenuBar) entry_rect(idx int, ctx &RenderContext) Rect {
 	return Rect{}
 }
 
+// hit_entry возвращает индекс заголовка под точкой или -1.
 fn (mb &MenuBar) hit_entry(mx f32, my f32, ctx &RenderContext) int {
 	bh := mb.eff_bar_height() // ← НОВОЕ
 	if my < mb.bounds.y || my > mb.bounds.y + bh {
@@ -1026,6 +1161,12 @@ fn (mb &MenuBar) all_items() []&MenuItem {
 	return result
 }
 
+// open_entry открывает попап заголовка idx под ним (или переключает на него уже
+// открытое меню): закрывает прежнее, ставит bar_active и уровень 0, устанавливает
+// оверлей. Пустой список пунктов: bar_active ставится, но
+// попап не открывается и меню остаётся закрытым (state.open = false). Замыкания draw/ev — копия логики
+// menu_install_overlay плюс: наведение на другой заголовок переключает меню;
+// клик по заголовку закрывает меню; Влево/Вправо листают заголовки (с зацикливанием).
 fn (mut mb MenuBar) open_entry(idx int, mut ctx RenderContext) {
 	if idx < 0 || idx >= mb.entries.len {
 		return
@@ -1062,6 +1203,8 @@ fn (mut mb MenuBar) open_entry(idx int, mut ctx RenderContext) {
 			return false
 		}
 
+		// Для колеса позиция курсора берётся из ctx (последняя известная), для
+		// остальных событий — из самого события.
 		mx := if event.typ == .mouse_wheel { ctx.mouse_x } else { event.mouse_x }
 		my := if event.typ == .mouse_wheel { ctx.mouse_y } else { event.mouse_y }
 
@@ -1252,6 +1395,7 @@ fn (mut mb MenuBar) open_entry(idx int, mut ctx RenderContext) {
 
 // ─── Drawing ───────────────────────────────────────────
 
+// draw рисует фон полосы с нижней границей, заголовки (активный и наведённый подсвечены) и ничего больше — попапы рисует оверлей.
 pub fn (mut mb MenuBar) draw(mut ctx RenderContext) {
 	if !mb.visible {
 		return
@@ -1289,6 +1433,9 @@ pub fn (mut mb MenuBar) draw(mut ctx RenderContext) {
 
 // ─── Events (CHANGED: added shortcut dispatch) ─────────
 
+// handle_event: при скрытой полосе работают только шорткаты (если keys_when_hidden);
+// иначе — подсветка заголовков по mouse_move, клик по заголовку открывает/закрывает
+// его меню, key_down при закрытом меню проверяет шорткаты всех пунктов.
 pub fn (mut mb MenuBar) handle_event(event &GuiEvent, app &App) bool {
 	if !mb.enabled {
 		return false

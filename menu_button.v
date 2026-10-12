@@ -30,18 +30,29 @@ module vgui
 //   mb.add(sub)
 // ═══════════════════════════════════════════════════════
 
+// MenuButton — «split button»: слева зона действия, справа зона стрелки с выпадающим
+// меню. Использует общую систему меню из menu.v (MenuItem, MenuState, menu_*),
+// но с собственной копией обработчика оверлея (open_menu).
+//
+// Состояния: open — флаг, который ведёт сам виджет (подсветка стрелки, переключение
+// по повторному клику); state.open — флаг системы меню (его читает is_open()).
+// active_idx / active_click — «активное действие», запускаемое кликом по левой зоне;
+// -1 до первого выбора (тогда клик по левой зоне открывает меню).
+// Размер считает measure() в layout_measure.v; фокус — через FocusManager
+// (register_menu_button), Tab/Down/Enter/Space — см. handle_event.
 @[heap]
 pub struct MenuButton {
 pub mut:
-	type_tag      int = kind_menu_button // тег типа, см. widget_tag.v
-	bounds        Rect
-	text          string // current display text (updated on action selection)
-	placeholder   string // shown when no action selected
-	items         []&MenuItem
-	style         ButtonStyle = .normal
-	visible       bool        = true
-	enabled       bool        = true
-	hovered       bool // mouse over the widget as a whole
+	type_tag    int = kind_menu_button // тег типа, см. widget_tag.v
+	bounds      Rect
+	text        string // current display text (updated on action selection)
+	placeholder string // shown when no action selected
+	items       []&MenuItem
+	style       ButtonStyle = .normal
+	visible     bool        = true
+	enabled     bool        = true
+	hovered     bool // mouse over the widget as a whole
+	// hovered_arrow — курсор над зоной стрелки (подмножество hovered); pressed / pressed_arrow — какая зона зажата (клик срабатывает по отпусканию)
 	hovered_arrow bool // mouse over the arrow zone specifically
 	pressed       bool // action zone pressed
 	pressed_arrow bool // arrow zone pressed
@@ -54,11 +65,14 @@ pub mut:
 	font_style    FontStyle = .regular
 	font_size     int
 	focus_group   int
-	no_focus      bool
-	pad           f32 = 6
-	arrow_w       f32 = 24
+	// no_focus: не участвовать в Tab-обходе и не реагировать на клавиатуру
+	no_focus bool
+	pad      f32 = 6
+	// arrow_w — ширина правой зоны со стрелкой, pad — внутренний отступ слева
+	arrow_w f32 = 24
 	// Active action: the item the main button runs when clicked.
 	// -1 means nothing selected yet (main click opens the menu).
+	// active_idx — «плоский» индекс (без разделителей) выбранного действия в items; -1, пока ничего не выбрано
 	active_idx   int   = -1
 	active_click fn () = unsafe { nil }
 	// Animation
@@ -67,6 +81,7 @@ pub mut:
 	press_anim       Anim = anim_smooth(anim_tau_press)
 	focus_anim       Anim = anim_smooth(anim_tau_focus)
 	// Menu state (reuses MenuState from menu.v)
+	// state.levels / state.open — открытые уровни меню; owner = адрес виджета (ключ слота оверлея)
 	state MenuState
 	// Callbacks
 	on_select fn (int, string) = unsafe { nil } // fired when an action item is picked or re-run
@@ -75,6 +90,7 @@ pub mut:
 
 // ─── Constructors ──────────────────────────────────────
 
+// menu_button создаёт кнопку; placeholder показывается серым, пока действие не выбрано.
 pub fn menu_button(placeholder string) &MenuButton {
 	return &MenuButton{
 		placeholder: placeholder
@@ -82,6 +98,7 @@ pub fn menu_button(placeholder string) &MenuButton {
 	}
 }
 
+// menu_button_with_icon — то же, с иконкой слева от текста (icon_path).
 pub fn menu_button_with_icon(placeholder string, icon_path string) &MenuButton {
 	return &MenuButton{
 		placeholder: placeholder
@@ -92,18 +109,22 @@ pub fn menu_button_with_icon(placeholder string, icon_path string) &MenuButton {
 
 // ─── Public API ────────────────────────────────────────
 
+// add добавляет пункт в корень выпадающего меню (любой MenuItem, в т.ч. подменю).
 pub fn (mut mb MenuButton) add(item &MenuItem) {
 	mb.items << unsafe { item }
 }
 
+// add_separator добавляет разделитель.
 pub fn (mut mb MenuButton) add_separator() {
 	mb.items << menu_separator()
 }
 
+// is_open: выпадающее меню сейчас показано (по state.open).
 pub fn (mb &MenuButton) is_open() bool {
 	return mb.state.open
 }
 
+// set_text меняет отображаемый текст кнопки, не трогая активное действие. Кадр не инвалидирует.
 pub fn (mut mb MenuButton) set_text(text string) {
 	mb.text = text
 }
@@ -114,6 +135,7 @@ pub fn (mb &MenuButton) get_text() string {
 
 // ─── Internal helpers ──────────────────────────────────
 
+// eff_radius: radius < 0 означает «радиус темы».
 fn (mb &MenuButton) eff_radius(ctx &RenderContext) f32 {
 	if mb.radius >= 0 {
 		return mb.radius
@@ -121,6 +143,7 @@ fn (mb &MenuButton) eff_radius(ctx &RenderContext) f32 {
 	return ctx.theme.border_radius
 }
 
+// display_text: текст кнопки или placeholder, если текст пуст.
 fn (mb &MenuButton) display_text() string {
 	return if mb.text.len > 0 { mb.text } else { mb.placeholder }
 }
@@ -151,15 +174,23 @@ fn (mut mb MenuButton) run_active() {
 	}
 }
 
+// close_menu закрывает меню (снимает оверлей через state.close_all) и сбрасывает open.
 fn (mut mb MenuButton) close_menu(mut ctx RenderContext) {
 	mb.state.close_all(mut ctx)
 	mb.open = false
 }
 
+// open_menu открывает выпадающее меню под кнопкой (шире кнопки не уже; если снизу
+// нет места — над кнопкой) и ставит оверлей окна. Пустой список items — ничего не
+// делает. Старое состояние меню предварительно закрывается. Замыкания draw/ev —
+// копия menu_install_overlay (menu.v) с отличием: наведение на саму кнопку не
+// закрывает меню, а клик по ней закрывает; при выборе action-пункта он становится
+// активным действием кнопки.
 fn (mut mb MenuButton) open_menu(mut ctx RenderContext) {
 	if mb.items.len == 0 {
 		return
 	}
+	// owner — адрес виджета: по нему слот оверлея окна узнаёт, чей попап стоит в слоте (overlay.v).
 	mb.state.owner = voidptr(&mb)
 	mb.state.close_all(mut ctx)
 
@@ -180,6 +211,7 @@ fn (mut mb MenuButton) open_menu(mut ctx RenderContext) {
 		items: mb.items
 		popup: popup
 	}
+	// Далее меню ставится в слот оверлея окна; события оверлея приходят раньше обычных виджетов.
 	mb.open = true
 
 	// Install overlay — reuse menu system's overlay with custom close hook
@@ -199,6 +231,8 @@ fn (mut mb MenuButton) open_menu(mut ctx RenderContext) {
 			return false
 		}
 
+		// Для колеса позиция курсора берётся из ctx (последняя известная), для
+		// остальных событий — из самого события.
 		mx := if event.typ == .mouse_wheel { ctx.mouse_x } else { event.mouse_x }
 		my := if event.typ == .mouse_wheel { ctx.mouse_y } else { event.mouse_y }
 
@@ -403,6 +437,10 @@ fn (mut mb MenuButton) open_menu(mut ctx RenderContext) {
 
 // ─── Drawing ───────────────────────────────────────────
 
+// draw: регистрирует кнопку в фокус-учёте, шагает четыре Anim (hover действия,
+// hover стрелки, нажатие, фокус), рисует фон, подсветку каждой зоны (с clip-ом по
+// зоне, чтобы сохранить скруглённые углы), рамку, кольцо фокуса, разделитель,
+// иконку + текст и стрелку (вверх, когда меню открыто). Сам попап рисует оверлей.
 pub fn (mut mb MenuButton) draw(mut ctx RenderContext) {
 	if !mb.visible {
 		return
@@ -557,6 +595,11 @@ pub fn (mut mb MenuButton) draw(mut ctx RenderContext) {
 
 // ─── Events ────────────────────────────────────────────
 
+// handle_event: наведение считает зоны (действие/стрелка); нажатие запоминает зону,
+// действие срабатывает по отпусканию над той же зоной (как у Button). Стрелка
+// переключает меню; левая зона запускает активное действие либо, если ничего не
+// выбрано, открывает меню. С клавиатуры (у сфокусированной кнопки): Down открывает
+// меню, Enter/Space — как клик по левой зоне, Tab — следующий фокус.
 pub fn (mut mb MenuButton) handle_event(event &GuiEvent, app &App) bool {
 	if !mb.visible || !mb.enabled {
 		return false
