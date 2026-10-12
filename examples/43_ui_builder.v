@@ -1,5 +1,10 @@
 module main
 
+// Пример 43. UI Builder: интерфейс из YAML-описания (load_ui_from_string) с привязкой колбэков по именам (UiCallbacks) и доступом к виджетам по id.
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/43_ui_builder.v
+
 import vgui
 
 // Декларативное описание интерфейса на YAML. Виджеты, их свойства и
@@ -74,7 +79,9 @@ fn (s &BuilderState) set_status(text string) {
 }
 
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'UI Builder - demo')!
 
 	mut state := &BuilderState{
@@ -107,7 +114,9 @@ fn main() {
 	state.tree = tree
 
 	win.add_ui_tree(&tree)
+	// Логический масштаб интерфейса (шрифты, отступы, размеры) поверх DPI-масштаба ОС.
 	win.set_ui_scale(1.25)
+	// Регистрируем окно в App; app.run() блокирует до закрытия всех окон.
 	app.add_window(win)
 	app.run()
 }

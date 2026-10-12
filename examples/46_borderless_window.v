@@ -1,5 +1,10 @@
 module main
 
+// Пример 46. Безрамочное окно со своим заголовком на WindowTitleDrag: перетаскивание, разворот двойным кликом, кнопки управления.
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/46_borderless_window.v
+
 import vgui
 
 // Состояние «развёрнуто/восстановлено» для кнопки разворота.
@@ -9,7 +14,9 @@ mut:
 }
 
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(
 		title:      'Borderless - demo'
 		min_width:  320
@@ -81,9 +88,11 @@ fn main() {
 	root.add(titlebar)
 	root.add(body, flex: 1.0)
 
+	// Корень дерева виджетов окна; всё остальное вложено в него.
 	win.add_widget(root)
 	// Убираем системную рамку и включаем resize за края.
 	win.set_borderless(true)
+	// Регистрируем окно в App; app.run() блокирует до закрытия всех окон.
 	app.add_window(win)
 	app.run()
 }

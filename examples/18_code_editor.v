@@ -1,5 +1,10 @@
 module main
 
+// Пример 18. CodeEditor: редактор кода с номерами строк, выделением, undo/redo и подсветкой синтаксиса V.
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/18_code_editor.v
+
 import vgui
 
 const sample_code = 'module main
@@ -14,7 +19,9 @@ fn main() {
 '
 
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'CodeEditor - demo')!
 
 	mut status := vgui.label('Строк: -')
@@ -34,6 +41,7 @@ fn main() {
 		status.text = 'Строк: ${ed.get_line_count()}'
 	}
 
+	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(8)
@@ -41,8 +49,11 @@ fn main() {
 	root.add(ed, flex: 1)
 	root.add(b_get)
 
+	// Корень дерева виджетов окна; всё остальное вложено в него.
 	win.add_widget(root)
+	// Логический масштаб интерфейса (шрифты, отступы, размеры) поверх DPI-масштаба ОС.
 	win.set_ui_scale(1.25)
+	// Регистрируем окно в App; app.run() блокирует до закрытия всех окон.
 	app.add_window(win)
 	app.run()
 }

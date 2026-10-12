@@ -1,10 +1,17 @@
 module main
 
+// Пример 15. ImageView: показ картинки из файла с режимом масштабирования .fit.
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/15_image_view.v
+
 import os
 import vgui
 
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'ImageView - demo')!
 
 	// Путь к картинке вычисляем относительно исходника, чтобы пример
@@ -39,6 +46,7 @@ fn main() {
 	row.add(b_out, flex: 1)
 	row.add(b_reset, flex: 1)
 
+	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(8)
@@ -46,8 +54,11 @@ fn main() {
 	root.add(iv, flex: 1)
 	root.add(row)
 
+	// Корень дерева виджетов окна; всё остальное вложено в него.
 	win.add_widget(root)
+	// Логический масштаб интерфейса (шрифты, отступы, размеры) поверх DPI-масштаба ОС.
 	win.set_ui_scale(1.25)
+	// Регистрируем окно в App; app.run() блокирует до закрытия всех окон.
 	app.add_window(win)
 	app.run()
 }

@@ -6,7 +6,33 @@ import os
 // YAML-like UI builder — loads widget trees from .yaml files
 // Uses a built-in minimal YAML parser (V has no standard YAML lib)
 // ═══════════════════════════════════════════════════════
+//
+// Декларативный конструктор интерфейса: дерево виджетов описывается текстом
+// (YAML-подобным), а имена обработчиков в нём (`on_click: save`) связываются с
+// V-функциями через UiCallbacks. Файл состоит из четырёх частей:
+//
+//   1. Публичные типы: HotkeyBinding, UiCallbacks (реестры обработчиков по
+//      именам), UiTree (результат: корень, виджеты по id, горячие клавиши) и
+//      геттеры UiTree.get_<виджет>(id).
+//   2. Мини-парсер YAML: yaml_parse_lines -> YLine -> YParser -> дерево YNode.
+//      Поддерживается только подмножество YAML: отступы, `ключ: значение`,
+//      списки `- ...`, скаляры в кавычках; якорей, многострочных скаляров,
+//      flow-стиля ({...}, [...]) и комментариев в конце строки НЕТ.
+//   3. YamlBuilder: обход YNode и создание виджетов (build_<тип>); поле `type`
+//      выбирает тип, остальные ключи - свойства. Незаданное свойство остаётся
+//      значением по умолчанию самого виджета (проверка `> 0` / `.len > 0`).
+//   4. Публичный API: load_ui_from_string / load_ui_from_file и удобные
+//      add_ui_tree / apply_hotkeys для окна, диалога, VBox/HBox и App.
+//
+// Поток данных: текст -> yaml_parse -> YNode -> YamlBuilder.build_widget ->
+// UiTree.root -> window.add_ui_tree(tree). Пример - examples/43_ui_builder.v.
+//
+// Ошибки в YAML молчаливы: неизвестный `type` превращается в Spacer, неизвестное
+// имя обработчика просто не привязывается (разбор не падает). Исключение -
+// корень документа не map и нечитаемый файл: load_ui_* вернут error.
 
+// HotkeyBinding - пара «сочетание клавиш -> обработчик», прочитанная из секции
+// `hotkeys:` YAML. Применяется через Window.apply_hotkeys / App.apply_hotkeys.
 pub struct HotkeyBinding {
 pub:
 	shortcut string
@@ -14,7 +40,24 @@ pub:
 }
 
 // ─── Callback registry ─────────────────────────────────
+// Методы on_<вид>(name, handler) ниже просто кладут обработчик в
+// соответствующую карту под именем name; повторная регистрация имени
+// перезаписывает прежний обработчик.
 
+// UiCallbacks - реестр обработчиков, на которые YAML ссылается по имени
+// (`on_click: save` -> click_handlers['save']). Заполняется ДО загрузки YAML:
+// builder берёт обработчик в момент создания виджета и сохраняет его в поле
+// самого виджета, поэтому регистрация после load_ui_* уже не подействует.
+// Какая карта используется, зависит от ключа и типа виджета, например:
+//   click_handlers       - on_click кнопки, пункта меню;
+//   change_bool_handlers - on_toggle кнопки/пункта меню, on_change чекбокса,
+//                          радиокнопки и переключателя;
+//   change_str_handlers  - on_change TextInput;
+//   change_idx_handlers  - on_change ComboBox/TabBox (индекс, текст);
+//   change_f32_handlers  - on_change Slider; change_int_handlers - SpinBox;
+//   submit_handlers      - on_submit TextInput; select_handlers - ListBox,
+//                          Breadcrumbs (on_click); dbl_click_handlers - ListBox;
+//   hotkey_handlers      - on_press из секции hotkeys.
 pub struct UiCallbacks {
 pub mut:
 	click_handlers       map[string]fn ()
@@ -37,6 +80,7 @@ pub fn (mut cb UiCallbacks) on_change_int(name string, handler fn (int)) {
 	cb.change_int_handlers[name] = handler
 }
 
+// ui_callbacks создаёт пустой реестр обработчиков.
 pub fn ui_callbacks() UiCallbacks {
 	return UiCallbacks{}
 }
@@ -75,6 +119,13 @@ pub fn (mut cb UiCallbacks) on_hotkey(name string, handler fn ()) {
 
 // ─── Built result ──────────────────────────────────────
 
+// UiTree - результат загрузки YAML.
+//   root    - корень дерева виджетов (добавляется в окно через add_ui_tree);
+//   widgets - все виджеты (и MenuItem/TreeNode), у которых в YAML есть `id`,
+//             как сырые voidptr; типизированно достаются через get_<виджет>;
+//   flex    - flex корневого узла YAML, нужен VBox/HBox.add_ui_tree;
+//   hotkeys - привязки из секции `hotkeys:`.
+// Виджеты принадлежит дереву: UiTree должен жить, пока они нужны.
 pub struct UiTree {
 pub mut:
 	root    &Widget = unsafe { nil }
@@ -85,6 +136,11 @@ pub mut:
 	hotkeys []HotkeyBinding
 }
 
+// get_<виджет>(id) - типизированный доступ к виджету по id из YAML. Если id
+// нет в YAML, возвращается nil-указатель (проверяйте `unsafe { w != nil }`).
+// ВНИМАНИЕ: проверки типа нет - приведение voidptr к &T слепое (тег типа
+// widget_tag.v здесь не сверяется), поэтому id должен принадлежать виджету
+// именно запрошенного типа, иначе поведение не определено.
 pub fn (t &UiTree) get_breadcrumbs(id string) &Breadcrumbs {
 	p := t.widgets[id] or { return unsafe { &Breadcrumbs(nil) } }
 	return unsafe { &Breadcrumbs(p) }
@@ -200,6 +256,12 @@ pub fn (t &UiTree) get_image_view(id string) &ImageView {
 // ═══════════════════════════════════════════════════════
 
 // YNode represents a YAML node: scalar, map, or list
+//
+// Узел YAML-дерева. Вид определяется по заполненности полей (is_scalar /
+// is_map / is_list), отдельного тега нет. Map хранится двумя параллельными
+// срезами (map_keys[i] <-> map_values[i]) - порядок ключей сохраняется,
+// дубликаты ключей не отсекаются (get вернёт первый). Пустой узел YNode{}
+// одновременно «скаляр с пустой строкой» - им get() отвечает на отсутствующий ключ.
 struct YNode {
 mut:
 	// Scalar value (leaf)
@@ -223,6 +285,7 @@ fn (n &YNode) is_list() bool {
 	return n.list.len > 0
 }
 
+// get возвращает значение ключа map-узла или пустой YNode{}, если ключа нет.
 fn (n &YNode) get(key string) YNode {
 	for i, k in n.map_keys {
 		if k == key {
@@ -232,11 +295,13 @@ fn (n &YNode) get(key string) YNode {
 	return YNode{}
 }
 
+// get_str - скалярное значение ключа ('' если ключа нет или это не скаляр).
 fn (n &YNode) get_str(key string) string {
 	child := n.get(key)
 	return child.val
 }
 
+// has - есть ли ключ в map (отличает «ключ не задан» от «задан пустым»).
 fn (n &YNode) has(key string) bool {
 	for k in n.map_keys {
 		if k == key {
@@ -248,6 +313,9 @@ fn (n &YNode) has(key string) bool {
 
 // ─── YAML line representation ──────────────────────────
 
+// YLine - одна значимая строка YAML после лексического разбора:
+// отступ, признак элемента списка (`- `), ключ и значение (оба могут быть пустыми).
+// raw хранится для отладки; парсер её не читает.
 struct YLine {
 	indent       int
 	raw          string
@@ -256,6 +324,8 @@ struct YLine {
 	value        string
 }
 
+// yaml_count_indent считает отступ строки: пробел = 1, таб = 2. Таб - не
+// «настоящий» YAML (там табы запрещены), здесь он терпится как два пробела.
 fn yaml_count_indent(line string) int {
 	mut n := 0
 	for ch in line.bytes() {
@@ -270,6 +340,8 @@ fn yaml_count_indent(line string) int {
 	return n
 }
 
+// yaml_strip_quotes обрезает пробелы и одну пару внешних кавычек ('...' или "...").
+// Экранирование внутри кавычек не обрабатывается: \" остаётся как есть.
 fn yaml_strip_quotes(s string) string {
 	t := s.trim_space()
 	if t.len >= 2 {
@@ -280,6 +352,11 @@ fn yaml_strip_quotes(s string) string {
 	return t
 }
 
+// yaml_parse_lines - лексер: режет текст на YLine. Пустые строки и строки,
+// начинающиеся с `#`, выбрасываются; остальное делится на «- » / ключ / значение.
+// Ключом считается всё до ПЕРВОГО двоеточия в строке (`colon > 0`), поэтому
+// значения с двоеточием (`time: 12:30`) работают, а ключи с двоеточием - нет.
+// Строка без двоеточия - скаляр (элемент `- value` или продолжение).
 fn yaml_parse_lines(content string) []YLine {
 	raw_lines := content.split('\n')
 	mut result := []YLine{cap: raw_lines.len}
@@ -324,12 +401,17 @@ fn yaml_parse_lines(content string) []YLine {
 
 // ─── Recursive YAML tree builder ───────────────────────
 
+// YParser - рекурсивный разбор плоского списка YLine в дерево YNode.
+// pos - индекс следующей непрочитанной строки; методы parse_* двигают его
+// вперёд. Структура блоков определяется только по отступам строк.
 struct YParser {
 mut:
 	lines []YLine
 	pos   int
 }
 
+// parse_value разбирает блок, начинающийся с текущей строки, и выбирает вид
+// узла по ней: `- ...` -> список, строка с ключом -> map, иначе скаляр.
 fn (mut p YParser) parse_value(parent_indent int) YNode {
 	if p.pos >= p.lines.len {
 		return YNode{}
@@ -353,6 +435,11 @@ fn (mut p YParser) parse_value(parent_indent int) YNode {
 	}
 }
 
+// parse_map читает пары `ключ: значение` с отступом min_indent. Если после
+// `ключ:` значения нет, а следующая строка имеет больший отступ - это вложенный
+// блок (parse_value), иначе значение пустое. Выход из цикла: строка с меньшим
+// отступом, элемент списка на нашем уровне (он принадлежит родителю-списку)
+// или более глубокая строка после первого ключа (её уже разобрал вложенный вызов).
 fn (mut p YParser) parse_map(min_indent int) YNode {
 	mut node := YNode{}
 
@@ -397,6 +484,11 @@ fn (mut p YParser) parse_map(min_indent int) YNode {
 	return node
 }
 
+// parse_list читает элементы списка. Элемент `- key: val` - начало map-элемента:
+// первая пара берётся из самой строки со «-», а остальные ключи этого map
+// собираются из следующих строк с БОЛЬШИМ отступом (внутренний цикл ниже).
+// Элемент `- scalar` даёт скалярный узел. Пустой элемент `-` без значения
+// пропускается (в список не попадает).
 fn (mut p YParser) parse_list(min_indent int) YNode {
 	mut node := YNode{}
 
@@ -469,6 +561,8 @@ fn (mut p YParser) parse_list(min_indent int) YNode {
 	return node
 }
 
+// yaml_parse - точка входа парсера: возвращает корневой узел или пустой YNode{},
+// если в тексте нет значимых строк. Корень разбирается по отступу первой строки.
 fn yaml_parse(content string) YNode {
 	lines := yaml_parse_lines(content)
 	if lines.len == 0 {
@@ -487,6 +581,10 @@ fn yaml_parse(content string) YNode {
 
 // ─── Parse helpers ─────────────────────────────────────
 
+// vui_parse_color разбирает цвет из YAML: `#RRGGBB` (alpha = 255) или
+// `#RRGGBBAA` (`#` необязателен). Любая другая длина, в т.ч. пустая строка,
+// даёт полностью прозрачный чёрный Color{0,0,0,0}. Неверные hex-цифры
+// дают 0 в своём разряде (см. hex_to_u64), ошибки не сообщаются.
 fn vui_parse_color(s string) Color {
 	if s.len == 0 {
 		return Color{0, 0, 0, 0}
@@ -513,6 +611,7 @@ fn vui_parse_color(s string) Color {
 	return Color{0, 0, 0, 0}
 }
 
+// hex_to_u64 - ручной разбор hex-строки; недопустимый символ считается нулевой цифрой.
 fn hex_to_u64(s string) u64 {
 	mut r := u64(0)
 	for ch in s.bytes() {
@@ -529,6 +628,10 @@ fn hex_to_u64(s string) u64 {
 	return r
 }
 
+// yn_* - типизированное чтение свойства узла n по ключу key. Отсутствующий
+// ключ даёт нулевое значение типа (0 / '') или def у yn_bool, поэтому
+// «не задано» и «задано нулём» различимы только через n.has(key).
+// yn_bool: true для 'true' / '1' / 'yes', всё остальное (даже 'on') - false.
 fn yn_str(n &YNode, key string) string {
 	return n.get_str(key)
 }
@@ -557,6 +660,8 @@ fn yn_bool(n &YNode, key string, def bool) bool {
 	return s == 'true' || s == '1' || s == 'yes'
 }
 
+// yn_items читает список строк: YAML-список (`items:` + `- a`) либо
+// строку через запятую (`items: a,b,c`; пробелы вокруг элементов не режутся).
 fn yn_items(n &YNode, key string) []string {
 	child := n.get(key)
 	if child.is_list() {
@@ -574,6 +679,8 @@ fn yn_items(n &YNode, key string) []string {
 	return s.split(',')
 }
 
+// vui_parse_*: преобразование строки из YAML в enum. Неизвестное значение
+// молча даёт значение по умолчанию (regular / left / top / normal).
 fn vui_parse_font_style(s string) FontStyle {
 	return match s {
 		'bold' { FontStyle.bold }
@@ -614,6 +721,9 @@ fn vui_parse_button_style(s string) ButtonStyle {
 
 // ─── VuiChild ──────────────────────────────────────────
 
+// VuiChild - построенный виджет вместе с параметрами раскладки, которые
+// YAML задаёт на самом узле (flex/min/max/align). Родитель-контейнер
+// применяет их при добавлении ребёнка (vui_child_params).
 struct VuiChild {
 mut:
 	widget &Widget = unsafe { nil }
@@ -638,8 +748,9 @@ fn vui_parse_cross_align(s string) CrossAlign {
 	}
 }
 
-// vui_add_child добавляет ребёнка в box-контейнер с учётом
-// его параметров раскладки. Общая часть build_vbox/build_hbox.
+// vui_child_params переводит параметры ребёнка в LayoutParams для box.add().
+// Общая часть build_vbox/build_hbox. max == 0 в YAML значит «без ограничения»
+// и превращается в size_unbounded.
 fn vui_child_params(child VuiChild) LayoutParams {
 	return LayoutParams{
 		flex:  child.flex
@@ -651,12 +762,16 @@ fn vui_child_params(child VuiChild) LayoutParams {
 
 // ─── Builder ───────────────────────────────────────────
 
+// YamlBuilder - состояние одной загрузки: cb - реестр обработчиков (только
+// чтение), tree - накапливаемый результат (в первую очередь карта id -> виджет).
 struct YamlBuilder {
 mut:
 	cb   &UiCallbacks
 	tree UiTree
 }
 
+// build_widget строит виджет по узлу n и читает параметры раскладки
+// flex/min/max/align, общие для любого типа (имеют смысл, если родитель - box).
 fn (mut b YamlBuilder) build_widget(n &YNode) VuiChild {
 	wtype := yn_str(n, 'type')
 	flex := yn_f32(n, 'flex')
@@ -675,6 +790,12 @@ fn (mut b YamlBuilder) build_widget(n &YNode) VuiChild {
 	}
 }
 
+// build_widget_by_type - диспетчер по полю `type`. Контейнеры, spacer,
+// separator и icon доступны всегда; остальные виджеты - только если включены
+// в сборку (has_<виджет>() из features.v). Неизвестный или выключенный тип
+// даёт Spacer, чтобы разметка не ломала раскладку.
+// Не все виджеты библиотеки умеют строиться из YAML: нет, например, Grid,
+// Table, Calendar, Canvas.
 fn (mut b YamlBuilder) build_widget_by_type(wtype string, n &YNode) &Widget {
 	// Core containers (always available)
 	match wtype {
@@ -775,6 +896,8 @@ fn (mut b YamlBuilder) build_widget_by_type(wtype string, n &YNode) &Widget {
 	return create_spacer()
 }
 
+// build_children строит всех детей из списка `children:` узла n (в порядке
+// записи); если ключа нет или это не список - пустой срез.
 fn (mut b YamlBuilder) build_children(n &YNode) []VuiChild {
 	children_node := n.get('children')
 	if !children_node.is_list() {
@@ -787,6 +910,8 @@ fn (mut b YamlBuilder) build_children(n &YNode) []VuiChild {
 	return result
 }
 
+// reg запоминает виджет в tree.widgets под его `id` (если id задан).
+// Повторный id перезаписывает предыдущий виджет без предупреждения.
 fn (mut b YamlBuilder) reg(n &YNode, ptr voidptr) {
 	id := yn_str(n, 'id')
 	if id.len > 0 {
@@ -795,6 +920,14 @@ fn (mut b YamlBuilder) reg(n &YNode, ptr voidptr) {
 }
 
 // ─── Widget builders ───────────────────────────────────
+// build_<виджет>(n) - единая схема: создать виджет фабрикой, перенести из YAML
+// заданные свойства (числовые, как правило, - только если > 0, строки и цвета - только если
+// непустые, чтобы не затирать значения по умолчанию; флаги visible/enabled -
+// по умолчанию true), привязать обработчики из UiCallbacks по имени
+// (`h != nil` - неизвестное имя игнорируется), зарегистрировать id через reg
+// и вернуть виджет. Контейнеры дополнительно строят детей рекурсивно.
+// Ключи YAML совпадают с именами полей виджета (см. его struct), поэтому
+// каждый ключ ниже отдельно не комментируется.
 
 fn (mut b YamlBuilder) build_breadcrumbs(n &YNode) &Widget {
 	mut bc := breadcrumbs()
@@ -1180,6 +1313,10 @@ fn (mut b YamlBuilder) build_list_box(n &YNode) &Widget {
 	return lb
 }
 
+// build_vbox/build_hbox: ключи spacing, padding, bg, cross_align и `children:`.
+// Контейнер регистрируется ДО построения детей (id родителя не зависит от
+// детей); параметры раскладки каждого ребёнка (flex/min/max/align) передаются
+// в v.add(...) через vui_child_params.
 fn (mut b YamlBuilder) build_vbox(n &YNode) &Widget {
 	mut v := create_vbox_fill()
 	s := yn_f32(n, 'spacing')
@@ -1232,6 +1369,7 @@ fn (mut b YamlBuilder) build_hbox(n &YNode) &Widget {
 	return h
 }
 
+// build_panel: ключи bg, border, radius, pad, visible и ребёнок (см. ниже).
 fn (mut b YamlBuilder) build_panel(n &YNode) &Widget {
 	mut pan := panel()
 	bg := yn_str(n, 'bg')
@@ -1252,7 +1390,8 @@ fn (mut b YamlBuilder) build_panel(n &YNode) &Widget {
 	}
 	pan.visible = yn_bool(n, 'visible', true)
 	b.reg(n, voidptr(pan))
-	// Panel takes a single child
+	// Panel держит ровно одного ребёнка: либо ключ `child:`, либо первый
+	// элемент `children:` (остальные игнорируются).
 	child_node := n.get('child')
 	if child_node.is_map() {
 		ch := b.build_widget(&child_node)
@@ -1266,6 +1405,8 @@ fn (mut b YamlBuilder) build_panel(n &YNode) &Widget {
 	return pan
 }
 
+// build_scroll_box/build_stack: дети из `children:` добавляются без параметров
+// раскладки (flex/min/max/align у них игнорируются).
 fn (mut b YamlBuilder) build_scroll_box(n &YNode) &Widget {
 	mut sb := scroll_box(yn_f32(n, 'content_h'))
 	ss := yn_f32(n, 'scroll_speed')
@@ -1304,6 +1445,10 @@ fn (mut b YamlBuilder) build_stack(n &YNode) &Widget {
 	return st
 }
 
+// build_tab_box: положение (`pos`, либо `dir: vertical` = слева),
+// режим строки вкладок (`layout`), направление текста и список `tabs:`
+// (title, icon, child). Вкладка без `child:` получает Spacer. Вариант
+// добавления зависит от того, заданы ли title и icon.
 fn (mut b YamlBuilder) build_tab_box(n &YNode) &Widget {
 	mut tb := tab_box()
 	if yn_str(n, 'dir') == 'vertical' {
@@ -1402,6 +1547,10 @@ fn (mut b YamlBuilder) build_tab_box(n &YNode) &Widget {
 	return tb
 }
 
+// build_menu_items читает `items:` меню или подменю. Вид пункта задаёт `kind`:
+// separator (допустимо и `type: separator`), checkbox, submenu; всё остальное -
+// обычное действие (action). Подменю строится рекурсивно. Пункты - не Widget,
+// но id регистрируется так же (в tree.widgets), чтобы получить get_menu_item(id).
 fn (mut b YamlBuilder) build_menu_items(n &YNode) []&MenuItem {
 	items_node := n.get('items')
 	if !items_node.is_list() {
@@ -1488,6 +1637,7 @@ fn (mut b YamlBuilder) build_menu_items(n &YNode) []&MenuItem {
 	return result
 }
 
+// build_menu_bar: список `menus:` с title и `items:` каждого меню.
 fn (mut b YamlBuilder) build_menu_bar(n &YNode) &Widget {
 	mut mb := menu_bar()
 	mb.visible = yn_bool(n, 'visible', true)
@@ -1515,6 +1665,9 @@ fn (mut b YamlBuilder) build_menu_bar(n &YNode) &Widget {
 	return mb
 }
 
+// build_splitter: направление `dir`, доля `ratio` (зажимается в 0..1; 0 -
+// остаётся значение по умолчанию), минимумы панелей, полоса и два ребёнка
+// под ключами `first:` и `second:` (не `children:`).
 fn (mut b YamlBuilder) build_splitter(n &YNode) &Widget {
 	mut sp := splitter(if yn_str(n, 'dir') == 'vertical' {
 		SplitDir.vertical
@@ -1586,6 +1739,7 @@ fn (mut b YamlBuilder) build_separator(n &YNode) &Widget {
 	return s
 }
 
+// build_tree_view: настройки вида и пунктирные линии связей, корни из `roots:`.
 fn (mut b YamlBuilder) build_tree_view(n &YNode) &Widget {
 	mut tv := tree_view()
 	tv.visible = yn_bool(n, 'visible', true)
@@ -1643,6 +1797,8 @@ fn (mut b YamlBuilder) build_tree_view(n &YNode) &Widget {
 	return tv
 }
 
+// build_tree_node строит узел дерева (text, icon, expanded - по умолчанию true,
+// цвета) и рекурсивно его `children:`. Как и пункты меню, узел - не Widget.
 fn (mut b YamlBuilder) build_tree_node(n &YNode) &TreeNode {
 	text := yn_str(n, 'text')
 	icon_path := yn_str(n, 'icon')
@@ -1673,6 +1829,7 @@ fn (mut b YamlBuilder) build_tree_node(n &YNode) &TreeNode {
 	return node
 }
 
+// build_spinner: `style` - dots | dual (иначе arc), `spinning` по умолчанию true.
 fn (mut b YamlBuilder) build_spinner(n &YNode) &Widget {
 	mut sp := spinner()
 	sp.visible = yn_bool(n, 'visible', true)
@@ -1720,6 +1877,7 @@ fn (mut b YamlBuilder) build_spinner(n &YNode) &Widget {
 	return sp
 }
 
+// build_tooltip: подсказка с текстом, задержкой появления `delay_ms` и переносом.
 fn (mut b YamlBuilder) build_tooltip(n &YNode) &Widget {
 	mut t := tooltip(yn_str(n, 'text'))
 	d := yn_int(n, 'delay_ms')
@@ -1752,6 +1910,7 @@ fn (mut b YamlBuilder) build_code_editor(n &YNode) &Widget {
 	ce.show_line_numbers = yn_bool(n, 'show_line_numbers', true)
 	ce.highlight_cur_line = yn_bool(n, 'highlight_cur_line', true)
 	ce.focus_group = yn_int(n, 'focus_group')
+	// `item_height` читается, но не применяется: ветка пуста (зарезервировано).
 	ih := yn_f32(n, 'item_height')
 	if ih > 0 {
 		// unused but reserved
@@ -1788,7 +1947,8 @@ fn (mut b YamlBuilder) build_code_editor(n &YNode) &Widget {
 	if tc.len > 0 {
 		ce.text_color = vui_parse_color(tc)
 	}
-	// Syntax highlighting
+	// Подсветка синтаксиса: ключ `language` выбирает готовый подсветчик;
+	// неизвестный язык - без подсветки.
 	lang := yn_str(n, 'language')
 	match lang {
 		'v', 'vlang' { ce.set_highlighter(v_highlighter()) }
@@ -1801,6 +1961,8 @@ fn (mut b YamlBuilder) build_code_editor(n &YNode) &Widget {
 	return ce
 }
 
+// build_slider: `value` зажимается в [min, max] сразу при чтении, поэтому min и
+// max читаются раньше него; max <= 0 в YAML оставляет max по умолчанию.
 fn (mut b YamlBuilder) build_slider(n &YNode) &Widget {
 	mut s := slider()
 	if yn_str(n, 'dir') == 'vertical' {
@@ -1856,6 +2018,8 @@ fn (mut b YamlBuilder) build_slider(n &YNode) &Widget {
 	return s
 }
 
+// build_progress_bar: `value` зажимается в [0, 1]; `style: circular` - круговой.
+// `radius` и `corner_radius` - разные поля (corner_radius применяется и при нуле).
 fn (mut b YamlBuilder) build_progress_bar(n &YNode) &Widget {
 	mut p := progress_bar()
 	if yn_str(n, 'style') == 'circular' {
@@ -1901,6 +2065,8 @@ fn (mut b YamlBuilder) build_progress_bar(n &YNode) &Widget {
 	return p
 }
 
+// build_image_view: `mode` - fit | fill | stretch | native | zoom, иначе
+// режим по умолчанию; `zoom`/`zoom_speed` имеют смысл для режима zoom.
 fn (mut b YamlBuilder) build_image_view(n &YNode) &Widget {
 	mut iv := image_view()
 	iv.path = yn_str(n, 'path')
@@ -1943,6 +2109,7 @@ fn (mut b YamlBuilder) build_image_view(n &YNode) &Widget {
 	return iv
 }
 
+// build_accordion: оформление заголовков и секции. Секция без `child:` получает Spacer.
 fn (mut b YamlBuilder) build_accordion(n &YNode) &Widget {
 	mut acc := accordion()
 	match yn_str(n, 'mode') {
@@ -2007,11 +2174,15 @@ fn (mut b YamlBuilder) build_accordion(n &YNode) &Widget {
 		if h != unsafe { nil } {
 			// Wrap fn(int, string) → fn(int, bool) by section index
 			// For accordion we use change_bool_handlers pattern instead
+			// (на деле ветка пуста: `on_change` аккордеона из YAML НЕ
+			// привязывается - обработчик находится, но нигде не сохраняется)
 		}
 	}
 	b.reg(n, voidptr(acc))
 
-	// Parse sections
+	// Секции `sections:` (title, expanded, child). Секция собирается напрямую
+	// литералом AccordionSection; анимация раскрытия сразу ставится в
+	// конечное значение (1.0 / 0.0) через .at(), т.е. без анимации при старте.
 	sections_node := n.get('sections')
 	if sections_node.is_list() {
 		for sec_n in sections_node.list {
@@ -2039,6 +2210,21 @@ fn (mut b YamlBuilder) build_accordion(n &YNode) &Widget {
 
 // ─── Public API ────────────────────────────────────────
 
+// load_ui_from_string строит дерево виджетов из YAML-текста.
+// cb - реестр обработчиков, заполненный заранее (см. UiCallbacks); он должен
+// пережить вызов, но дереву после построения не нужен: обработчики уже
+// скопированы в поля виджетов.
+// Ошибка возвращается только если корень документа не map. Корневой узел сам
+// является виджетом (`type: vbox` и т.д.), а не обёрткой над ним.
+// Пример YAML:
+//   type: vbox
+//   children:
+//     - type: button
+//       text: "OK"
+//       on_click: ok
+//   hotkeys:
+//     - shortcut: "Ctrl+S"
+//       on_press: save
 pub fn load_ui_from_string(yaml_str string, cb &UiCallbacks) !UiTree {
 	root := yaml_parse(yaml_str)
 	if !root.is_map() {
@@ -2054,7 +2240,10 @@ pub fn load_ui_from_string(yaml_str string, cb &UiCallbacks) !UiTree {
 	builder.tree.root = ch.widget
 	builder.tree.flex = ch.flex
 
-	// ── Parse hotkeys section ──
+	// ── Секция hotkeys ──
+	// Лежит в корневом map рядом с `type`/`children` и сама виджетом не является.
+	// Пара без shortcut, без on_press или с незарегистрированным именем
+	// обработчика пропускается молча.
 	hotkeys_node := root.get('hotkeys')
 	if hotkeys_node.is_list() {
 		for hk_n in hotkeys_node.list {
@@ -2075,6 +2264,8 @@ pub fn load_ui_from_string(yaml_str string, cb &UiCallbacks) !UiTree {
 	return builder.tree
 }
 
+// load_ui_from_file читает файл целиком и строит дерево как load_ui_from_string.
+// Ошибка чтения файла возвращается как error с путём и причиной.
 pub fn load_ui_from_file(path string, cb &UiCallbacks) !UiTree {
 	content := os.read_file(path) or { return error('Cannot read file: ${path}: ${err}') }
 	return load_ui_from_string(content, cb)
@@ -2082,6 +2273,8 @@ pub fn load_ui_from_file(path string, cb &UiCallbacks) !UiTree {
 
 // ─── Convenience: add UiTree root to Window ────────────
 
+// Корень добавляется в окно через Window.add_widget (окно его не копирует и не
+// освобождает). Если корень nil (дерево не строилось), вызов ничего не делает.
 pub fn (mut w Window) add_ui_tree(tree &UiTree) {
 	if unsafe { tree.root != nil } {
 		w.add_widget(tree.root)
@@ -2090,6 +2283,7 @@ pub fn (mut w Window) add_ui_tree(tree &UiTree) {
 
 // ─── Convenience: add UiTree root to Dialog ────────────
 
+// То же для Dialog.
 pub fn (mut d Dialog) add_ui_tree(tree &UiTree) {
 	if unsafe { tree.root != nil } {
 		d.add_widget(tree.root)
@@ -2098,6 +2292,7 @@ pub fn (mut d Dialog) add_ui_tree(tree &UiTree) {
 
 // ─── Convenience: add UiTree as child to VBox ──────────
 
+// Корень добавляется ребёнком VBox с flex из корня YAML (без flex - размер из measure()).
 pub fn (mut v VBox) add_ui_tree(tree &UiTree) {
 	if unsafe { tree.root != nil } {
 		v.add(tree.root, flex: tree.flex)
@@ -2106,6 +2301,7 @@ pub fn (mut v VBox) add_ui_tree(tree &UiTree) {
 
 // ─── Convenience: add UiTree as child to HBox ──────────
 
+// Корень добавляется ребёнком HBox с flex из корня YAML.
 pub fn (mut h HBox) add_ui_tree(tree &UiTree) {
 	if unsafe { tree.root != nil } {
 		h.add(tree.root, flex: tree.flex)
@@ -2114,6 +2310,8 @@ pub fn (mut h HBox) add_ui_tree(tree &UiTree) {
 
 // ─── Apply hotkeys from UiTree to Window ───────────────
 
+// Привязывает горячие клавиши окна (действуют, пока окно в фокусе).
+// Вызывать после того, как окно создано; дерево на это не влияет.
 pub fn (mut w Window) apply_hotkeys(tree &UiTree) {
 	for hk in tree.hotkeys {
 		w.bind_hotkey(hk.shortcut, hk.handler)
@@ -2122,6 +2320,7 @@ pub fn (mut w Window) apply_hotkeys(tree &UiTree) {
 
 // ─── Apply hotkeys from UiTree to App (global) ────────
 
+// Привязывает глобальные горячие клавиши приложения (для всех окон).
 pub fn (mut a App) apply_hotkeys(tree &UiTree) {
 	for hk in tree.hotkeys {
 		a.bind_hotkey(hk.shortcut, hk.handler)

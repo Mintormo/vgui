@@ -1,9 +1,16 @@
 module main
 
+// Пример 40. UI Scale: масштабирование всего интерфейса окна через win.set_ui_scale().
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/40_ui_scale.v
+
 import vgui
 
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'UI Scale - demo')!
 
 	mut status := vgui.label('Текущий масштаб: 1.0')
@@ -35,6 +42,7 @@ fn main() {
 	row.add(mk_scale_btn('1.5', 1.5), flex: 1)
 	row.add(mk_scale_btn('2.0', 2.0), flex: 1)
 
+	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(12)
@@ -46,9 +54,11 @@ fn main() {
 	root.add(vgui.label('Выберите масштаб интерфейса:'))
 	root.add(row)
 
+	// Корень дерева виджетов окна; всё остальное вложено в него.
 	win.add_widget(root)
 	// Начальный масштаб
 	win.set_ui_scale(1.0)
+	// Регистрируем окно в App; app.run() блокирует до закрытия всех окон.
 	app.add_window(win)
 	app.run()
 }

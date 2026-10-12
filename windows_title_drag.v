@@ -14,7 +14,18 @@ module vgui
 // Each registers its bounds as a draggable region for
 // SDL's hit-test callback.
 // ═══════════════════════════════════════════════════════
+//
+// Файл нужен для безрамочных окон со своим заголовком (examples/46_borderless_window.v;
+// сама механика перетаскивания - borderless.v). Сам виджет перетаскиванием не занимается:
+// в draw() он лишь сообщает окну свой прямоугольник (ctx.pending_drag_rects и
+// ctx.pending_titlebar_rects), а Window после отрисовки кадра регистрирует эти прямоугольники
+// в borderless-хит-тесте SDL. Всё остальное (раскладка, отрисовка и события детей) делегируется
+// внутреннему BoxLayout, как у HBox/VBox. Для hit-testing/обхода дерева тип описан в
+// widget_tree.v (bounds_of/set_bounds/child_widgets).
 
+// WindowTitleDrag - строка-заголовок: BoxLayout (горизонтальный по умолчанию) + флаг видимости.
+// ВНИМАНИЕ: `visible` здесь - собственное поле виджета; одноимённое box.visible внутри
+// BoxLayout - отдельное (см. HasVisibility в widget_tree.v).
 pub struct WindowTitleDrag {
 pub mut:
 	type_tag int = kind_window_title_drag // тег типа, см. widget_tag.v
@@ -24,6 +35,8 @@ pub mut:
 
 // ─── Constructors ──────────────────────────────────────
 
+// window_title_drag создаёт горизонтальную строку заголовка (дети идут слева направо).
+// Нулевые bounds = «не заданы»: при первом arrange() растянутся на весь экран окна.
 pub fn window_title_drag() &WindowTitleDrag {
 	return &WindowTitleDrag{
 		box: BoxLayout{
@@ -35,6 +48,7 @@ pub fn window_title_drag() &WindowTitleDrag {
 	}
 }
 
+// window_title_drag_vertical - то же, но дети идут сверху вниз (вертикальная полоса заголовка).
 pub fn window_title_drag_vertical() &WindowTitleDrag {
 	return &WindowTitleDrag{
 		box: BoxLayout{
@@ -72,6 +86,8 @@ pub fn (mut d WindowTitleDrag) set_panel_bg() {
 
 // ─── Drawing ───────────────────────────────────────────
 
+// arrange раскладывает детей внутри box. Если bounds ещё не выданы
+// родителем (is_bounds_unset), занимает весь экран окна.
 pub fn (mut d WindowTitleDrag) arrange(mut ctx RenderContext) {
 	if !d.visible {
 		return
@@ -82,6 +98,9 @@ pub fn (mut d WindowTitleDrag) arrange(mut ctx RenderContext) {
 	d.box.arrange(mut ctx)
 }
 
+// draw сообщает окну свою область для хит-теста и рисует детей. Список pending_* окно
+// очищает каждый кадр перед отрисовкой виджетов, поэтому регистрация делается заново в
+// каждом draw(). Скрытый виджет не регистрируется - перетаскивать за него нельзя.
 pub fn (mut d WindowTitleDrag) draw(mut ctx RenderContext) {
 	if !d.visible {
 		return
@@ -97,6 +116,8 @@ pub fn (mut d WindowTitleDrag) draw(mut ctx RenderContext) {
 
 // ─── Events ────────────────────────────────────────────
 
+// handle_event отдаёт событие детям (кнопки управления окном внутри строки работают);
+// возвращает true, только если его обработал ребёнок.
 pub fn (mut d WindowTitleDrag) handle_event(event &GuiEvent, app &App) bool {
 	if !d.visible {
 		return false
@@ -109,6 +130,8 @@ pub fn (mut d WindowTitleDrag) handle_event(event &GuiEvent, app &App) bool {
 
 	// We don't handle drag ourselves — SDL hit-test does it.
 	// Double-click maximize/restore is handled in sdl2_app.v process_events
+	// (файла sdl2_app.v в репозитории больше нет: двойной щелчок обрабатывает
+	// borderless.v - borderless_check_dbl_click)
 	// because SDL hit-test intercepts clicks in drag zones before they reach widgets.
 	return false
 }

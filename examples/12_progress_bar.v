@@ -1,9 +1,16 @@
 module main
 
+// Пример 12. ProgressBar: линейный, круговой и неопределённый прогресс.
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/12_progress_bar.v
+
 import vgui
 
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'ProgressBar - demo')!
 
 	mut status := vgui.label('Прогресс: 40%')
@@ -41,6 +48,7 @@ fn main() {
 	btn_row.add(b_minus, flex: 1)
 	btn_row.add(b_plus, flex: 1)
 
+	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(10)
@@ -54,8 +62,11 @@ fn main() {
 	root.add(vgui.label('Неопределённый:'))
 	root.add(pb_indet)
 
+	// Корень дерева виджетов окна; всё остальное вложено в него.
 	win.add_widget(root)
+	// Логический масштаб интерфейса (шрифты, отступы, размеры) поверх DPI-масштаба ОС.
 	win.set_ui_scale(1.25)
+	// Регистрируем окно в App; app.run() блокирует до закрытия всех окон.
 	app.add_window(win)
 	app.run()
 }

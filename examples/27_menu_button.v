@@ -1,9 +1,16 @@
 module main
 
+// Пример 27. MenuButton: кнопка с выпадающим меню действий.
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/27_menu_button.v
+
 import vgui
 
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'MenuButton - demo')!
 
 	mut status := vgui.label('Действие: -')
@@ -38,6 +45,7 @@ fn main() {
 	row.add(mb)
 	row.add(vgui.create_spacer(), flex: 1)
 
+	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(12)
@@ -45,8 +53,11 @@ fn main() {
 	root.add(vgui.hseparator())
 	root.add(row)
 
+	// Корень дерева виджетов окна; всё остальное вложено в него.
 	win.add_widget(root)
+	// Логический масштаб интерфейса (шрифты, отступы, размеры) поверх DPI-масштаба ОС.
 	win.set_ui_scale(1.25)
+	// Регистрируем окно в App; app.run() блокирует до закрытия всех окон.
 	app.add_window(win)
 	app.run()
 }

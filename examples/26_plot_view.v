@@ -1,5 +1,10 @@
 module main
 
+// Пример 26. PlotView: график функций и точек (колесо - зум, перетаскивание - панорама).
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/26_plot_view.v
+
 import math
 import vgui
 
@@ -12,7 +17,9 @@ fn f_cos(x f32) f32 {
 }
 
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'PlotView - demo')!
 
 	// График функций и точек. Колесо мыши — зум, перетаскивание — панорама.
@@ -41,14 +48,18 @@ fn main() {
 	row.add(b_reset, flex: 1)
 	row.add(b_fit, flex: 1)
 
+	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(8)
 	root.add(plot, flex: 1)
 	root.add(row)
 
+	// Корень дерева виджетов окна; всё остальное вложено в него.
 	win.add_widget(root)
+	// Логический масштаб интерфейса (шрифты, отступы, размеры) поверх DPI-масштаба ОС.
 	win.set_ui_scale(1.25)
+	// Регистрируем окно в App; app.run() блокирует до закрытия всех окон.
 	app.add_window(win)
 	app.run()
 }

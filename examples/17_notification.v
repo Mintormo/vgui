@@ -1,9 +1,16 @@
 module main
 
+// Пример 17. NotificationManager: всплывающие уведомления поверх окна.
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/17_notification.v
+
 import vgui
 
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'Notification - demo')!
 
 	// NotificationManager рисует всплывающие уведомления поверх окна
@@ -39,6 +46,7 @@ fn main() {
 		nm.show_with_title(.info, 'Заголовок', 'Текст уведомления с заголовком')
 	}
 
+	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(10)
@@ -48,9 +56,12 @@ fn main() {
 		root.add(b)
 	}
 
+	// Корень дерева виджетов окна; всё остальное вложено в него.
 	win.add_widget(root)
 	win.add_widget(nm)
+	// Логический масштаб интерфейса (шрифты, отступы, размеры) поверх DPI-масштаба ОС.
 	win.set_ui_scale(1.25)
+	// Регистрируем окно в App; app.run() блокирует до закрытия всех окон.
 	app.add_window(win)
 	app.run()
 }

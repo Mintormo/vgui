@@ -168,12 +168,12 @@ fn (c &UndoCommand) run_release() {
 // Команды [0, pos) применены, [pos, len) — ветка повтора. Новая команда
 // обрывает ветку повтора. Пока выполняется undo/redo команды, стек занят:
 // push/record/undo/redo из её действий отклоняются (возвращают false).
-@[heap]
 //
 // Пример (V):
 //   mut st := undo_stack(100)
 //   st.push(UndoCommand{ text: 'Цвет', redo: fn () { ... }, undo: fn () { ... } })
 //   st.undo() // откатывает «Цвет»
+@[heap]
 pub struct UndoStack {
 pub mut:
 	// on_change — после любого изменения состояния стека: обновить пункты

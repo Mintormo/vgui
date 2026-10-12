@@ -1,5 +1,10 @@
 module main
 
+// Пример 37. Accordion: разворачиваемые секции (accordion_single - открыта одна, accordion_multi - несколько).
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/37_accordion.v
+
 import vgui
 
 fn make_section(text string) &vgui.VBox {
@@ -12,7 +17,9 @@ fn make_section(text string) &vgui.VBox {
 }
 
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'Accordion - demo')!
 
 	// Аккордеон: разворачиваемые секции.
@@ -36,14 +43,18 @@ fn main() {
 		println('Секция ${idx}: expanded=${expanded}')
 	}
 
+	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(8)
 	root.add(vgui.label('Кликните по заголовку секции:'))
 	root.add(acc, flex: 1)
 
+	// Корень дерева виджетов окна; всё остальное вложено в него.
 	win.add_widget(root)
+	// Логический масштаб интерфейса (шрифты, отступы, размеры) поверх DPI-масштаба ОС.
 	win.set_ui_scale(1.25)
+	// Регистрируем окно в App; app.run() блокирует до закрытия всех окон.
 	app.add_window(win)
 	app.run()
 }

@@ -4,6 +4,13 @@ module vgui
 // указателем на виджет (C-ABI, vgui-capi). Первое поле каждой структуры
 // виджета - `type_tag int = kind_<name>` (см. widget_tag.v). Номера - часть
 // ABI: не перенумеровывайте занятые, новые берите следующими по порядку.
+//
+// Использование: `type_tag int = kind_<name>` в структуре виджета (widget_tag.v);
+// ветки vgui_get_kind() / vgui_resolve_widget() / vgui_destroy() в vgui-capi;
+// на стороне Python те же числа лежат в `_kind` классов vguipy (должны совпадать).
+// Нумерация шла по мере появления виджетов (1-4 базовые, дальше по истории), поэтому
+// порядок не отражает смысловых групп. Не виджеты-Widget, а вспомогательные типы
+// (MenuItem=29, Property=34, TreeNode=37) тоже имеют kind: их добавляют во владельца.
 pub const kind_label = 1
 pub const kind_button = 2
 pub const kind_vbox = 3

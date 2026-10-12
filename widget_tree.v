@@ -13,8 +13,8 @@ module vgui
 //
 // ВАЖНО: это НЕ самопроверяющийся механизм. В V нельзя
 // перечислить все реализации интерфейса программно, поэтому
-// widget_tree_test.v — не более чем 51 вручную написанная
-// проверка (по одной на уже известный тип). Новый тип
+// widget_tree_test.v — не более чем набор вручную написанных
+// проверок (по одной на уже известный тип; сейчас около семи десятков тестов). Новый тип
 // виджета, для которого забыли добавить bounds_of/set_bounds
 // сюда, компилируется молча и просто НЕ ломает тест — тест
 // проверяет только то, что уже в него вписано руками. Полнота
@@ -132,6 +132,11 @@ pub interface HasVisibility {
 }
 
 // ─── Layouted: bounds_of / set_bounds ──────────────────
+// Ниже идут однотипные пары bounds_of/set_bounds: bounds_of отдаёт сохранённый
+// Rect виджета, set_bounds кладёт новый (его вызывает arrange_child после
+// того, как контейнер рассчитал место для ребёнка). Отдельно комментируются
+// только типы с побочным эффектом в set_bounds (Label, MarkdownView) и
+// обёртки над BoxLayout (HBox/VBox/WindowTitleDrag — bounds лежит в w.box).
 // Порядок и состав — как в бывших get_widget_bounds/
 // set_widget_bounds (списки были сверены и совпадали 1:1).
 
@@ -571,6 +576,12 @@ pub fn (mut w CpPreview) set_bounds(r Rect) {
 }
 
 // ─── HasChildren: child_widgets ────────────────────────
+// HBox/VBox/WindowTitleDrag держат детей в box.children (записи с полем
+// widget); Panel/Centered — один child; Stack/ScrollBox — срез children;
+// Splitter — first/second; TabBox — widget каждой вкладки; Accordion —
+// widget секций; GridLayout — widget ячеек; ListBox — widget ячеек строк.
+// Во всех случаях возвращается новый срез, nil-дети пропускаются там, где
+// они допустимы (Panel/Centered/Splitter/Accordion/ListBox).
 // Только реальные контейнеры, держащие детей-Widget (не
 // MenuItem/TreeNode/Property — те не Widget, а отдельные
 // типы, принадлежащие своему владельцу, не слою раскладки).
@@ -671,6 +682,8 @@ pub fn (w &ListBox) child_widgets() []&Widget {
 }
 
 // ─── HitTestable: только реально «живые» для клика дети ─
+
+// TabBox: кликабельна только активная вкладка — bounds неактивных устарели.
 
 pub fn (w &TabBox) hit_children() []&Widget {
 	if w.active >= 0 && w.active < w.tabs.len {
@@ -785,6 +798,8 @@ pub fn walk_widgets(w &Widget, cb fn (&Widget)) {
 	walk_widgets_impl(w, cb, 0)
 }
 
+// walk_widgets_impl — рекурсия walk_widgets: cb вызывается до спуска в детей
+// (pre-order), на глубине widget_tree_max_depth ветка обрывается.
 fn walk_widgets_impl(w &Widget, cb fn (&Widget), depth int) {
 	cb(w)
 	if depth >= widget_tree_max_depth {
@@ -798,6 +813,26 @@ fn walk_widgets_impl(w &Widget, cb fn (&Widget), depth int) {
 			walk_widgets_impl(c, cb, depth + 1)
 		}
 	}
+}
+
+// widget_is_visible — «виджет сейчас нарисован и должен ловить курсор».
+// Вынесено из widget_at_impl, потому что тем же правилом пользуется
+// Window.hover_target (sdl3_window.v): widget_at проверяет видимость только
+// ДЕТЕЙ, а корень поддерева — забота вызывающего.
+// HBox/VBox — исключение из HasVisibility (см. коммент у интерфейса): их флаг
+// видимости лежит в box.visible, не в топ-уровневом поле, поэтому
+// field-интерфейс их не ловит.
+pub fn widget_is_visible(w &Widget) bool {
+	if w is HasVisibility {
+		return w.visible
+	}
+	if w is HBox {
+		return w.box.visible
+	}
+	if w is VBox {
+		return w.box.visible
+	}
+	return true
 }
 
 // widget_at ищет самый глубокий виджет, чей bounds содержит
@@ -822,31 +857,15 @@ fn walk_widgets_impl(w &Widget, cb fn (&Widget), depth int) {
 // расхождение между этим обходом и реальным hit-testing'ом
 // стоит не ошибочного клика, а лишь лишней/недостающей
 // перерисовки прямоугольника.
-// widget_is_visible — «виджет сейчас нарисован и должен ловить курсор».
-// Вынесено из widget_at_impl, потому что тем же правилом пользуется
-// Window.hover_target (sdl3_window.v): widget_at проверяет видимость только
-// ДЕТЕЙ, а корень поддерева — забота вызывающего.
-// HBox/VBox — исключение из HasVisibility (см. коммент у интерфейса): их флаг
-// видимости лежит в box.visible, не в топ-уровневом поле, поэтому
-// field-интерфейс их не ловит.
-pub fn widget_is_visible(w &Widget) bool {
-	if w is HasVisibility {
-		return w.visible
-	}
-	if w is HBox {
-		return w.box.visible
-	}
-	if w is VBox {
-		return w.box.visible
-	}
-	return true
-}
-
 pub fn widget_at(w &Widget, x f32, y f32) ?&Widget {
 	return widget_at_impl(w, x, y, 0)
 }
 
+// widget_at_impl — рекурсивная часть widget_at; depth защищает от циклов
+// (см. widget_tree_max_depth).
 fn widget_at_impl(w &Widget, x f32, y f32, depth int) ?&Widget {
+	// Нулевой/отрицательный размер = виджет сейчас не нарисован (скрыт,
+	// вне видимой области, ещё не раскладывался) — клик ловить не должен.
 	b := get_widget_bounds(w)
 	if b.w <= 0 || b.h <= 0 {
 		return none
@@ -862,6 +881,8 @@ fn widget_at_impl(w &Widget, x f32, y f32, depth int) ?&Widget {
 		} else {
 			[]&Widget{}
 		}
+		// Идём с конца: последний ребёнок рисуется поверх остальных (z-порядок),
+		// поэтому при перекрытии побеждает он.
 		for i := children.len - 1; i >= 0; i-- {
 			c := children[i]
 			if unsafe { c == nil } {

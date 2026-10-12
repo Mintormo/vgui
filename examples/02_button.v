@@ -1,9 +1,16 @@
 module main
 
+// Пример 02. Button: стили кнопок (.style), отключённая кнопка и toggle-кнопка с колбэком on_toggle.
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/02_button.v
+
 import vgui
 
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'Button - demo')!
 
 	mut status := vgui.label('Нажмите кнопку...')
@@ -53,6 +60,7 @@ fn main() {
 	row2.add(b_disabled, flex: 1)
 	row2.add(b_toggle, flex: 1)
 
+	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(10)
@@ -61,8 +69,11 @@ fn main() {
 	root.add(row1)
 	root.add(row2)
 
+	// Корень дерева виджетов окна; всё остальное вложено в него.
 	win.add_widget(root)
+	// Логический масштаб интерфейса (шрифты, отступы, размеры) поверх DPI-масштаба ОС.
 	win.set_ui_scale(1.25)
+	// Регистрируем окно в App; app.run() блокирует до закрытия всех окон.
 	app.add_window(win)
 	app.run()
 }

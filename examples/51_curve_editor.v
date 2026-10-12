@@ -1,5 +1,10 @@
 module main
 
+// Пример 51. CurveEditor: редактор тональной кривой с гистограммой и "призраком" второй кривой.
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/51_curve_editor.v
+
 import vgui
 
 // CurveEditor - редактор тональной кривой. Левая кнопка на точке -
@@ -8,7 +13,9 @@ import vgui
 // другой кривой. Подпись показывает значение кривой в середине (x = 0.5)
 // и обновляется при отпускании.
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'CurveEditor')!
 
 	mut ce := vgui.curve_editor()
@@ -29,12 +36,15 @@ fn main() {
 		info.text = 'y(0.5) = ${ce.value(0.5):.3f}'
 	}
 
+	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(12)
 	root.set_spacing(8)
 	root.add(ce, flex: 1)
 	root.add(info)
+	// Корень дерева виджетов окна; всё остальное вложено в него.
 	win.add_widget(root)
+	// Регистрируем окно в App; app.run() блокирует до закрытия всех окон.
 	app.add_window(win)
 	app.run()
 }

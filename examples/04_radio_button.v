@@ -1,9 +1,16 @@
 module main
 
+// Пример 04. RadioButton: группы взаимоисключающих кнопок через поле .radio_group.
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/04_radio_button.v
+
 import vgui
 
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'RadioButton - demo')!
 
 	mut status := vgui.label('Выбор: -')
@@ -44,6 +51,7 @@ fn main() {
 	mut c2 := vgui.radio_button('Тёмная тема')
 	c2.radio_group = 'theme'
 
+	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(8)
@@ -57,8 +65,11 @@ fn main() {
 	root.add(c1)
 	root.add(c2)
 
+	// Корень дерева виджетов окна; всё остальное вложено в него.
 	win.add_widget(root)
+	// Логический масштаб интерфейса (шрифты, отступы, размеры) поверх DPI-масштаба ОС.
 	win.set_ui_scale(1.25)
+	// Регистрируем окно в App; app.run() блокирует до закрытия всех окон.
 	app.add_window(win)
 	app.run()
 }

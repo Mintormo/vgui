@@ -1,9 +1,16 @@
 module main
 
+// Пример 29. ContextMenu: контекстное меню по правому клику, привязанное к виджету через attach().
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/29_context_menu.v
+
 import vgui
 
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'ContextMenu - demo')!
 
 	mut status := vgui.label('Команда: -')
@@ -48,16 +55,20 @@ fn main() {
 	menu.add(c_check)
 	menu.attach(panel)
 
+	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(10)
 	root.add(status)
 	root.add(panel, flex: 1)
 
+	// Корень дерева виджетов окна; всё остальное вложено в него.
 	win.add_widget(root)
 	// Контекстное меню добавляется в окно отдельно, чтобы рисоваться поверх.
 	win.add_widget(menu)
+	// Логический масштаб интерфейса (шрифты, отступы, размеры) поверх DPI-масштаба ОС.
 	win.set_ui_scale(1.25)
+	// Регистрируем окно в App; app.run() блокирует до закрытия всех окон.
 	app.add_window(win)
 	app.run()
 }

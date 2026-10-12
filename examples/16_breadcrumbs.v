@@ -1,9 +1,16 @@
 module main
 
+// Пример 16. Breadcrumbs: хлебные крошки - цепочка навигации с колбэком on_click(index, text).
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/16_breadcrumbs.v
+
 import vgui
 
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'Breadcrumbs - demo')!
 
 	mut status := vgui.label('Кликните по сегменту пути')
@@ -27,6 +34,7 @@ fn main() {
 		status.text = 'Добавлен уровень'
 	}
 
+	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(12)
@@ -35,8 +43,11 @@ fn main() {
 	root.add(bc)
 	root.add(btn)
 
+	// Корень дерева виджетов окна; всё остальное вложено в него.
 	win.add_widget(root)
+	// Логический масштаб интерфейса (шрифты, отступы, размеры) поверх DPI-масштаба ОС.
 	win.set_ui_scale(1.25)
+	// Регистрируем окно в App; app.run() блокирует до закрытия всех окон.
 	app.add_window(win)
 	app.run()
 }

@@ -1,5 +1,10 @@
 module main
 
+// Пример 50. Область модальности: модальный диалог блокирует только своё окно, а не все окна приложения.
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/50_modal_scope.v
+
 import vgui
 
 // Область модальности: модальный диалог блокирует только своё окно.
@@ -46,6 +51,7 @@ fn open_dialog(parent &vgui.Window, mut app vgui.App, title string) {
 	}
 	btn_row.add(close_btn)
 
+	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(12)
@@ -58,6 +64,7 @@ fn open_dialog(parent &vgui.Window, mut app vgui.App, title string) {
 }
 
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app()!
 
 	mut win1 := vgui.create_window(title: 'Окно 1')!

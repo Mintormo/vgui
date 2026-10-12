@@ -1,5 +1,10 @@
 module main
 
+// Пример 45. Canvas: растровый редактор (кисть, ластик, пипетка, заливка, линия, прямоугольник) поверх единого колбэка on_input.
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/45_canvas.v
+
 import vgui
 import math
 
@@ -101,7 +106,9 @@ fn constrain_square(x0 int, y0 int, x int, y int) (int, int) {
 }
 
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'Canvas - набор инструментов')!
 
 	w := 360
@@ -425,6 +432,7 @@ fn main() {
 	mut hint2 := vgui.label('1-7 инструменты, [ ] размер, X обмен, Ctrl+колесо масштаб, средняя кнопка - панорама')
 	hint2.color = vgui.Color{120, 120, 120, 255}
 
+	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(14)
 	root.set_spacing(8)
@@ -438,8 +446,11 @@ fn main() {
 	root.add(hint1)
 	root.add(hint2)
 
+	// Корень дерева виджетов окна; всё остальное вложено в него.
 	win.add_widget(root)
+	// Логический масштаб интерфейса (шрифты, отступы, размеры) поверх DPI-масштаба ОС.
 	win.set_ui_scale(1.25)
+	// Регистрируем окно в App; app.run() блокирует до закрытия всех окон.
 	app.add_window(win)
 	app.run()
 }

@@ -1,5 +1,10 @@
 module main
 
+// Пример 49. Фоновый поток (app.post) и собственный цикл событий вместо app.run() (pump_events / render_all).
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/49_background_thread.v
+
 import time
 import vgui
 
@@ -56,7 +61,9 @@ fn heavy_work(app &vgui.App, work &Work) {
 }
 
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'Фоновый поток - app.post()')!
 
 	mut status := vgui.label('Нажмите «Посчитать» - работа пойдёт в фоне')
@@ -89,6 +96,7 @@ fn main() {
 	row.add(start)
 	row.add(vgui.create_spacer(), flex: 1)
 
+	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(10)
@@ -98,6 +106,7 @@ fn main() {
 	root.add(row)
 	root.add(vgui.create_spacer(), flex: 1)
 
+	// Корень дерева виджетов окна; всё остальное вложено в него.
 	win.add_widget(root)
 	app.add_window(win)
 

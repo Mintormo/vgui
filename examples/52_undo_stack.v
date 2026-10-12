@@ -1,5 +1,10 @@
 module main
 
+// Пример 52. UndoStack: стек отменяемых команд приложения со слиянием (merge_id) и группами.
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/52_undo_stack.v
+
 import vgui
 
 // UndoStack - стек отменяемых команд приложения. Каждое действие с
@@ -49,7 +54,9 @@ fn double_cmd(mut doc Doc) vgui.UndoCommand {
 }
 
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'UndoStack - demo')!
 	mut stack := vgui.undo_stack(50)
 	mut doc := &Doc{}
@@ -120,6 +127,7 @@ fn main() {
 	edit.add(vgui.create_spacer())
 	edit.add(btn_save)
 
+	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(12)
@@ -127,7 +135,9 @@ fn main() {
 	root.add(history)
 	root.add(actions)
 	root.add(edit)
+	// Корень дерева виджетов окна; всё остальное вложено в него.
 	win.add_widget(root)
+	// Регистрируем окно в App; app.run() блокирует до закрытия всех окон.
 	app.add_window(win)
 	app.run()
 }

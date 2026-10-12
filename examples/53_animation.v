@@ -1,5 +1,10 @@
 module main
 
+// Пример 53. Anim: анимируемое число для своих виджетов (tween, easing, smooth).
+//
+// Запуск (из корня репозитория):
+//   ~/soft/v/v -enable-globals run examples/53_animation.v
+
 import vgui
 
 // Anim - анимируемое число для своих виджетов. Каждая строка - свой
@@ -76,7 +81,9 @@ fn (mut t EaseTrack) draw(mut ctx vgui.RenderContext) {
 }
 
 fn main() {
+	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'Anim - easing')!
 
 	mut tracks := []&EaseTrack{}
@@ -93,6 +100,7 @@ fn main() {
 		win.invalidate_all() // сеттеры кадр не просят - запустить анимацию
 	}
 
+	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(6)
@@ -100,7 +108,9 @@ fn main() {
 		root.add(t)
 	}
 	root.add(btn, align: .start)
+	// Корень дерева виджетов окна; всё остальное вложено в него.
 	win.add_widget(root)
+	// Регистрируем окно в App; app.run() блокирует до закрытия всех окон.
 	app.add_window(win)
 	app.run()
 }
