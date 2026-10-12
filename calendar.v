@@ -16,9 +16,10 @@ import time
 //     свою сетку, виджет Calendar он не использует.
 //   - Названия месяцев и дней недели - глобальные массивы cal_*; их можно
 //     заменить через cal_set_* (перевод интерфейса, i18n.v / C-ABI).
-//   - Фокус: в focus.v есть register_calendar/focus_calendar, но сам calendar.v
-//     их не вызывает (draw не регистрирует виджет), поле focused здесь только
-//     читается при рисовании рамки. Клавиатуру виджет не обрабатывает. Анимаций нет.
+//   - Фокус: draw регистрирует виджет в фокус-учёте (register_calendar), клик
+//     даёт ему фокус. С фокусом: стрелки - день/неделя (в годовом виде тоже по
+//     дням), PageUp/PageDown - месяц, Enter/Space - выбрать дату (on_select).
+//     Анимаций нет.
 //   - Неделя начинается с понедельника: колонка = (день_недели + 6) % 7, где
 //     dp_day_of_week даёт 0 = воскресенье.
 // ═══════════════════════════════════════════════════════════
@@ -56,6 +57,9 @@ pub mut:
 	hov_prev  bool
 	hov_next  bool
 	hov_title bool
+	// Высота шрифта последнего кадра: хит-тест сетки повторяет геометрию draw, а
+	// в обработчике событий шрифта нет. 0 до первого кадра (тогда 14).
+	font_h f32
 	// Callbacks
 	on_select      fn (int, int, int) = unsafe { nil } // year, month, day
 	on_view_change fn (CalendarView)  = unsafe { nil }
@@ -104,9 +108,9 @@ fn cal_today() (int, int, int) {
 	return now.year, int(now.month), now.day
 }
 
-// Add n days to (y,m,d)
-// Сейчас нигде не вызывается (мёртвый код). Сдвиг даты на n дней (n может быть отрицательным) пошагово по месяцам, с
-// переходом через границы месяцев и годов. Нормализует rd в 1..dim(rm).
+// cal_add_days - сдвиг даты на n дней (n может быть отрицательным) пошагово по месяцам,
+// с переходом через границы месяцев и годов. Нормализует rd в 1..dim(rm). Нужна
+// клавиатурной навигации (стрелки).
 fn cal_add_days(y int, m int, d int, n int) (int, int, int) {
 	mut ry := y
 	mut rm := m
@@ -174,6 +178,9 @@ pub fn (mut c Calendar) set_date(y int, m int, d int) {
 pub fn (mut c Calendar) draw(mut ctx RenderContext) {
 	if !c.visible { return }
 	if !ctx.is_in_clip(c.bounds) { return }
+
+	ctx.focus.register_calendar(&c, c.focus_group)
+	c.font_h = ctx.font_height_of(ctx.get_font(.regular, 0))
 
 	bg := ctx.theme.input_bg
 	brd := if c.focused { ctx.theme.input_focus } else { ctx.theme.input_border }
@@ -442,29 +449,32 @@ fn (mut c Calendar) navigate_next() {
 	}
 }
 
-// drill_up - переход месяц -> год по клику на заголовок. В годовом виде вид не
-// меняется, но on_view_change всё равно вызывается (как есть в коде).
+// drill_up - переход месяц -> год по клику на заголовок. В годовом виде подниматься
+// некуда: вид не меняется, и on_view_change не зовётся.
 fn (mut c Calendar) drill_up() {
-	match c.view {
-		.month { c.view = .year }
-		.year {}
+	if c.view != .month {
+		return
 	}
+	c.view = .year
 	if c.on_view_change != unsafe { nil } {
 		c.on_view_change(c.view)
 	}
 }
 
+// eff_font_h - высота шрифта для хит-теста: из последнего кадра, до него - 14.
+fn (c &Calendar) eff_font_h() f32 {
+	return if c.font_h > 0 { c.font_h } else { f32(14) }
+}
+
 // ─── Month-view hit test ──────────────────────────────────
 
 // hit_month_day - (год, месяц, день) ячейки под точкой в месячном виде или
-// (0, 0, 0). Высота строки дней недели здесь ПРИБЛИЗИТЕЛЬНА (14 + 8), тогда как
-// draw_month берёт реальную высоту шрифта: при другом размере шрифта границы
-// ячеек для клика могут слегка не совпадать с нарисованными.
+// (0, 0, 0). Строка дней недели - высота шрифта последнего кадра + 8, как в draw_month
+// (раньше здесь было зашито 14, и при другом шрифте клик промахивался мимо дня).
 fn (c &Calendar) hit_month_day(mx f32, my f32) (int, int, int) {
 	body := Rect{c.bounds.x, c.bounds.y + cal_hdr_h, c.bounds.w, c.bounds.h - cal_hdr_h}
 	cell_w := body.w / 7
-	font_placeholder := f32(14)
-	dow_h := font_placeholder + 8
+	dow_h := c.eff_font_h() + 8
 	num_rows := cal_month_rows(c.year, c.month)
 	cell_h := (body.h - dow_h) / f32(num_rows)
 	first_dow := (dp_day_of_week(c.year, c.month, 1) + 6) % 7
@@ -482,8 +492,9 @@ fn (c &Calendar) hit_month_day(mx f32, my f32) (int, int, int) {
 }
 
 // Returns (month, day) under (mx,my) in year view mini-grids, or (0,0).
-// font_h is an approximate font height used for the month name row.
-fn (c &Calendar) hit_year_day(mx f32, my f32, font_h f32) (int, int) {
+// Строка названия месяца - высота шрифта последнего кадра, как в draw_year.
+fn (c &Calendar) hit_year_day(mx f32, my f32) (int, int) {
+	font_h := c.eff_font_h()
 	body := Rect{c.bounds.x + 8, c.bounds.y + cal_hdr_h + 4, c.bounds.w - 16, c.bounds.h - cal_hdr_h - 8}
 	cell_w := body.w / 4
 	cell_h := body.h / 3
@@ -520,15 +531,81 @@ fn (c &Calendar) hit_year_day(mx f32, my f32, font_h f32) (int, int) {
 
 // ─── Events ───────────────────────────────────────────────
 
-// handle_event обрабатывает только mouse_move (hover) и mouse_down (кнопки
-// шапки, заголовок, выбор дня). Клавиатура не поддерживается.
+// handle_event: mouse_move (hover), mouse_down (кнопки шапки, заголовок, выбор дня,
+// фокус) и key_down при фокусе (on_key).
 pub fn (mut c Calendar) handle_event(event &GuiEvent, app &App) bool {
 	if !c.visible || !c.enabled { return false }
 	match event.typ {
-		.mouse_move { return c.on_mouse_move(event) }
-		.mouse_down { return c.on_mouse_down(event) }
-		else { return false }
+		.mouse_move {
+			return c.on_mouse_move(event)
+		}
+		.mouse_down {
+			if c.bounds.contains(event.mouse_x, event.mouse_y) {
+				ctx_ptr := app.get_active_ctx()
+				if unsafe { ctx_ptr != nil } {
+					mut ctx := unsafe { &RenderContext(ctx_ptr) }
+					ctx.focus.focus_calendar(&c, c.focus_group)
+				}
+			}
+			return c.on_mouse_down(event)
+		}
+		.key_down {
+			return c.focused && c.on_key(event)
+		}
+		else {
+			return false
+		}
 	}
+}
+
+// on_key - клавиатура при фокусе. Стрелки сдвигают выбранную дату на день (влево/
+// вправо) или неделю (вверх/вниз), PageUp/PageDown - на месяц; показываемый период
+// следует за датой. Enter/Space - выбрать (on_select). Без выбранной даты первая
+// клавиша-стрелка выбирает 1-е число показанного месяца. Остальные клавиши - false.
+fn (mut c Calendar) on_key(ev &GuiEvent) bool {
+	if ev.keycode == sdl_k_return || ev.keycode == sdl_k_space {
+		if c.sel_day > 0 && c.on_select != unsafe { nil } {
+			c.on_select(c.sel_year, c.sel_month, c.sel_day)
+		}
+		return c.sel_day > 0
+	}
+	days := match ev.keycode {
+		sdl_k_left { -1 }
+		sdl_k_right { 1 }
+		sdl_k_up { -7 }
+		sdl_k_down { 7 }
+		else { 0 }
+	}
+	months := match ev.keycode {
+		sdl_k_pageup { -1 }
+		sdl_k_pagedown { 1 }
+		else { 0 }
+	}
+	if days == 0 && months == 0 {
+		return false
+	}
+	if c.sel_day == 0 {
+		c.sel_year, c.sel_month, c.sel_day = c.year, c.month, 1
+	} else if days != 0 {
+		c.sel_year, c.sel_month, c.sel_day = cal_add_days(c.sel_year, c.sel_month, c.sel_day,
+			days)
+	} else {
+		c.sel_year, c.sel_month, c.sel_day = cal_add_months(c.sel_year, c.sel_month,
+			c.sel_day, months)
+	}
+	c.year = c.sel_year
+	c.month = c.sel_month
+	return true
+}
+
+// cal_add_months - сдвиг даты на n месяцев; день зажимается по длине нового месяца
+// (31 января + 1 месяц = 28/29 февраля).
+fn cal_add_months(y int, m int, d int, n int) (int, int, int) {
+	total := y * 12 + (m - 1) + n
+	ry := total / 12
+	rm := total % 12 + 1
+	rd := min_int(d, dp_days_in_month(ry, rm))
+	return ry, rm, rd
 }
 
 // on_mouse_move обновляет hov_*. Возвращает true (событие поглощено), если
@@ -558,7 +635,7 @@ fn (mut c Calendar) on_mouse_move(ev &GuiEvent) bool {
 			c.hov_day = hd
 		}
 		.year {
-			hm, hd := c.hit_year_day(mx, my, 14)
+			hm, hd := c.hit_year_day(mx, my)
 			if hm > 0 && hd > 0 {
 				c.hov_year = c.year
 				c.hov_month = hm
@@ -607,7 +684,7 @@ fn (mut c Calendar) on_mouse_down(ev &GuiEvent) bool {
 			}
 		}
 		.year {
-			hm, hd := c.hit_year_day(mx, my, 14)
+			hm, hd := c.hit_year_day(mx, my)
 			if hm > 0 && hd > 0 {
 				c.sel_year = c.year
 				c.sel_month = hm

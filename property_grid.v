@@ -42,7 +42,7 @@ pub enum PropertyKind {
 // bool_val, color_val, year/month/day (date), choices + choice_idx (choice).
 // parent выставляет Property.add (нужен для клавиши Left); user_data — произвольный
 // указатель приложения; hovered — служебный признак подсветки строки; readonly
-// запрещает редактирование (переключение bool-флажка readonly НЕ блокирует).
+// запрещает любое редактирование пользователем, в том числе переключение bool и выбор варианта.
 @[heap]
 pub struct Property {
 pub mut:
@@ -268,7 +268,7 @@ pub mut:
 	focused     bool
 	focus_anim  Anim = anim_smooth(anim_tau_focus)
 	focus_group int
-	// selected — выделенная строка (nil — нет); edit_prop/edit_text_input — свойство в редакторе и его временное поле ввода; edit_combo сейчас не используется
+	// selected — выделенная строка (nil — нет); edit_prop/edit_text_input — свойство в редакторе и его временное поле ввода; choice_menu — выпадающий список вариантов свойства .choice (open_choice_menu)
 	selected              &Property = unsafe { nil }
 	split_ratio           f32       = pg_default_split
 	row_height            f32       = pg_row_height
@@ -280,9 +280,9 @@ pub mut:
 	splitter_dragging     bool
 	splitter_hovered      bool
 	editing               bool
-	edit_prop             &Property  = unsafe { nil }
-	edit_text_input       &TextInput = unsafe { nil }
-	edit_combo            &ComboBox  = unsafe { nil }
+	edit_prop             &Property    = unsafe { nil }
+	edit_text_input       &TextInput   = unsafe { nil }
+	choice_menu           &ContextMenu = unsafe { nil }
 	vsb_dragging          bool
 	vsb_hovered           bool
 	vsb_drag_start_y      f32
@@ -413,8 +413,9 @@ fn pg_find_recursive(p &Property, name string) ?&Property {
 
 // Чтение/запись значений по имени (через find). Если свойства нет — get_* возвращают
 // нулевое значение (get_choice — -1), set_* молча ничего не делают. Тип свойства не
-// проверяется: get_int на строковом свойстве вернёт его (нулевое) int_val. set_* не
-// вызывают on_change и не инвалидируют кадр; set_choice нет.
+// проверяется: get_int на строковом свойстве вернёт его (нулевое) int_val. set_*, как
+// Slider/Spinbox.set_value, зовут on_change только если значение действительно
+// изменилось; кадр не инвалидируют (общее правило сеттеров, CLAUDE.md).
 // ─── Get/Set values by name ────────────────────────────
 
 pub fn (pg &PropertyGrid) get_string(name string) string {
@@ -475,46 +476,80 @@ pub fn (pg &PropertyGrid) get_choice(name string) int {
 
 pub fn (mut pg PropertyGrid) set_string(name string, value string) {
 	mut p := pg.find(name)
-	if unsafe { p != nil } {
+	if unsafe { p != nil } && p.str_val != value {
 		p.str_val = value
+		pg.fire_change(p)
 	}
 }
 
 pub fn (mut pg PropertyGrid) set_int(name string, value int) {
 	mut p := pg.find(name)
-	if unsafe { p != nil } {
+	if unsafe { p != nil } && p.int_val != value {
 		p.int_val = value
+		pg.fire_change(p)
 	}
 }
 
 pub fn (mut pg PropertyGrid) set_float(name string, value f32) {
 	mut p := pg.find(name)
-	if unsafe { p != nil } {
+	if unsafe { p != nil } && p.float_val != value {
 		p.float_val = value
+		pg.fire_change(p)
 	}
 }
 
 pub fn (mut pg PropertyGrid) set_bool(name string, value bool) {
 	mut p := pg.find(name)
-	if unsafe { p != nil } {
+	if unsafe { p != nil } && p.bool_val != value {
 		p.bool_val = value
+		pg.fire_change(p)
 	}
 }
 
 pub fn (mut pg PropertyGrid) set_color(name string, value Color) {
 	mut p := pg.find(name)
-	if unsafe { p != nil } {
+	if unsafe { p != nil } && p.color_val != value {
 		p.color_val = value
+		pg.fire_change(p)
 	}
 }
 
 pub fn (mut pg PropertyGrid) set_date(name string, year int, month int, day int) {
 	mut p := pg.find(name)
-	if unsafe { p != nil } {
+	if unsafe { p != nil } && (p.year != year || p.month != month || p.day != day) {
 		p.year = year
 		p.month = month
 		p.day = day
+		pg.fire_change(p)
 	}
+}
+
+// set_choice выбирает вариант idx свойства .choice; индекс вне списка вариантов
+// игнорируется.
+pub fn (mut pg PropertyGrid) set_choice(name string, idx int) {
+	mut p := pg.find(name)
+	if unsafe { p != nil } && idx >= 0 && idx < p.choices.len && p.choice_idx != idx {
+		p.choice_idx = idx
+		pg.fire_change(p)
+	}
+}
+
+// fire_change зовёт on_change(p), если обработчик задан.
+fn (pg &PropertyGrid) fire_change(p &Property) {
+	if pg.on_change != unsafe { nil } {
+		pg.on_change(p)
+	}
+}
+
+// toggle_bool переключает bool-свойство пользователем (клик, двойной клик, Enter/F2) и
+// зовёт on_change. readonly-свойство не меняется.
+fn (mut pg PropertyGrid) toggle_bool(prop &Property) {
+	if prop.readonly {
+		return
+	}
+	mut p := unsafe { prop }
+	p.bool_val = !p.bool_val
+	pg.fire_change(p)
 }
 
 // ─── Editing helpers ───────────────────────────────────
@@ -528,12 +563,12 @@ fn (mut pg PropertyGrid) cancel_edit() {
 	pg.editing = false
 	pg.edit_prop = unsafe { nil }
 	pg.edit_text_input = unsafe { nil }
-	pg.edit_combo = unsafe { nil }
 }
 
 // commit_edit применяет текст редактора к свойству по его типу (строки как есть, int/float
 // — разбором текста: нечисловой ввод даст 0), зовёт on_change и закрывает редактор.
-// Для остальных видов (choice) значение не меняется.
+// Свойство .choice текстовым редактором не правится: для него begin_edit открывает
+// список вариантов (open_choice_menu).
 fn (mut pg PropertyGrid) commit_edit() {
 	if !pg.editing {
 		return
@@ -768,6 +803,39 @@ fn (mut pg PropertyGrid) open_folder_dialog(prop &Property, app &App) {
 	}
 }
 
+// open_choice_menu показывает варианты свойства .choice выпадающим списком под ячейкой
+// значения (ContextMenu: общий оверлей меню с клавиатурой и мышью); текущий вариант
+// отмечен галочкой. Выбор пишет choice_idx и зовёт on_change. Меню хранится в
+// choice_menu: пока оно открыто, его держит и слот оверлея окна.
+fn (mut pg PropertyGrid) open_choice_menu(prop &Property, app &App) {
+	if prop.choices.len == 0 {
+		return
+	}
+	ctx_ptr := app.get_active_ctx()
+	if unsafe { ctx_ptr == nil } {
+		return
+	}
+	mut ctx := unsafe { &RenderContext(ctx_ptr) }
+	mut p := unsafe { prop }
+	mut cm := context_menu()
+	for i, text in prop.choices {
+		mut item := menu_checkbox(text, i == prop.choice_idx)
+		// Замыкание - через локальную переменную (обход vlang/v#28795, см.
+		// PROJECT.md, «Компилятор V»).
+		handler := fn [mut pg, mut p, i] (_ bool) {
+			if p.choice_idx != i {
+				p.choice_idx = i
+				pg.fire_change(p)
+			}
+		}
+		item.on_toggle = handler
+		cm.add(item)
+	}
+	pg.choice_menu = cm
+	r := pg.editor_rect_for(prop)
+	cm.show(r.x, r.y + r.h, mut ctx)
+}
+
 // Begin editing a property. For special types (color, date, file, folder)
 // opens a corresponding dialog instead of inline edit.
 fn (mut pg PropertyGrid) begin_edit(prop &Property, app &App) {
@@ -794,6 +862,10 @@ fn (mut pg PropertyGrid) begin_edit(prop &Property, app &App) {
 		}
 		.folder_path {
 			pg.open_folder_dialog(prop, app)
+			return
+		}
+		.choice {
+			pg.open_choice_menu(prop, app)
 			return
 		}
 		else {}
@@ -1557,11 +1629,7 @@ pub fn (mut pg PropertyGrid) handle_event(event &GuiEvent, app &App) bool {
 					// color/date/file/folder открываются ТОЛЬКО по двойному клику —
 					// здесь мы не обрабатываем эти типы, чтобы не блокировать dbl_click.
 					if row.prop.kind == .bool_val {
-						mut p := unsafe { row.prop }
-						p.bool_val = !p.bool_val
-						if pg.on_change != unsafe { nil } {
-							pg.on_change(row.prop)
-						}
+						pg.toggle_bool(row.prop)
 						return true
 					}
 				}
@@ -1586,11 +1654,7 @@ pub fn (mut pg PropertyGrid) handle_event(event &GuiEvent, app &App) bool {
 					return true
 				}
 				if row.prop.kind == .bool_val {
-					mut p := unsafe { row.prop }
-					p.bool_val = !p.bool_val
-					if pg.on_change != unsafe { nil } {
-						pg.on_change(row.prop)
-					}
+					pg.toggle_bool(row.prop)
 					return true
 				}
 				// Start editing — passes app for FocusManager registration
@@ -1662,11 +1726,7 @@ pub fn (mut pg PropertyGrid) handle_event(event &GuiEvent, app &App) bool {
 			if event.keycode == sdl_k_f2 || event.keycode == sdl_k_return {
 				if unsafe { pg.selected != nil } {
 					if pg.selected.kind == .bool_val {
-						mut p := unsafe { pg.selected }
-						p.bool_val = !p.bool_val
-						if pg.on_change != unsafe { nil } {
-							pg.on_change(pg.selected)
-						}
+						pg.toggle_bool(pg.selected)
 					} else if pg.selected.kind == .group {
 						mut p := unsafe { pg.selected }
 						p.expanded = !p.expanded

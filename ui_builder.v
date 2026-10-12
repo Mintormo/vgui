@@ -27,8 +27,8 @@ import os
 // Поток данных: текст -> yaml_parse -> YNode -> YamlBuilder.build_widget ->
 // UiTree.root -> window.add_ui_tree(tree). Пример - examples/43_ui_builder.v.
 //
-// Ошибки в YAML молчаливы: неизвестный `type` превращается в Spacer, неизвестное
-// имя обработчика просто не привязывается (разбор не падает). Исключение -
+// Ошибки в YAML разбор не роняют: неизвестный `type` превращается в Spacer (с
+// предупреждением в stderr), неизвестное имя обработчика просто не привязывается. Исключение -
 // корень документа не map и нечитаемый файл: load_ui_* вернут error.
 
 // HotkeyBinding - пара «сочетание клавиш -> обработчик», прочитанная из секции
@@ -54,6 +54,7 @@ pub:
 //                          радиокнопки и переключателя;
 //   change_str_handlers  - on_change TextInput;
 //   change_idx_handlers  - on_change ComboBox/TabBox (индекс, текст);
+//   section_handlers     - on_change Accordion (индекс секции, раскрыта ли);
 //   change_f32_handlers  - on_change Slider; change_int_handlers - SpinBox;
 //   submit_handlers      - on_submit TextInput; select_handlers - ListBox,
 //                          Breadcrumbs (on_click); dbl_click_handlers - ListBox;
@@ -64,6 +65,7 @@ pub mut:
 	change_bool_handlers map[string]fn (bool)
 	change_str_handlers  map[string]fn (string)
 	change_idx_handlers  map[string]fn (int, string)
+	section_handlers     map[string]fn (int, bool)
 	change_f32_handlers  map[string]fn (f32)
 	change_int_handlers  map[string]fn (int)
 	submit_handlers      map[string]fn (string)
@@ -99,6 +101,11 @@ pub fn (mut cb UiCallbacks) on_change_string(name string, handler fn (string)) {
 
 pub fn (mut cb UiCallbacks) on_change_index(name string, handler fn (int, string)) {
 	cb.change_idx_handlers[name] = handler
+}
+
+// on_section_toggle - обработчик `on_change` аккордеона: (индекс секции, раскрыта ли).
+pub fn (mut cb UiCallbacks) on_section_toggle(name string, handler fn (int, bool)) {
+	cb.section_handlers[name] = handler
 }
 
 pub fn (mut cb UiCallbacks) on_submit(name string, handler fn (string)) {
@@ -782,7 +789,8 @@ fn (mut b YamlBuilder) build_widget(n &YNode) VuiChild {
 // build_widget_by_type - диспетчер по полю `type`. Контейнеры, spacer,
 // separator и icon доступны всегда; остальные виджеты - только если включены
 // в сборку (has_<виджет>() из features.v). Неизвестный или выключенный тип
-// даёт Spacer, чтобы разметка не ломала раскладку.
+// даёт Spacer, чтобы разметка не ломала раскладку, и предупреждение в stderr
+// (раньше подмена была молчаливой, и опечатка в `type` терялась).
 // Не все виджеты библиотеки умеют строиться из YAML: нет, например, Grid,
 // Table, Calendar, Canvas.
 fn (mut b YamlBuilder) build_widget_by_type(wtype string, n &YNode) &Widget {
@@ -882,6 +890,7 @@ fn (mut b YamlBuilder) build_widget_by_type(wtype string, n &YNode) &Widget {
 		return b.build_breadcrumbs(n)
 	}
 
+	eprintln('vgui ui_builder: неизвестный или выключенный в сборке type "${wtype}" - вместо него Spacer')
 	return create_spacer()
 }
 
@@ -1899,11 +1908,8 @@ fn (mut b YamlBuilder) build_code_editor(n &YNode) &Widget {
 	ce.show_line_numbers = yn_bool(n, 'show_line_numbers', true)
 	ce.highlight_cur_line = yn_bool(n, 'highlight_cur_line', true)
 	ce.focus_group = yn_int(n, 'focus_group')
-	// `item_height` читается, но не применяется: ветка пуста (зарезервировано).
-	ih := yn_f32(n, 'item_height')
-	if ih > 0 {
-		// unused but reserved
-	}
+	// Высоту строки задаёт шрифт (font_size), отдельной настройки у CodeEditor нет,
+	// поэтому ключа `item_height` у code_editor нет.
 	ts := yn_int(n, 'tab_size')
 	if ts > 0 {
 		ce.tab_size = ts
@@ -2157,14 +2163,13 @@ fn (mut b YamlBuilder) build_accordion(n &YNode) &Widget {
 	}
 	acc.visible = yn_bool(n, 'visible', true)
 	acc.enabled = yn_bool(n, 'enabled', true)
+	// on_change: раскрытие/сворачивание секции пользователем, обработчик из
+	// UiCallbacks.on_section_toggle (индекс секции, раскрыта ли).
 	oc := yn_str(n, 'on_change')
 	if oc.len > 0 {
-		h := b.cb.change_idx_handlers[oc] or { unsafe { nil } }
+		h := b.cb.section_handlers[oc] or { unsafe { nil } }
 		if h != unsafe { nil } {
-			// Wrap fn(int, string) → fn(int, bool) by section index
-			// For accordion we use change_bool_handlers pattern instead
-			// (на деле ветка пуста: `on_change` аккордеона из YAML НЕ
-			// привязывается - обработчик находится, но нигде не сохраняется)
+			acc.on_change = h
 		}
 	}
 	b.reg(n, voidptr(acc))

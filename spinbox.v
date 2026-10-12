@@ -59,33 +59,35 @@ pub mut:
 // ─── Constructors ──────────────────────────────────────
 
 // Создаёт Spinbox (0..100, шаг 1) с внутренним TextInput: плоский (чтобы не было скруглённого
-// прямоугольника внутри скруглённого), максимум 16 символов, фильтр допускает только
-// цифры и ведущий минус. Колбэк text_input.on_change во время набора просто обновляет value
+// прямоугольника внутри скруглённого), максимум 64 символа (число плюс prefix/suffix),
+// ввод проверяет accepts_text: целое с необязательным минусом, окружённое необязательными
+// prefix и suffix. Колбэк text_input.on_change во время набора просто обновляет value
 // без ограничения диапазоном и форматирования: ограничение посреди ввода запретило бы
 // промежуточные строки вроде "" или "-"; нормализация делается при потере фокуса.
 pub fn spinbox() &Spinbox {
 	mut s := &Spinbox{}
 	mut ti := text_input('')
-	ti.max_len = 16
+	ti.max_len = 64
 	// Spinbox draws its own rounded background and border; the inner
 	// text input must blend in with square edges, otherwise we get a
 	// rounded rectangle inside a rounded rectangle.
 	ti.flat = true
-	// Spinbox holds integer values only — the filter blocks anything
-	// other than digits and an optional leading minus at insertion
-	// time, so we no longer need to overwrite the text on every
-	// keystroke.
-	ti.input_filter = r'^-?[0-9]*$'
-	ti.input_filter_mode = .pattern
+	// Только целое число - но текст поля включает prefix/suffix ("$5", "5 шт."),
+	// поэтому регулярное выражение по всей строке не годится (оно отклоняло любой
+	// ввод при заданном префиксе): кандидат проверяет accepts_text.
+	ti.accept = fn [s] (candidate string) bool {
+		return s.accepts_text(candidate)
+	}
 	// While the user is typing, just track the parsed value without
 	// clamping or reformatting — clamping during entry would block
 	// transitional strings like "" or "-" before the user types the
 	// rest of the number. Normalization happens on blur.
 	ti.on_change = fn [mut s] (txt string) {
-		if txt.len == 0 || txt == '-' {
+		num := s.number_part(txt)
+		if num.len == 0 || num == '-' {
 			return
 		}
-		val := strconv.atoi(txt) or { return }
+		val := strconv.atoi(num) or { return }
 		s.value = val
 		if s.on_change != unsafe { nil } {
 			s.on_change(s.value)
@@ -105,6 +107,33 @@ fn (mut s Spinbox) init_buttons_bounds() (Rect, Rect) {
 	dec_r := Rect{s.bounds.x + s.bounds.w - btn_w * 2, s.bounds.y, btn_w, s.bounds.h}
 	inc_r := Rect{s.bounds.x + s.bounds.w - btn_w, s.bounds.y, btn_w, s.bounds.h}
 	return dec_r, inc_r
+}
+
+// number_part - числовая часть текста поля: без prefix в начале и suffix в конце (каждый
+// снимается, только если он действительно там стоит) и без пробелов по краям.
+fn (s &Spinbox) number_part(txt string) string {
+	mut t := txt
+	if s.prefix.len > 0 && t.starts_with(s.prefix) {
+		t = t[s.prefix.len..]
+	}
+	if s.suffix.len > 0 && t.ends_with(s.suffix) {
+		t = t[..t.len - s.suffix.len]
+	}
+	return t.trim_space()
+}
+
+// accepts_text - допустим ли текст поля во время набора: числовая часть пуста, "-" или
+// целое с необязательным ведущим минусом. Промежуточные "" и "-" разрешены, иначе
+// поле нельзя было бы очистить и набрать отрицательное число.
+fn (s &Spinbox) accepts_text(txt string) bool {
+	num := s.number_part(txt)
+	digits := if num.starts_with('-') { num[1..] } else { num }
+	for c in digits {
+		if !c.is_digit() {
+			return false
+		}
+	}
+	return true
 }
 
 // Текст для поля: prefix + число + suffix.
@@ -241,6 +270,9 @@ pub fn (mut s Spinbox) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	ctx_ptr := app.get_active_ctx()
+	// Внутреннее поле получает событие ровно один раз (ti_handled - его ответ). Раньше
+	// в конце метода оно звалось ещё раз, и mouse_move/mouse_down доходили до поля дважды.
+	mut ti_handled := false
 
 	match event.typ {
 		.mouse_move {
@@ -250,7 +282,7 @@ pub fn (mut s Spinbox) handle_event(event &GuiEvent, app &App) bool {
 
 			if unsafe { ctx_ptr != nil } && s.text_input != unsafe { nil } {
 				mut ti := unsafe { s.text_input }
-				ti.handle_event(event, app)
+				ti_handled = ti.handle_event(event, app)
 			}
 		}
 		.mouse_down {
@@ -266,10 +298,11 @@ pub fn (mut s Spinbox) handle_event(event &GuiEvent, app &App) bool {
 				}
 				if unsafe { ctx_ptr != nil } && s.text_input != unsafe { nil } {
 					mut ti := unsafe { s.text_input }
-					if ti.handle_event(event, app) {
-						return true
-					}
+					ti_handled = ti.handle_event(event, app)
 				}
+			} else if s.text_input != unsafe { nil } {
+				mut ti := unsafe { s.text_input }
+				ti_handled = ti.handle_event(event, app)
 			}
 		}
 		.mouse_up {
@@ -308,13 +341,19 @@ pub fn (mut s Spinbox) handle_event(event &GuiEvent, app &App) bool {
 
 				return handled
 			}
+			if s.text_input != unsafe { nil } {
+				mut ti := unsafe { s.text_input }
+				ti_handled = ti.handle_event(event, app)
+			}
 		}
 		.key_down {
 			if unsafe { ctx_ptr != nil } {
 				mut ti := unsafe { s.text_input }
 				if ti != unsafe { nil } && ti.handle_event(event, app) {
-					return true
+					ti_handled = true
 				}
+			}
+			if !ti_handled && unsafe { ctx_ptr != nil } {
 				if s.text_input != unsafe { nil } && unsafe { s.text_input.focused } {
 					match event.keycode {
 						sdl_k_up {
@@ -348,7 +387,13 @@ pub fn (mut s Spinbox) handle_event(event &GuiEvent, app &App) bool {
 				}
 			}
 		}
-		else {}
+		else {
+			// Остальное (ввод текста, двойной клик, колесо...) - полю как есть.
+			if s.text_input != unsafe { nil } {
+				mut ti := unsafe { s.text_input }
+				ti_handled = ti.handle_event(event, app)
+			}
+		}
 	}
 
 	// Detect focused→unfocused on the embedded text input and run a
@@ -363,8 +408,9 @@ pub fn (mut s Spinbox) handle_event(event &GuiEvent, app &App) bool {
 		s.was_ti_focused = ti_focused
 	}
 
-	return s.hovered_dec || s.hovered_inc
-		|| (s.text_input != unsafe { nil } && unsafe { s.text_input.handle_event(event, app) })
+	// Наведение на кнопки поглощает только само движение мыши; раньше при курсоре над
+	// кнопками поглощалось любое событие, в том числе горячие клавиши окна.
+	return ti_handled || (event.typ == .mouse_move && (s.hovered_dec || s.hovered_inc))
 }
 
 // normalize_text clamps the parsed value into [min, max] and rewrites
@@ -374,12 +420,12 @@ fn (mut s Spinbox) normalize_text() {
 	if s.text_input == unsafe { nil } {
 		return
 	}
-	txt := unsafe { s.text_input.get_text() }
+	num := s.number_part(unsafe { s.text_input.get_text() })
 	mut v := s.value
-	if txt.len == 0 || txt == '-' {
+	if num.len == 0 || num == '-' {
 		v = s.min
 	} else {
-		v = strconv.atoi(txt) or { s.value }
+		v = strconv.atoi(num) or { s.value }
 	}
 	s.set_value(v)
 	s.update_text_input()

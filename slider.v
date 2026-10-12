@@ -120,11 +120,17 @@ pub fn (mut s Slider) set_value(v f32) {
 
 // min > max меняются местами — так же, как в Spinbox.set_range: у одинакового
 // входа должен быть одинаковый результат.
-// Текущее значение value ограничивается новым диапазоном; on_change при этом НЕ вызывается,
-// даже если значение сдвинулось.
+// Текущее значение value ограничивается новым диапазоном; если оно от этого сдвинулось,
+// зовётся on_change - как в Spinbox.set_range.
 pub fn (mut s Slider) set_range(min f32, max f32) {
 	s.min, s.max = ordered_range_f32(min, max)
-	s.value = clamp_f32(s.value, s.min, s.max)
+	clamped := clamp_f32(s.value, s.min, s.max)
+	if clamped != s.value {
+		s.value = clamped
+		if s.on_change != unsafe { nil } {
+			s.on_change(s.value)
+		}
+	}
 }
 
 // ─── Helpers ───────────────────────────────────────────

@@ -2,13 +2,14 @@ module vgui
 
 import os
 
-// Кэш текстур картинок MarkdownView привязан к рендереру (MdImageTexture).
-// Аудит 2026-10, 1.1: cleanup() звал SDL_DestroyTexture без проверки, жив ли
-// рендерер, - после закрытия окна это повторное освобождение; а кэш по голому
-// пути отдавал текстуру чужого или уже мёртвого рендерера, если виджет
-// переносили в другое окно.
+// MarkdownView: картинки и якоря (аудит 2026-10, 1.1 и 2.17).
 //
-// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v -enable-globals test markdown_texture_test.v
+// 1.1: кэш текстур картинок привязан к рендереру (MdImageTexture). cleanup() звал
+// SDL_DestroyTexture без проверки, жив ли рендерер, - после закрытия окна это
+// повторное освобождение; а кэш по голому пути отдавал текстуру чужого или уже
+// мёртвого рендерера, если виджет переносили в другое окно.
+//
+// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v -enable-globals test markdown_view_test.v
 
 const md_test_image = os.join_path(@VMODROOT, 'assets', 'icons', 'home.png')
 
@@ -48,4 +49,19 @@ fn test_image_texture_is_bound_to_renderer() {
 
 	win1.cleanup()
 	app.cleanup()
+}
+
+// Кэш размеров картинок читается и пишется по одному ключу (аудит 2026-10, 2.17).
+fn test_image_path_is_shared_key() {
+	mut md := markdown_view()
+	md.base_dir = '/docs'
+	assert md.image_path('img/a.png') == os.join_path('/docs', 'img/a.png')
+	assert md.image_path('/abs/b.png') == '/abs/b.png'
+}
+
+// slug: буква не путается с дефисом по младшему байту руны (2.17).
+fn test_heading_slug_keeps_unicode_letters() {
+	assert md_heading_to_slug('Hello World') == 'hello-world'
+	assert md_heading_to_slug('ĭ test') == 'ĭ-test'
+	assert md_heading_to_slug('Привет, мир') == 'привет-мир'
 }

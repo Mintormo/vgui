@@ -7,7 +7,9 @@ import os
 // SDL3: SDL_RenderReadPixels returns a surface directly.
 // ═══════════════════════════════════════════════════════
 
-// ImageFormat - формат сохраняемого файла; выбирается по расширению пути (image_format_from_path). tiff объявлен, но сохранение в него не поддерживается (всегда ошибка).
+// ImageFormat - формат сохраняемого файла; выбирается по расширению пути (image_format_from_path).
+// tiff распознаётся, но записать его нельзя: SDL_image умеет TIFF только читать, поэтому
+// сохранение в .tiff - намеренно ошибка (false), а не JPEG/PNG под чужим расширением.
 pub enum ImageFormat {
 	png
 	jpg
@@ -16,8 +18,10 @@ pub enum ImageFormat {
 	webp
 }
 
-// image_format_from_path - формат по расширению (.jpg/.jpeg, .tif/.tiff, ... без учёта регистра); неизвестное расширение даёт png (запись пойдёт PNG-данными под чужим именем).
-pub fn image_format_from_path(path string) ImageFormat {
+// image_format_from_path - формат по расширению (.jpg/.jpeg, .tif/.tiff, ... без учёта
+// регистра); неизвестное расширение - none. Раньше оно давало png, и файл .gif или без
+// расширения молча получал PNG-данные под чужим именем.
+pub fn image_format_from_path(path string) ?ImageFormat {
 	ext := os.file_ext(path).to_lower()
 	return match ext {
 		'.png' { ImageFormat.png }
@@ -25,14 +29,15 @@ pub fn image_format_from_path(path string) ImageFormat {
 		'.bmp' { ImageFormat.bmp }
 		'.tif', '.tiff' { ImageFormat.tiff }
 		'.webp' { ImageFormat.webp }
-		else { ImageFormat.png }
+		else { none }
 	}
 }
 
 // Save a rectangular region of the window's renderer to a file.
 // The rectangle is in LOGICAL coordinates (same as widget bounds).
 // Параметры: region - в ЛОГИЧЕСКИХ координатах; quality 1..100 для jpg/webp (<= 0 -> 90, > 100 -> 100). Возвращает false при любой
-// ошибке (нет рендерера, пустая или целиком вне окна область, сбой SDL/кодека, tiff).
+// ошибке (нет рендерера, пустая или целиком вне окна область, сбой SDL/кодека, tiff,
+// неизвестное расширение).
 // Алгоритм: логические координаты переводятся в физические пиксели (умножение на dpi_scale * ui_scale), область
 // обрезается по размеру окна, затем SDL_RenderReadPixels читает пиксели из текущего кадра рендерера. Захватывается то,
 // что уже нарисовано: для свежего кадра сначала вызовите render() (как PlotView.save_to_image).
@@ -54,10 +59,15 @@ pub fn (mut w Window) save_region_to_image(path string, region Rect, quality int
 		return false
 	}
 
-	// Размер окна для обрезки области берётся из SDL_GetWindowSize (так в коде; см. замечание в отчёте про HiDPI, где физические и оконные пиксели могут различаться).
+	// Формат проверяется до чтения пикселей: неизвестное расширение - сразу false.
+	fmt := image_format_from_path(path) or { return false }
+
+	// Область обрезается по размеру текущей цели рендеринга в физических пикселях - в тех
+	// же единицах, что phys_*. Раньше бралось SDL_GetWindowSize (оконные единицы): на HiDPI
+	// они меньше физических, и снимок обрезался.
 	mut win_w := 0
 	mut win_h := 0
-	C.SDL_GetWindowSize(w.sdl_window, &win_w, &win_h)
+	C.SDL_GetCurrentRenderOutputSize(w.renderer, &win_w, &win_h)
 	if phys_x >= win_w || phys_y >= win_h {
 		return false
 	}
@@ -93,7 +103,6 @@ pub fn (mut w Window) save_region_to_image(path string, region Rect, quality int
 	}
 	defer { C.SDL_DestroySurface(surface) }
 
-	fmt := image_format_from_path(path)
 	q := if quality <= 0 {
 		90
 	} else if quality > 100 {

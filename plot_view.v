@@ -2,6 +2,7 @@ module vgui
 
 import math
 import os
+import strconv
 
 // ═══════════════════════════════════════════════════════
 // PlotView — function plot widget with axes, grid,
@@ -44,8 +45,8 @@ pub mut:
 
 // PlotSeries — одна серия данных (кривая/ломаная/облако). Приватна: создаётся через
 // add_function*/add_points*/add_scatter*. Для function используется func, для
-// остальных — points (копия данных). name хранится для легенды, но легенда
-// сейчас нигде не рисуется.
+// остальных — points (копия данных). name - подпись серии в легенде (draw_legend);
+// серия без имени в легенду не попадает.
 struct PlotSeries {
 mut:
 	kind         PlotSeriesKind = .function
@@ -109,6 +110,8 @@ pub mut:
 	show_labels      bool  = true
 	show_axes        bool  = true
 	show_scrollbars  bool  = true
+	// Легенда: подписи именованных серий (add_*_named) в правом верхнем углу графика.
+	show_legend bool = true
 	// Series
 	// серии в порядке добавления (поздние рисуются поверх)
 	series []PlotSeries
@@ -659,6 +662,10 @@ pub fn (mut p PlotView) draw(mut ctx RenderContext) {
 		}
 	}
 
+	if p.show_legend {
+		p.draw_legend(pr, mut ctx)
+	}
+
 	ctx.pop_clip()
 
 	if p.show_labels {
@@ -666,6 +673,45 @@ pub fn (mut p PlotView) draw(mut ctx RenderContext) {
 	}
 	if p.show_scrollbars {
 		p.draw_scrollbars(mut ctx)
+	}
+}
+
+// draw_legend рисует легенду в правом верхнем углу области графика: для каждой видимой
+// серии с именем - образец цвета и имя. Нет ни одной именованной серии - ничего не
+// рисуется. Фон - цвет фона графика, рамка - цвет рамки виджета.
+fn (p &PlotView) draw_legend(pr Rect, mut ctx RenderContext) {
+	font := ctx.get_font(.regular, 0)
+	fh := ctx.font_height_of(font)
+	mut names := []string{}
+	mut colors := []Color{}
+	mut max_w := f32(0)
+	for s in p.series {
+		if !s.visible || s.name.len == 0 {
+			continue
+		}
+		names << s.name
+		colors << s.color
+		max_w = max_f32(max_w, ctx.measure_text_with_font(s.name, font).x)
+	}
+	if names.len == 0 {
+		return
+	}
+	pad := f32(6)
+	swatch := f32(14)
+	row_h := fh + 4
+	box := Rect{
+		x: pr.x + pr.w - (pad * 3 + swatch + max_w) - 8
+		y: pr.y + 8
+		w: pad * 3 + swatch + max_w
+		h: pad * 2 + row_h * f32(names.len)
+	}
+	ctx.fill_rounded_rect(box, p.eff_bg(ctx).with_alpha(230), 4)
+	ctx.draw_rounded_rect(box, p.eff_border(ctx), 4)
+	for i, name in names {
+		row_y := box.y + pad + row_h * f32(i)
+		ctx.fill_rect(Rect{box.x + pad, row_y + (row_h - 3) * 0.5, swatch, 3}, colors[i])
+		ctx.draw_text_with_font(name, box.x + pad * 2 + swatch, row_y + (row_h - fh) * 0.5,
+			p.eff_label(ctx), font)
 	}
 }
 
@@ -1423,11 +1469,18 @@ fn csv_detect_delimiter(line string) string {
 	return best
 }
 
-// csv_parse_number разбирает число; если разделитель полей не запятая, запятая считается десятичной ('1,5' -> 1.5). Результат — f32() строки: для нечисловой строки, по-видимому, 0, а не NaN (см. проверку на NaN в parse_csv_points).
+// csv_parse_number разбирает число; если разделитель полей не запятая, запятая считается
+// десятичной ('1,5' -> 1.5); пробелы и кавычки по краям снимаются.
+// Нечисловое поле (заголовок, «n/a», пусто) даёт NaN, и строка пропускается: раньше
+// String.f32() возвращал для него 0, и в серию попадала ложная точка (0, 0).
 fn csv_parse_number(s string, delim string) f32 {
 	// If ',' is not the field separator, allow it as decimal separator
-	t := if delim != ',' { s.replace(',', '.') } else { s }
-	return t.f32()
+	t := (if delim != ',' { s.replace(',', '.') } else { s }).trim_space().trim('"')
+	if t.len == 0 {
+		return f32(math.nan())
+	}
+	v := strconv.atof64(t) or { return f32(math.nan()) }
+	return f32(v)
 }
 
 // Load a connected-line series from a CSV file.

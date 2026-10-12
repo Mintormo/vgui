@@ -34,7 +34,7 @@ children:
 
   - type: checkbox
     text: "Подписаться на рассылку"
-    on_click: on_subscribe
+    on_change: on_subscribe
 
   - type: slider
     id: volume
@@ -92,8 +92,13 @@ fn main() {
 	cb.on_change_string('on_name_change', fn [mut state] (text string) {
 		state.set_status('Имя: ${text}')
 	})
-	cb.on_click('on_subscribe', fn [mut state] () {
-		state.set_status('Подписка переключена')
+	// У чекбокса событие on_change с новым состоянием (не on_click).
+	cb.on_change_bool('on_subscribe', fn [mut state] (on bool) {
+		state.set_status(if on {
+			'Подписка включена'
+		} else {
+			'Подписка выключена'
+		})
 	})
 	cb.on_change_f32('on_volume', fn [mut state] (v f32) {
 		state.set_status('Громкость: ${v:.0f}')

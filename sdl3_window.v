@@ -58,8 +58,10 @@ pub enum WindowMode {
 // размера (0 у max - без ограничения). theme == none - тема приложения (применит App.add_window).
 // *_path / *_data - шрифты файлом или байтами (data приоритетнее; пусто - встроенные).
 // font_size/mono_size - логические размеры; high_dpi - включить HiDPI; borderless/hittest_data -
-// служебные поля безрамочного режима. Поле vsync в create_window не читается (VSync всегда
-// выключен, частоту кадров задаёт цикл App).
+// служебные поля безрамочного режима. vsync - синхронизация показа кадра с
+// обновлением экрана; по умолчанию выключена: частоту кадров задаёт цикл App
+// (AppConfig.target_fps), а VSync блокирует показ кадра в каждом окне, и при нескольких
+// анимированных окнах частота делилась бы на их число.
 @[params]
 pub struct WindowConfig {
 pub mut:
@@ -91,9 +93,9 @@ pub mut:
 	bold_italic_data []u8
 	mono_data        []u8
 	mono_bold_data   []u8
-	font_size        int  = 16
-	mono_size        int  = 16
-	vsync            bool = true
+	font_size        int = 16
+	mono_size        int = 16
+	vsync            bool
 	high_dpi         bool = true
 	icon_path        string
 	borderless       bool
@@ -368,8 +370,8 @@ pub fn create_window(cfg WindowConfig) !&Window {
 	}
 	C.SDL_SetRenderDrawBlendMode(ren, sdl_blendmode_blend)
 	register_renderer(ren)
-	// VSync disabled: frame rate is controlled by SDL_Delay in the app loop
-	C.SDL_SetRenderVSync(ren, 0)
+	// VSync по WindowConfig.vsync (по умолчанию выключен: частоту кадров задаёт цикл App).
+	C.SDL_SetRenderVSync(ren, if cfg.vsync { 1 } else { 0 })
 
 	shared_fonts_ptr := get_or_load_fonts(window_font_config(cfg, cfg.font_size, cfg.mono_size)) or {
 		C.SDL_DestroyRenderer(ren)
@@ -414,6 +416,9 @@ pub fn create_window(cfg WindowConfig) !&Window {
 	if rc.dpi_info.is_hidpi {
 		w.reload_scaled_fonts()
 	}
+	// Инвариант: create_window не сохраняет адрес w ни в SDL (свойства окна, hit-test), ни
+	// в глобальных реестрах - create_dialog копирует окно по значению, и сохранённый адрес
+	// указывал бы на брошенный оригинал. Такая регистрация - только после создания.
 	return w
 }
 
@@ -586,15 +591,29 @@ pub fn (w &Window) is_borderless() bool {
 	return w.config.borderless
 }
 
-// Задаёт размер окна в пикселях SDL и сразу обновляет логический размер экрана ctx. При
-// ui_scale != 1 переданные значения записываются в screen_width/height как есть, без деления на
-// масштаб (set_ui_scale и событие resize потом приведут их в порядок).
+// Задаёт размер окна в логических единицах vgui - тех же, что у виджетов и config.width/
+// height: окно SDL получает размер × ui_scale. Раньше значения уходили в SDL как есть, и при
+// ui_scale != 1 окно (в том числе после fit_to_content, передающего размер из measure())
+// получалось меньше содержимого.
 pub fn (mut w Window) set_size(width int, height int) {
-	C.SDL_SetWindowSize(w.sdl_window, width, height)
+	scale := w.ctx.ui_scale
+	C.SDL_SetWindowSize(w.sdl_window, int(f32(width) * scale + 0.5), int(f32(height) * scale + 0.5))
 	w.config.width = width
 	w.config.height = height
 	w.ctx.screen_width = f32(width)
 	w.ctx.screen_height = f32(height)
+}
+
+// apply_sdl_size записывает размер окна SDL (sdl_w x sdl_h) как логический: config.width/
+// height и screen_width/height = SDL-размер / ui_scale. Единая точка для событий окна
+// (развернуть, восстановить) и первой раскладки по содержимому: раньше часть путей писала в
+// config SDL-размер, и set_ui_scale потом считал от неверной базы.
+pub fn (mut w Window) apply_sdl_size(sdl_w int, sdl_h int) {
+	scale := if w.ctx.ui_scale > 0 { w.ctx.ui_scale } else { f32(1) }
+	w.ctx.screen_width = f32(sdl_w) / scale
+	w.ctx.screen_height = f32(sdl_h) / scale
+	w.config.width = int(w.ctx.screen_width + 0.5)
+	w.config.height = int(w.ctx.screen_height + 0.5)
 }
 
 // measure_content — сколько места просят корневые виджеты
@@ -646,13 +665,22 @@ pub fn (mut w Window) fit_to_content(max_w int, max_h int) {
 	w.set_size(cw, ch)
 }
 
-// Позиция окна на экране в пикселях; center() - по центру экрана (SDL_WINDOWPOS_CENTERED).
+// Позиция окна на экране в пикселях; center() - по центру дисплея, на котором окно сейчас
+// (раньше - всегда основного: окно на втором мониторе прыгало на первый).
 pub fn (mut w Window) set_position(x int, y int) {
 	C.SDL_SetWindowPosition(w.sdl_window, x, y)
 }
 
 pub fn (mut w Window) center() {
-	C.SDL_SetWindowPosition(w.sdl_window, sdl_windowpos_centered, sdl_windowpos_centered)
+	mut pos := sdl_windowpos_centered
+	if w.sdl_window != unsafe { nil } {
+		id := C.SDL_GetDisplayForWindow(w.sdl_window)
+		if id != 0 {
+			// SDL_WINDOWPOS_CENTERED_DISPLAY(id)
+			pos = int(u32(sdl_windowpos_centered) | id)
+		}
+	}
+	C.SDL_SetWindowPosition(w.sdl_window, pos, pos)
 }
 
 // Закрывает окно: помечает его не открытым и скрытым, прячет SDL-окно и вызывает on_close.
@@ -890,10 +918,7 @@ fn (mut w Window) fit_min_size() {
 		sw := max_int(max_int(mw, title_w), int(hint.w * scale + 0.999))
 		sh := max_int(mh, int(hint.h * scale + 0.999))
 		C.SDL_SetWindowSize(w.sdl_window, sw, sh)
-		w.config.width = sw
-		w.config.height = sh
-		w.ctx.screen_width = f32(sw) / scale
-		w.ctx.screen_height = f32(sh) / scale
+		w.apply_sdl_size(sw, sh)
 		if w.config.x < 0 && w.config.y < 0 {
 			C.SDL_SetWindowPosition(w.sdl_window, sdl_windowpos_centered, sdl_windowpos_centered)
 		}
@@ -1604,9 +1629,9 @@ pub mut:
 	bold_italic_data []u8
 	mono_data        []u8
 	mono_bold_data   []u8
-	font_size        int  = 14
-	mono_size        int  = 13
-	vsync            bool = true
+	font_size        int = 14
+	mono_size        int = 13
+	vsync            bool
 	high_dpi         bool = true
 	icon_path        string
 	ui_scale         f32
@@ -1706,6 +1731,10 @@ pub fn create_dialog(cfg DialogConfig) !&Dialog {
 		w.set_ui_scale(scale)
 	}
 
+	// Окно копируется в Dialog по значению: все ресурсы (SDL-окно, рендерер, шрифты) -
+	// указатели и переходят в копию, а оригинал больше не используется и не освобождается.
+	// Это безопасно, пока create_window нигде не сохраняет собственный адрес (&Window) -
+	// см. инвариант у create_window.
 	return &Dialog{
 		win:         unsafe { *w }
 		parent_id:   parent_id

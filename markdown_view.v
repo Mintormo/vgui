@@ -366,10 +366,11 @@ fn md_heading_to_slug(text string) string {
 	mut s := ''
 	for r in text.to_lower().runes() {
 		c := r.str()
-		b := u8(r)
-		if (b >= `a` && b <= `z`) || (b >= `0` && b <= `9`) {
+		// Сравнивается сама руна: раньше брался её младший байт (u8(r)), и буква
+		// вроде U+012D (ĭ, младший байт 0x2D = '-') превращалась в дефис.
+		if (r >= `a` && r <= `z`) || (r >= `0` && r <= `9`) {
 			s += c
-		} else if b == ` ` || b == `-` || b == `_` {
+		} else if r == ` ` || r == `-` || r == `_` {
 			s += '-'
 		}
 		// non-ASCII Unicode letters: include as-is (covers Cyrillic etc.)
@@ -1818,7 +1819,7 @@ fn (mut md MarkdownView) layout(ctx &RenderContext, max_w f32) {
 				// Высота картинки: если задан масштаб и реальный размер уже известен (image_size_cache) - по пропорциям, иначе запас md_image_max_h. Размер узнаётся при первой отрисовке и тогда раскладка пересчитывается (dirty).
 				// use real image dimensions if cached, else fall back to md_image_max_h
 				img_area_h := if block.image_scale > 0 {
-					if sz := md.image_size_cache[block.image_url] {
+					if sz := md.image_size_cache[md.image_path(block.image_url)] {
 						tw_l := f32(sz[0])
 						th_l := f32(sz[1])
 						if tw_l > 0 {
@@ -1949,7 +1950,7 @@ fn (md &MarkdownView) layout_spans(spans []MdSpan, ctx &RenderContext, max_w f32
 			cap_font := ctx.get_font_immut(.italic, default_size)
 			caption_h := md_caption_height(span.alt, ctx, cap_font, img_w)
 			img_area_h_l := if span.image_scale > 0 {
-				if sz := md.image_size_cache[span.url] {
+				if sz := md.image_size_cache[md.image_path(span.url)] {
 					tw_l := f32(sz[0])
 					th_l := f32(sz[1])
 					if tw_l > 0 {
@@ -2678,6 +2679,17 @@ fn (mut md MarkdownView) draw_line_spans(line &MdLine, ly f32, ox f32, mut ctx R
 	}
 }
 
+// image_path - путь к файлу картинки: относительный url берётся от base_dir. Один ключ
+// и для текстур, и для image_size_cache: раньше раскладка читала размеры по сырому url,
+// а отрисовка записывала их по пути с base_dir, и при относительных путях высота
+// картинки с масштабом оставалась приблизительной.
+fn (md &MarkdownView) image_path(url string) string {
+	if md.base_dir.len > 0 && !os.is_abs_path(url) {
+		return os.join_path(md.base_dir, url)
+	}
+	return url
+}
+
 // MdImageTexture - текстура картинки в кэше вместе с рендерером, которому она принадлежит, и его
 // поколением в реестре живых рендереров. Текстура SDL живёт не дольше своего рендерера: когда окно
 // закрыто или рендерер пересоздан (сброс устройства Direct3D), SDL уже освободил её сам. Пара
@@ -2732,10 +2744,7 @@ fn (mut md MarkdownView) image_texture(path string, ctx &RenderContext) voidptr 
 // dirty, чтобы высота строки стала точной. Нет файла - вместо картинки рисуется «[Image: ...]». Подпись переносится по словам
 // под картинкой с выравниванием image_align.
 fn (mut md MarkdownView) draw_inline_image(span MdRenderSpan, ix f32, ly f32, line_h f32, mut ctx RenderContext) {
-	mut path := span.image_url
-	if md.base_dir.len > 0 && !os.is_abs_path(path) {
-		path = os.join_path(md.base_dir, path)
-	}
+	path := md.image_path(span.image_url)
 
 	if !os.exists(path) {
 		font := ctx.get_font(.italic, md.font_size)
@@ -2916,10 +2925,7 @@ fn (mut md MarkdownView) draw_image_block(block MdBlock, ly f32, ox f32, vp Rect
 	caption_h := md_caption_height(block.image_alt, ctx, cap_font_d, target_w_d)
 	img_area_h := md_image_max_h
 
-	mut path := block.image_url
-	if md.base_dir.len > 0 && !os.is_abs_path(path) {
-		path = os.join_path(md.base_dir, path)
-	}
+	path := md.image_path(block.image_url)
 
 	if !os.exists(path) {
 		font := ctx.get_font(.italic, md.font_size)

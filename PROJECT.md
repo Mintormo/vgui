@@ -30,6 +30,8 @@ vgui - самостоятельная библиотека, ничего не з
 - Hover после прокрутки колесом
 - CurveEditor (kind 52) — редактор тональной кривой
 - ListBox: множественный выбор (`multi_select`); MenuBar.set_items
+- Размер окна — логические единицы
+- Сочетания Ctrl+буква (`ctrl_letter`)
 - Текстовый ввод SDL — только по фокусу; Canvas.take_keys
 - Кольцо пипетки (Canvas.brush_ring, brush_min_px); key_mods()
 - Canvas: инструменты поверх снимка (on_overlay, fx/fy, set_cursor, двойной щелчок)
@@ -70,7 +72,7 @@ SDL привязывает каждую текстуру к создавшему
 
 Защита: глобальный **реестр живых рендереров** в `sdl3_window.v` — `g_live_renderers []LiveRenderer` (пары `{ptr voidptr, gen u64}`) с функциями `register_renderer` / `unregister_renderer` / `renderer_generation` / `is_renderer_alive` / `is_renderer_alive_gen`. `Window` регистрирует свой рендерер сразу после `SDL_CreateRenderer`; `Window.cleanup()` вызывает `unregister_renderer` **до** `SDL_DestroyRenderer`.
 
-**Защита от ABA — generation-счётчик.** Голое сравнение указателей недостаточно: новый рендерер может быть аллоцирован по адресу умершего, и устаревший снимок указателя выглядел бы «живым» (то же обоснование, что у монотонных `cb_id` в `_lib.py`). Поэтому каждая регистрация получает монотонный `gen u64` (`g_renderer_gen`, никогда не переиспользуется; 0 — невалидное поколение). `ImageView` хранит пару `tex_renderer` + `tex_renderer_gen` (снимаются в `ensure_texture_loaded` через `renderer_generation(ctx.renderer)`); и `destroy_texture()`, и swap-destroy внутри `ensure_texture_loaded` вызывают `SDL_DestroyTexture` **только если `is_renderer_alive_gen(iv.tex_renderer, iv.tex_renderer_gen)`** — иначе SDL уже освободил текстуру (или по адресу живёт другой рендерер), и они просто обнуляют дескрипторы. Нулевой (nil) рендерер и `gen == 0` считаются мёртвыми. `unregister_renderer` ищет по указателю — это корректно, потому что реестр содержит только живые рендереры, а два живых не могут делить адрес. Все рендереры (Window + `Dialog.win`) уничтожаются через единую точку `Window.cleanup()`, поэтому регистрация/снятие симметричны. Так же устроен кэш картинок `MarkdownView` (`MdImageTexture`: текстура + рендерер + поколение): запись чужого или мёртвого рендерера не используется и не освобождается повторно (тест `markdown_texture_test.v`). Юнит-тест: `renderer_registry_test.v` (фиктивные указатели, SDL не нужен) — запуск `v -enable-globals test renderer_registry_test.v` из корня.
+**Защита от ABA — generation-счётчик.** Голое сравнение указателей недостаточно: новый рендерер может быть аллоцирован по адресу умершего, и устаревший снимок указателя выглядел бы «живым» (то же обоснование, что у монотонных `cb_id` в `_lib.py`). Поэтому каждая регистрация получает монотонный `gen u64` (`g_renderer_gen`, никогда не переиспользуется; 0 — невалидное поколение). `ImageView` хранит пару `tex_renderer` + `tex_renderer_gen` (снимаются в `ensure_texture_loaded` через `renderer_generation(ctx.renderer)`); и `destroy_texture()`, и swap-destroy внутри `ensure_texture_loaded` вызывают `SDL_DestroyTexture` **только если `is_renderer_alive_gen(iv.tex_renderer, iv.tex_renderer_gen)`** — иначе SDL уже освободил текстуру (или по адресу живёт другой рендерер), и они просто обнуляют дескрипторы. Нулевой (nil) рендерер и `gen == 0` считаются мёртвыми. `unregister_renderer` ищет по указателю — это корректно, потому что реестр содержит только живые рендереры, а два живых не могут делить адрес. Все рендереры (Window + `Dialog.win`) уничтожаются через единую точку `Window.cleanup()`, поэтому регистрация/снятие симметричны. Так же устроен кэш картинок `MarkdownView` (`MdImageTexture`: текстура + рендерер + поколение): запись чужого или мёртвого рендерера не используется и не освобождается повторно (тест `markdown_view_test.v`). Юнит-тест: `renderer_registry_test.v` (фиктивные указатели, SDL не нужен) — запуск `v -enable-globals test renderer_registry_test.v` из корня.
 
 ## Layout: measure/arrange (`layout.v`)
 
@@ -500,6 +502,14 @@ Shift — снова одна строка. `selected` остаётся теку
 меняющегося на ходу (пресеты vraw). Уже открытое меню держит свою копию списка (`MenuLevel.items`)
 и покажет новые пункты при следующем открытии. Только V API (в C-ABI не выведен). Тест —
 `menu_bar_items_test.v`.
+
+## Размер окна — логические единицы
+
+`Window.config.width/height` и `Window.set_size` — в логических единицах vgui (как bounds виджетов): окно SDL имеет размер × `ui_scale`. Все пути, получающие размер от SDL (событие resize, развернуть/восстановить, первая раскладка по содержимому), переводят его через `apply_sdl_size` (SDL-размер / `ui_scale`). Раньше часть путей писала в `config` SDL-размер, и `set_ui_scale` пересчитывал окно от неверной базы, а `fit_to_content` при `ui_scale != 1` делал окно меньше содержимого. `center()` центрирует на дисплее, где окно сейчас. Тест — `window_size_test.v`.
+
+## Сочетания Ctrl+буква (`ctrl_letter`)
+
+TextInput, TextArea и CodeEditor распознают Ctrl+A/C/X/V/Z через `ctrl_letter(ev, буква, scancode)` (`text_input.v`): если клавиша даёт латинскую букву (keycode a..z), сравнивается сама буква — так сочетание на месте своей буквы в любой латинской раскладке (AZERTY, Dvorak); иначе раскладка нелатинская, и буква берётся по физической клавише (scancode позиции в QWERTY), поэтому Ctrl+Я работает как Ctrl+Z. Проверять только scancode нельзя (в AZERTY Ctrl+Z срабатывал на W), `keycode || scancode` — тоже (Ctrl+Q ловился как Ctrl+A). Тест — `text_area_test.v`.
 
 ## Текстовый ввод SDL — только по фокусу; Canvas.take_keys
 

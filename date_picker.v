@@ -393,6 +393,9 @@ mut:
 	bounds  Rect
 	state   &DpState = unsafe { nil }
 	hovered int      = -1 // hovered day (1-based), -1 = none
+	// Высота шрифта последнего кадра: хит-тест повторяет геометрию draw, а в
+	// обработчике событий шрифта нет. 0 до первого кадра (тогда 16).
+	font_h f32
 }
 
 const dp_day_names = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']
@@ -408,6 +411,7 @@ fn (mut a DpArea) draw(mut ctx RenderContext) {
 
 	font := ctx.get_font(.regular, 0)
 	fh := ctx.font_height_of(font)
+	a.font_h = fh
 	font_b := ctx.get_font(.bold, 0)
 
 	pad := f32(4)
@@ -486,9 +490,9 @@ fn (mut a DpArea) handle_event(event &GuiEvent, app &App) bool {
 	}
 	mut s := a.state
 
-	// Use fixed font height — we don't need ctx_ptr for event geometry
-	// Фиксированная высота шрифта: ctx в обработчике событий недоступен. В draw() используется реальная высота шрифта (font_height_of), поэтому при шрифте не 16 px сетка попаданий может слегка не совпадать с нарисованной.
-	fh := f32(16)
+	// Высота шрифта из последнего кадра (как в draw): раньше здесь было зашито 16, и
+	// при другом шрифте клик по дню промахивался.
+	fh := if a.font_h > 0 { a.font_h } else { f32(16) }
 
 	pad := f32(4)
 	nav_h := f32(28)

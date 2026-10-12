@@ -39,9 +39,10 @@ module vgui
 // Устройство:
 //   - items - исходный путь; segments - то, что реально видно на экране.
 //     Segments пересчитываются в layout() при КАЖДОМ draw() (по bounds и
-//     тексту), поэтому после переполнения (overflow) индексы сегментов и
-//     элементов расходятся: сегмент 0 - многоточие, остальные соответствуют
-//     items[hidden_before..]. Перевод - segment_to_item_index().
+//     тексту). Каждый сегмент помнит свой индекс в items (item; -1 - многоточие),
+//     поэтому после сворачивания (overflow) перевод индексов не нужен. Наведение
+//     хранится отдельно (hover_seg): флаг внутри сегмента пропадал бы при
+//     пересборке, и подсветка не рисовалась вовсе.
 //   - Раскладка: размер задаёт контейнер (bounds), виджет сам измеряет текст
 //     и сам обрезает/сворачивает путь под ширину. Фокуса и анимаций нет.
 //   - Клики по сегментам -> on_click(индекс_в_items, текст). Последний
@@ -49,20 +50,18 @@ module vgui
 // ═══════════════════════════════════════════════════════
 
 // Константы по умолчанию: разделитель, горизонтальный/вертикальный внутренний
-// отступ, поля вокруг сегмента (расширяют зону hover/клика), минимальная
-// ширина сегмента (в этом файле не используется).
+// отступ, поля вокруг сегмента (расширяют зону hover/клика).
 const bc_default_separator = ' › '
 const bc_pad_h = f32(8)
 const bc_pad_v = f32(4)
 const bc_sep_pad = f32(2)
-const bc_min_segment_w = f32(20)
 
 // BcSegment - один видимый на экране сегмент пути (или многоточие).
 // x/w - абсолютная позиция и ширина текста, считаются в layout().
 struct BcSegment {
 mut:
-	text    string
-	hovered bool
+	text string
+	item int // индекс в items; -1 - многоточие
 	// Computed during layout
 	x f32
 	w f32
@@ -101,7 +100,8 @@ pub mut:
 	segments      []BcSegment
 	sep_w         f32  // measured separator width
 	overflow      bool // true when items don't fit
-	hidden_before int  // count of items hidden at start (after collapse)
+	hidden_before int  // сколько элементов скрыто под многоточием
+	hover_seg     int = -1 // наведённый кликабельный сегмент (-1 - нет)
 	// Callbacks
 	on_click fn (int, string) = unsafe { nil }
 }
@@ -246,12 +246,12 @@ fn (bc &Breadcrumbs) eff_radius(ctx &RenderContext) f32 {
 // layout пересчитывает bc.segments под текущие bounds и items.
 // Три случая:
 //   1. всё помещается - сегменты идут подряд, между ними sep_w;
-//   2. не помещается - overflow: слева многоточие "…", справа как можно
-//      больше последних элементов; первый элемент (items[0]) никогда не
-//      показывается в свёрнутом виде (цикл ниже останавливается на i > 0);
+//   2. не помещается - overflow: справа как можно больше последних элементов, перед
+//      ними многоточие "…", а слева - первый элемент (корень пути), если он влезает
+//      вместе с последним: «Корень › … › родитель › текущий»;
 //   3. не помещается даже многоточие + последний элемент целиком - последний
 //      элемент усекается по ширине (bc_truncate_text), segments = [… , усечённый].
-// Заполняет также hidden_before - сколько элементов с начала скрыто.
+// Заполняет также hidden_before - сколько элементов скрыто под многоточием.
 fn (mut bc Breadcrumbs) layout(ctx &RenderContext) {
 	bc.segments.clear()
 	bc.hidden_before = 0
@@ -269,103 +269,103 @@ fn (mut bc Breadcrumbs) layout(ctx &RenderContext) {
 		return
 	}
 
-	// Build all segments first with full text
-	mut segs := []BcSegment{cap: bc.items.len}
-	for item in bc.items {
-		w := ctx.measure_text_with_font(item, font).x
-		segs << BcSegment{
-			text: item
-			w:    w
-		}
-	}
-
-	// Calculate total width with separators
+	mut widths := []f32{cap: bc.items.len}
 	mut total := f32(0)
-	for i, s in segs {
-		total += s.w
-		if i < segs.len - 1 {
+	for i, item in bc.items {
+		w := ctx.measure_text_with_font(item, font).x
+		widths << w
+		total += w
+		if i < bc.items.len - 1 {
 			total += bc.sep_w
 		}
 	}
 
-	// If fits — assign x positions and we're done
+	// Всё помещается.
 	if total <= avail_w {
 		mut x := bc.bounds.x + bc.pad_h
-		for i in 0 .. segs.len {
-			segs[i].x = x
-			x += segs[i].w
-			if i < segs.len - 1 {
-				x += bc.sep_w
+		for i, item in bc.items {
+			bc.segments << BcSegment{
+				text: item
+				item: i
+				x:    x
+				w:    widths[i]
 			}
+			x += widths[i] + bc.sep_w
 		}
-		bc.segments = segs
 		return
 	}
 
-	// Overflow: use "..." prefix and keep last items
 	bc.overflow = true
 	ellipsis := '…'
 	ell_w := ctx.measure_text_with_font(ellipsis, font).x
+	last_idx := bc.items.len - 1
+	ell_part := ell_w + bc.sep_w
 
-	// Always keep last item (current). Try to fit as many tail items as possible.
-	last_idx := segs.len - 1
-	mut tail_w := segs[last_idx].w
-	mut keep_count := 1
-	mut prefix_w := ell_w + bc.sep_w
-
-	for i := last_idx - 1; i > 0; i-- {
-		add_w := segs[i].w + bc.sep_w
-		if prefix_w + tail_w + add_w > avail_w {
-			break
-		}
-		tail_w += add_w
-		keep_count++
-	}
-
-	// If even one item + ellipsis doesn't fit, truncate the last item itself
-	if prefix_w + tail_w > avail_w {
-		bc.segments.clear()
-		// Truncate last item to fit
-		max_w := avail_w - prefix_w
-		truncated := bc_truncate_text(ctx, segs[last_idx].text, max_w, font)
-		tw := ctx.measure_text_with_font(truncated, font).x
+	// Последний элемент не влезает даже с одним многоточием - усекаем его.
+	if ell_part + widths[last_idx] > avail_w {
+		truncated := bc_truncate_text(ctx, bc.items[last_idx], avail_w - ell_part, font)
 		bc.segments << BcSegment{
-			text:      ellipsis
-			w:         ell_w
-			x:         bc.bounds.x + bc.pad_h
-			truncated: false
+			text: ellipsis
+			item: -1
+			x:    bc.bounds.x + bc.pad_h
+			w:    ell_w
 		}
 		bc.segments << BcSegment{
 			text:      truncated
-			w:         tw
-			x:         bc.bounds.x + bc.pad_h + ell_w + bc.sep_w
+			item:      last_idx
+			x:         bc.bounds.x + bc.pad_h + ell_part
+			w:         ctx.measure_text_with_font(truncated, font).x
 			truncated: true
 		}
-		bc.hidden_before = segs.len - 1
+		bc.hidden_before = last_idx
 		return
 	}
 
-	// Build collapsed view: ellipsis + last keep_count items
-	bc.hidden_before = segs.len - keep_count
+	// Корень слева, если влезает вместе с многоточием и последним элементом.
+	root_part := widths[0] + bc.sep_w
+	show_root := last_idx > 1 && root_part + ell_part + widths[last_idx] <= avail_w
+	used_left := if show_root { root_part + ell_part } else { ell_part }
+	first_tail_min := if show_root { 1 } else { 0 }
+
+	// Хвост: последний элемент и сколько влезет перед ним.
+	mut first_tail := last_idx
+	mut tail_w := widths[last_idx]
+	for i := last_idx - 1; i > first_tail_min; i-- {
+		add_w := widths[i] + bc.sep_w
+		if used_left + tail_w + add_w > avail_w {
+			break
+		}
+		tail_w += add_w
+		first_tail = i
+	}
+
 	mut x := bc.bounds.x + bc.pad_h
+	if show_root {
+		bc.segments << BcSegment{
+			text: bc.items[0]
+			item: 0
+			x:    x
+			w:    widths[0]
+		}
+		x += root_part
+	}
 	bc.segments << BcSegment{
 		text: ellipsis
-		w:    ell_w
+		item: -1
 		x:    x
+		w:    ell_w
 	}
-	x += ell_w + bc.sep_w
-
-	for i := segs.len - keep_count; i < segs.len; i++ {
+	x += ell_part
+	for i in first_tail .. bc.items.len {
 		bc.segments << BcSegment{
-			text: segs[i].text
-			w:    segs[i].w
+			text: bc.items[i]
+			item: i
 			x:    x
+			w:    widths[i]
 		}
-		x += segs[i].w
-		if i < segs.len - 1 {
-			x += bc.sep_w
-		}
+		x += widths[i] + bc.sep_w
 	}
+	bc.hidden_before = first_tail - (if show_root { 1 } else { 0 })
 }
 
 // Truncate text to fit max_w with ellipsis
@@ -404,21 +404,13 @@ fn bc_truncate_text(ctx &RenderContext, text string, max_w f32, font voidptr) st
 	return runes[..lo].string() + ellipsis
 }
 
-// Map a visible segment index to the original items index.
-// Returns -1 for the ellipsis segment or invalid index.
+// segment_to_item_index - индекс в items видимого сегмента; -1 - многоточие или
+// неверный индекс.
 fn (bc &Breadcrumbs) segment_to_item_index(seg_idx int) int {
 	if seg_idx < 0 || seg_idx >= bc.segments.len {
 		return -1
 	}
-	if !bc.overflow {
-		return seg_idx
-	}
-	// Overflow layout: [ellipsis, item, item, ...]
-	if seg_idx == 0 {
-		return -1 // ellipsis
-	}
-	// segments[1..] correspond to items[hidden_before..]
-	return bc.hidden_before + (seg_idx - 1)
+	return bc.segments[seg_idx].item
 }
 
 // ─── Drawing ───────────────────────────────────────────
@@ -478,11 +470,12 @@ pub fn (mut bc Breadcrumbs) draw(mut ctx RenderContext) {
 		item_idx := bc.segment_to_item_index(i)
 		is_last := i == last_seg
 		is_current := is_last && item_idx == bc.items.len - 1
-		is_ellipsis := bc.overflow && i == 0
-		is_clickable := bc.is_segment_clickable(i, item_idx)
+		is_ellipsis := item_idx < 0
+		is_clickable := bc.is_item_clickable(item_idx)
+		is_hovered := i == bc.hover_seg
 
 		// Hover background pill
-		if seg.hovered && is_clickable && bc.enabled {
+		if is_hovered && is_clickable && bc.enabled {
 			pill_r := Rect{
 				x: seg.x - bc_sep_pad
 				y: cy - fh * 0.5 - bc.pad_v * 0.5
@@ -498,7 +491,7 @@ pub fn (mut bc Breadcrumbs) draw(mut ctx RenderContext) {
 			tc = ctx.theme.text_disabled
 		} else if is_ellipsis {
 			tc = tc_sep
-		} else if seg.hovered && is_clickable {
+		} else if is_hovered && is_clickable {
 			tc = tc_hover
 		} else if is_current {
 			tc = tc_current
@@ -516,17 +509,14 @@ pub fn (mut bc Breadcrumbs) draw(mut ctx RenderContext) {
 	ctx.pop_clip()
 }
 
-// is_segment_clickable - можно ли кликнуть сегмент seg_idx (ему соответствует
-// элемент item_idx): нельзя при disabled, для многоточия и для последнего
-// элемента, если не включён current_clickable.
-fn (bc &Breadcrumbs) is_segment_clickable(seg_idx int, item_idx int) bool {
+// is_item_clickable - можно ли кликнуть сегмент элемента item_idx: нельзя при
+// disabled, для многоточия (-1) и для последнего элемента, если не включён
+// current_clickable.
+fn (bc &Breadcrumbs) is_item_clickable(item_idx int) bool {
 	if !bc.enabled {
 		return false
 	}
-	// Ellipsis is not clickable (could be made into a popup later)
-	if bc.overflow && seg_idx == 0 {
-		return false
-	}
+	// Многоточие (item_idx -1) не кликабельно.
 	if item_idx < 0 || item_idx >= bc.items.len {
 		return false
 	}
@@ -569,27 +559,19 @@ pub fn (mut bc Breadcrumbs) handle_event(event &GuiEvent, app &App) bool {
 	match event.typ {
 		.mouse_move {
 			bc.hovered = bc.bounds.contains(event.mouse_x, event.mouse_y)
-			// Reset all hover flags
-			for i in 0 .. bc.segments.len {
-				bc.segments[i].hovered = false
-			}
+			bc.hover_seg = -1
 			if bc.hovered {
 				idx := bc.hit_segment(event.mouse_x, event.mouse_y)
-				if idx >= 0 {
-					item_idx := bc.segment_to_item_index(idx)
-					if bc.is_segment_clickable(idx, item_idx) {
-						bc.segments[idx].hovered = true
-						// Set hand cursor
-						cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_hand)
-						C.SDL_SetCursor(cursor)
-					} else {
-						cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_arrow)
-						C.SDL_SetCursor(cursor)
-					}
-				} else {
-					cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_arrow)
-					C.SDL_SetCursor(cursor)
+				if idx >= 0 && bc.is_item_clickable(bc.segment_to_item_index(idx)) {
+					bc.hover_seg = idx
 				}
+				// Кэширующий set_cursor: SDL_CreateSystemCursor на каждое движение
+				// мыши создавал курсор заново и не освобождал его.
+				set_cursor(if bc.hover_seg >= 0 {
+					sdl_system_cursor_hand
+				} else {
+					sdl_system_cursor_arrow
+				})
 			}
 		}
 		.mouse_down {
@@ -597,7 +579,7 @@ pub fn (mut bc Breadcrumbs) handle_event(event &GuiEvent, app &App) bool {
 				idx := bc.hit_segment(event.mouse_x, event.mouse_y)
 				if idx >= 0 {
 					item_idx := bc.segment_to_item_index(idx)
-					if bc.is_segment_clickable(idx, item_idx) {
+					if bc.is_item_clickable(item_idx) {
 						if bc.on_click != unsafe { nil } {
 							bc.on_click(item_idx, bc.items[item_idx])
 						}

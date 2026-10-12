@@ -48,3 +48,23 @@ fn test_slider_factories_order_range() {
 	v := slider_vertical(10, 0, 50)
 	assert v.min == 0 && v.max == 10 && v.value == 10
 }
+
+struct SliderChangeLog {
+mut:
+	values []f32
+}
+
+// Slider.set_range, сдвинувший значение, зовёт on_change, как Spinbox.set_range
+// (аудит 2026-10, 2.11); без сдвига - тихо.
+fn test_slider_set_range_reports_shift() {
+	mut s := slider()
+	s.set_range(0, 100)
+	s.set_value(50)
+	mut log := &SliderChangeLog{}
+	s.on_change = fn [mut log] (v f32) {
+		log.values << v
+	}
+	s.set_range(0, 80) // 50 внутри - без события
+	s.set_range(0, 30) // 50 -> 30
+	assert log.values == [f32(30)]
+}

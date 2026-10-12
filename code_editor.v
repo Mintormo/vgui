@@ -1387,7 +1387,7 @@ fn (mut e CodeEditor) handle_key(ev &GuiEvent, app &App, ctx_ptr &RenderContext)
 	// ── Read-only mode: navigation + copy only ──
 	if e.readonly {
 		if ctrl {
-			if ev.keycode == sdl_k_c || ev.scancode == sc_letter_c {
+			if ctrl_letter(ev, `c`, sc_letter_c) {
 				if e.has_sel() {
 					app.set_clipboard(e.selected_text())
 				}
@@ -1399,7 +1399,7 @@ fn (mut e CodeEditor) handle_key(ev &GuiEvent, app &App, ctx_ptr &RenderContext)
 				}
 				return true
 			}
-			if ev.keycode == sdl_k_a || ev.scancode == sc_letter_a {
+			if ctrl_letter(ev, `a`, sc_letter_a) {
 				e.sel_a = ce_pos(0, 0)
 				last := e.lines.len - 1
 				e.sel_b = ce_pos(last, e.lines[last].len)
@@ -1476,7 +1476,7 @@ fn (mut e CodeEditor) handle_key(ev &GuiEvent, app &App, ctx_ptr &RenderContext)
 
 	// ── Ctrl+key combinations ──
 	if ctrl {
-		if ev.keycode == sdl_k_a || ev.scancode == sc_letter_a {
+		if ctrl_letter(ev, `a`, sc_letter_a) {
 			e.sel_a = ce_pos(0, 0)
 			last := e.lines.len - 1
 			e.sel_b = ce_pos(last, e.lines[last].len)
@@ -1485,13 +1485,13 @@ fn (mut e CodeEditor) handle_key(ev &GuiEvent, app &App, ctx_ptr &RenderContext)
 			e.fire_cursor_move()
 			return true
 		}
-		if ev.keycode == sdl_k_c || ev.scancode == sc_letter_c {
+		if ctrl_letter(ev, `c`, sc_letter_c) {
 			if e.has_sel() {
 				app.set_clipboard(e.selected_text())
 			}
 			return true
 		}
-		if ev.keycode == sdl_k_x || ev.scancode == sc_letter_x {
+		if ctrl_letter(ev, `x`, sc_letter_x) {
 			if e.has_sel() {
 				app.set_clipboard(e.selected_text())
 				e.save_undo()
@@ -1500,7 +1500,7 @@ fn (mut e CodeEditor) handle_key(ev &GuiEvent, app &App, ctx_ptr &RenderContext)
 			}
 			return true
 		}
-		if ev.keycode == sdl_k_v || ev.scancode == sc_letter_v {
+		if ctrl_letter(ev, `v`, sc_letter_v) {
 			cl := app.get_clipboard()
 			if cl.len > 0 {
 				e.insert_text(cl)
@@ -1510,7 +1510,7 @@ fn (mut e CodeEditor) handle_key(ev &GuiEvent, app &App, ctx_ptr &RenderContext)
 			}
 			return true
 		}
-		if ev.keycode == sdl_k_z || ev.scancode == sc_letter_z {
+		if ctrl_letter(ev, `z`, sc_letter_z) {
 			if shift {
 				e.redo()
 			} else {

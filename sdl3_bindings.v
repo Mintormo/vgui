@@ -122,6 +122,7 @@ fn C.SDL_GetRenderScale(renderer voidptr, scale_x &f32, scale_y &f32) bool
 // ─── SDL3 HiDPI ───
 
 fn C.SDL_GetWindowSizeInPixels(win voidptr, w &int, h &int) bool
+fn C.SDL_GetCurrentRenderOutputSize(renderer voidptr, w &int, h &int) bool
 
 // Результаты hit-test для безрамочных окон (SDL_HitTestResult): что находится под курсором -
 // обычная область, зона перетаскивания или одна из восьми зон изменения размера.

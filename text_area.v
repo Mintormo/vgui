@@ -17,8 +17,8 @@ module vgui
 //   - фокус: регистрируется в ctx.focus при каждом draw (focus.v);
 //   - события: handle_event -> on_mouse_*/on_text/on_key; true = событие поглощено;
 //   - колбэк on_change(полный_текст) вызывается после каждой правки и undo/redo;
-//   - сочетания Ctrl+буква распознаются по физическому scancode (константы
-//     ti_sc_letter_* из text_input.v), чтобы работать при нелатинской раскладке;
+//   - сочетания Ctrl+буква распознаются через ctrl_letter (text_input.v): по букве
+//     клавиши, а при нелатинской раскладке - по физическому scancode;
 //     is_home_key/is_end_key/is_word тоже общие с text_input.v.
 //
 // Модель данных: текст - массив строк `lines` (всегда минимум одна, возможно пустая),
@@ -37,8 +37,11 @@ struct TaUndoEntry {
 
 // TextArea - многострочное поле. Примечания к полям:
 //   lines/cur_l/cur_c/sel_al/sel_ac - см. описание модели в шапке файла;
-//   max_len     - в текущем коде нигде не проверяется (ограничения длины нет);
-//   scroll_x/y  - прокрутка в пикселях; допустимый диапазон ограничивается в draw();
+//   max_len     - предел длины текста в символах (руны, перевод строки - один символ)
+//                 для ввода пользователем: лишнее при вставке обрезается; <= 0 - без
+//                 предела. set_text/append_text программные и не ограничиваются;
+//   scroll_x/y  - прокрутка в пикселях; допустимый диапазон ограничивается в draw(),
+//                 он же запоминает пределы в max_scroll_x/y (для колеса);
 //   drag        - идёт выделение мышью; vscroll_drag/hscroll_drag(+_off) -
 //                 перетаскивание ползунка и смещение точки захвата внутри него;
 //   focus_t     - анимация фокуса рамки; flat - без фона/рамки (для встраивания);
@@ -68,7 +71,10 @@ pub mut:
 	// scroll
 	scroll_y f32
 	scroll_x f32
-	drag     bool
+	// Пределы прокрутки, посчитанные последним draw() (до первого кадра - 0).
+	max_scroll_x f32
+	max_scroll_y f32
+	drag         bool
 	// scrollbar drag state
 	vscroll_drag     bool
 	vscroll_drag_off f32
@@ -114,13 +120,15 @@ pub fn (mut ta TextArea) set_text(s string) {
 	ta.history.clear()
 }
 
-// Дописывает s в конец (без undo-снимка, курсор в конец), вызывает on_change. Подходит
-// для логов. Первый кусок s приклеивается к последней строке. История undo не
-// обновляется, поэтому её старые снимки после append_text могут не соответствовать тексту.
+// Дописывает s в конец (курсор в конец), вызывает on_change. Подходит для логов. Первый
+// кусок s приклеивается к последней строке. История undo очищается, как и в set_text:
+// старые снимки после программной дозаписи не соответствовали бы тексту, а снимок на
+// каждую дозапись копировал бы весь лог.
 pub fn (mut ta TextArea) append_text(s string) {
 	if s.len == 0 {
 		return
 	}
+	ta.history.clear()
 	added := s.split('\n')
 	last_idx := ta.lines.len - 1
 	ta.lines[last_idx] = ta.lines[last_idx] + added[0]
@@ -347,6 +355,7 @@ pub fn (mut ta TextArea) draw(mut ctx RenderContext) {
 	// Clamp vertical scroll
 	total_h := f32(ta.lines.len) * line_step
 	max_scroll_y := max_f32(0, total_h - cr_h)
+	ta.max_scroll_y = max_scroll_y
 	if ta.scroll_y > max_scroll_y {
 		ta.scroll_y = max_scroll_y
 	}
@@ -356,6 +365,7 @@ pub fn (mut ta TextArea) draw(mut ctx RenderContext) {
 
 	// Clamp horizontal scroll
 	max_scroll_x := max_f32(0, total_w - cr.w)
+	ta.max_scroll_x = max_scroll_x
 	if ta.scroll_x > max_scroll_x {
 		ta.scroll_x = max_scroll_x
 	}
@@ -515,13 +525,17 @@ pub fn (mut ta TextArea) handle_event(ev &GuiEvent, app &App) bool {
 			if !ta.wheel {
 				return false
 			}
+			// Колесо поглощается, только если прокрутка сдвинулась: на краю (или когда
+			// прокручивать нечего) оно уходит родителю, как у ListBox.
 			if ta.hovered {
 				if ev.shift() {
-					ta.scroll_x -= ev.wheel_y * 30
-				} else {
-					ta.scroll_y -= ev.wheel_y * 30
+					old := ta.scroll_x
+					ta.scroll_x = clamp_f32(ta.scroll_x - ev.wheel_y * 30, 0, ta.max_scroll_x)
+					return ta.scroll_x != old
 				}
-				return true
+				old := ta.scroll_y
+				ta.scroll_y = clamp_f32(ta.scroll_y - ev.wheel_y * 30, 0, ta.max_scroll_y)
+				return ta.scroll_y != old
 			}
 			return false
 		}
@@ -713,14 +727,13 @@ fn (mut ta TextArea) on_text(ev &GuiEvent) bool {
 	return true
 }
 
-// Нажатия клавиш (только при фокусе). Порядок: Ctrl+A/C/X/V/Z по scancode
-// (раскладко-независимо; Ctrl+Shift+Z - redo) -> Home/End (в пределах строки) ->
+// Нажатия клавиш (только при фокусе). Порядок: Ctrl+A/C/X/V/Z (ctrl_letter: по букве
+// клавиши, при нелатинской раскладке - по физическому scancode; Ctrl+Shift+Z - redo)
+// -> Home/End (в пределах строки) ->
 // остальное по keycode: Enter разбивает строку, Backspace/Delete (с Ctrl - по
 // слову, на краю строки склеивают соседние), стрелки (Up/Down сохраняют колонку,
 // зажимая по длине строки), Tab вставляет 4 пробела (Ctrl+Tab передаёт фокус
 // дальше), Escape снимает фокус, Ctrl/Shift+Insert - копировать/вставить.
-// Замечание: ветки sdl_k_a/c/x/v/z по keycode для этого виджета отсутствуют, поэтому
-// при нелатинской раскладке всё работает только благодаря scancode.
 fn (mut ta TextArea) on_key(ev &GuiEvent, app &App) bool {
 	if !ta.focused {
 		return false
@@ -730,20 +743,20 @@ fn (mut ta TextArea) on_key(ev &GuiEvent, app &App) bool {
 	s := ev.shift()
 
 	if c {
-		if ev.scancode == ti_sc_letter_a {
+		if ctrl_letter(ev, `a`, ti_sc_letter_a) {
 			ta.sel_al = 0
 			ta.sel_ac = 0
 			ta.cur_l = ta.lines.len - 1
 			ta.cur_c = ta.lines[ta.cur_l].runes().len
 			return true
 		}
-		if ev.scancode == ti_sc_letter_c {
+		if ctrl_letter(ev, `c`, ti_sc_letter_c) {
 			if ta.has_sel() {
 				app.set_clipboard(ta.selected_text())
 			}
 			return true
 		}
-		if ev.scancode == ti_sc_letter_x {
+		if ctrl_letter(ev, `x`, ti_sc_letter_x) {
 			if ta.has_sel() {
 				app.set_clipboard(ta.selected_text())
 				ta.save_undo()
@@ -752,14 +765,14 @@ fn (mut ta TextArea) on_key(ev &GuiEvent, app &App) bool {
 			}
 			return true
 		}
-		if ev.scancode == ti_sc_letter_v {
+		if ctrl_letter(ev, `v`, ti_sc_letter_v) {
 			cl := app.get_clipboard()
 			if cl.len > 0 {
 				ta.insert_text(cl)
 			}
 			return true
 		}
-		if ev.scancode == ti_sc_letter_z {
+		if ctrl_letter(ev, `z`, ti_sc_letter_z) {
 			if s {
 				ta.redo()
 			} else {
@@ -784,19 +797,8 @@ fn (mut ta TextArea) on_key(ev &GuiEvent, app &App) bool {
 
 	match ev.keycode {
 		sdl_k_return {
-			ta.save_undo()
-			if ta.has_sel() {
-				ta.delete_selection()
-			}
-			// Split current line at cursor
-			rr := ta.lines[ta.cur_l].runes()
-			left := rr[..ta.cur_c].string()
-			right := rr[ta.cur_c..].string()
-			ta.lines[ta.cur_l] = left
-			ta.lines.insert(ta.cur_l + 1, right)
-			ta.cur_l++
-			ta.cur_c = 0
-			ta.fire()
+			// Разрыв строки - вставка '\n' (общий путь: undo, выделение, max_len).
+			ta.insert_text('\n')
 			return true
 		}
 		sdl_k_backspace {
@@ -999,10 +1001,23 @@ fn (mut ta TextArea) key_down_key(shift bool) {
 // Один undo-снимок на операцию. Однострочная вставка меняет одну строку; иначе
 // строка курсора делится: левая часть + первый кусок, промежуточные куски становятся
 // новыми строками, а последний кусок получает правый хвост исходной строки. Курсор
-// оказывается в конце вставленного текста. Ограничение max_len не применяется.
-fn (mut ta TextArea) insert_text(s string) {
-	if s.len == 0 {
+// оказывается в конце вставленного текста. Если текст длиннее места до max_len, лишнее
+// отбрасывается; места нет совсем - правки нет (ни undo-снимка, ни on_change).
+fn (mut ta TextArea) insert_text(text string) {
+	if text.len == 0 {
 		return
+	}
+	mut s := text
+	if ta.max_len > 0 {
+		sel_len := if ta.has_sel() { ta.selected_text().len_utf8() } else { 0 }
+		room := ta.max_len - (ta.text_len() - sel_len)
+		if room <= 0 {
+			return
+		}
+		rr := s.runes()
+		if rr.len > room {
+			s = rr[..room].string()
+		}
 	}
 	ta.save_undo()
 	if ta.has_sel() {
@@ -1026,6 +1041,15 @@ fn (mut ta TextArea) insert_text(s string) {
 		ta.cur_c = parts[parts.len - 1].runes().len
 	}
 	ta.fire()
+}
+
+// text_len - длина текста в символах (рунах), перевод строки - один символ.
+fn (ta &TextArea) text_len() int {
+	mut n := ta.lines.len - 1
+	for line in ta.lines {
+		n += line.len_utf8()
+	}
+	return n
 }
 
 // Удаляет выделение (в т.ч. многострочное: склеивает начало первой и конец

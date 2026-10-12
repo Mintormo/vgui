@@ -785,9 +785,8 @@ fn (mut tv TreeView) edit_insert(s string) {
 }
 
 // Подбирает горизонтальную прокрутку edit_scroll_x поля ввода так, чтобы курсор
-// оставался виден (с запасом 20 px при сдвиге), а если весь текст помещается в
-// avail_w - сбрасывает её в 0. Вызывается из draw() каждый кадр, т.е. draw здесь
-// меняет состояние виджета.
+// оставался виден (см. edit_scroll_for_cursor). Вызывается из draw() каждый кадр,
+// т.е. draw здесь меняет состояние виджета.
 fn (mut tv TreeView) edit_fix_scroll(ctx &RenderContext, avail_w f32) {
 	font := ctx.get_font_immut(.regular, 0)
 	text_before := if tv.edit_cur > 0 && tv.edit_cur <= tv.edit_buf.len {
@@ -795,21 +794,28 @@ fn (mut tv TreeView) edit_fix_scroll(ctx &RenderContext, avail_w f32) {
 	} else {
 		''
 	}
-	cx := ctx.measure_text_with_font(text_before, font).x
-	if cx - tv.edit_scroll_x > avail_w - 4 {
-		tv.edit_scroll_x = cx - avail_w + 20
-	}
-	if cx - tv.edit_scroll_x < 0 {
-		tv.edit_scroll_x = max_f32(0, cx - 20)
-	}
 	full := if tv.edit_buf.len > 0 { tv.edit_buf.string() } else { '' }
-	fw := ctx.measure_text_with_font(full, font).x
-	if fw <= avail_w {
-		tv.edit_scroll_x = 0
+	tv.edit_scroll_x = edit_scroll_for_cursor(ctx.measure_text_with_font(text_before, font).x,
+		ctx.measure_text_with_font(full, font).x, tv.edit_scroll_x, avail_w)
+}
+
+// edit_scroll_for_cursor - горизонтальная прокрутка однострочного поля ввода, при
+// которой курсор виден: cursor_x - x курсора от начала текста, text_w - ширина всего
+// текста, scroll - текущая прокрутка, avail_w - ширина поля. Курсор у правого края
+// (запас 4 px) или левее видимой части - сдвиг с запасом 20 px; весь текст помещается -
+// прокрутка 0. Чистая функция: общая для TreeView и TableView.
+fn edit_scroll_for_cursor(cursor_x f32, text_w f32, scroll f32, avail_w f32) f32 {
+	if text_w <= avail_w {
+		return 0
 	}
-	if tv.edit_scroll_x < 0 {
-		tv.edit_scroll_x = 0
+	mut sx := scroll
+	if cursor_x - sx > avail_w - 4 {
+		sx = cursor_x - avail_w + 20
 	}
+	if cursor_x - sx < 0 {
+		sx = cursor_x - 20
+	}
+	return max_f32(0, sx)
 }
 
 // Ширина поля ввода: ширина текста + tv_edit_pad, не меньше tv_min_edit_w и не

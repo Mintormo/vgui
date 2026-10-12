@@ -17,13 +17,12 @@ import os
 // NativeFdRequest — состояние одного ожидающего запроса к нативному диалогу.
 // Заполняется колбэком SDL (native_fd_trampoline), читается циклом ожидания.
 // done — пользователь закончил (выбрал или отменил), paths — выбранные пути
-// (пусто при отмене/ошибке), filter — индекс выбранного фильтра, как его сообщил SDL (-1 —
-// не сообщён). Поле filter сейчас нигде дальше не используется.
+// (пусто при отмене/ошибке). Индекс выбранного фильтра, который сообщает SDL, не
+// хранится: наружу native_fd_run отдаёт только пути.
 struct NativeFdRequest {
 mut:
-	done   bool
-	paths  []string
-	filter int = -1
+	done  bool
+	paths []string
 }
 
 // Monotonic ids — never reused (same ABA-defence rationale as the Python
@@ -51,10 +50,10 @@ fn native_fd_register() (u64, &NativeFdRequest) {
 
 // native_fd_trampoline — C-колбэк для SDL_Show*Dialog. Находит запрос по id из
 // userdata (нет в реестре — молча выходит: запрос уже снят), копирует пути из
-// C-массива в []string (массив оканчивается nil), записывает номер фильтра и
-// ставит done. SDL зовёт его из цикла событий, т.е. из того же главного потока
+// C-массива в []string (массив оканчивается nil) и ставит done; номер фильтра
+// (третий аргумент) не нужен. SDL зовёт его из цикла событий, т.е. из того же главного потока
 // в момент process_events() в native_fd_wait.
-fn native_fd_trampoline(userdata voidptr, filelist &&char, filter int) {
+fn native_fd_trampoline(userdata voidptr, filelist &&char, _ int) {
 	id := u64(usize(userdata))
 	req := g_native_fd_requests[id] or { return }
 	mut r := unsafe { req }
@@ -69,7 +68,6 @@ fn native_fd_trampoline(userdata voidptr, filelist &&char, filter int) {
 			i++
 		}
 	}
-	r.filter = filter
 	r.done = true
 }
 
@@ -249,8 +247,8 @@ pub enum MessageBoxKind {
 }
 
 // MessageBoxConfig — параметры message_box: заголовок, текст, вид, подписи кнопок
-// (по умолчанию одна 'OK'), default_button — кнопка с акцентным стилем (-1 — нет),
-// cancel_button — индекс, возвращаемый по Escape (-1 — нет).
+// (по умолчанию одна 'OK'), default_button — кнопка с акцентным стилем, которую
+// нажимает Enter (-1 — нет), cancel_button — индекс, возвращаемый по Escape (-1 — нет).
 @[params]
 pub struct MessageBoxConfig {
 pub mut:
@@ -356,6 +354,16 @@ pub fn message_box(parent &Window, mut app App, cfg MessageBoxConfig) int {
 		state.result = cancel_idx
 		state.answered = true
 	})
+	// Enter - кнопка по умолчанию. Раньше default_button только красил кнопку, и Enter
+	// ничего не делал. Горячая клавиша окна срабатывает после виджетов, поэтому Enter
+	// на кнопке в фокусе по-прежнему нажимает именно её.
+	if cfg.default_button >= 0 && cfg.default_button < labels.len {
+		default_idx := cfg.default_button
+		dlg.win.bind_hotkey('Return', fn [mut state, default_idx] () {
+			state.result = default_idx
+			state.answered = true
+		})
+	}
 
 	app.add_dialog(dlg)
 	dlg.show()

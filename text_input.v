@@ -45,6 +45,19 @@ const ti_sc_letter_v = 25
 const ti_sc_letter_x = 27
 const ti_sc_letter_z = 29
 
+// ctrl_letter - нажата ли буква letter (в паре с Ctrl - проверяет вызывающий). Если
+// клавиша даёт латинскую букву (keycode a..z), сравнивается сама буква: так Ctrl+Z
+// работает на месте Z в любой латинской раскладке (AZERTY, Dvorak). Иначе - нелатинская
+// раскладка (русская и т.п.), и буква определяется по физической клавише (scancode
+// позиции в QWERTY): Ctrl+Я остаётся Ctrl+Z. Раньше сравнивался только scancode, и в
+// AZERTY/Dvorak сочетания срабатывали не на тех клавишах.
+fn ctrl_letter(ev &GuiEvent, letter rune, scancode int) bool {
+	if ev.keycode >= `a` && ev.keycode <= `z` {
+		return ev.keycode == int(letter)
+	}
+	return ev.scancode == scancode
+}
+
 // Режим фильтра input_filter (регулярное выражение V-модуля regex):
 // whitelist/blacklist фильтруют каждый вводимый символ отдельно, pattern проверяет
 // всю строку целиком после вставки.
@@ -91,12 +104,17 @@ pub mut:
 	flat              bool
 	input_filter      string
 	input_filter_mode InputFilterMode
-	history           UndoHistory[RuneSnap] = UndoHistory[RuneSnap]{
+	// accept - проверка строки-кандидата «как будет после вставки» кодом, а не
+	// регулярным выражением (как режим pattern). false - вставка отклоняется.
+	// Нужна, когда допустимый текст не выразить паттерном: Spinbox принимает число
+	// с произвольными префиксом и суффиксом. Если задана - input_filter не применяется.
+	accept      fn (string) bool      = unsafe { nil }
+	history     UndoHistory[RuneSnap] = UndoHistory[RuneSnap]{
 		limit: ti_max_undo
 	}
-	on_change         fn (string) = unsafe { nil }
-	on_submit         fn (string) = unsafe { nil }
-	focus_group       int
+	on_change   fn (string) = unsafe { nil }
+	on_submit   fn (string) = unsafe { nil }
+	focus_group int
 }
 
 // For use inside containers (bounds set by layout)
@@ -580,19 +598,19 @@ fn (mut t TextInput) on_key(ev &GuiEvent, app &App) bool {
 
 	// Layout-independent Ctrl+letter handling (works on Cyrillic, etc.)
 	if c {
-		if ev.scancode == ti_sc_letter_a {
+		if ctrl_letter(ev, `a`, ti_sc_letter_a) {
 			t.sel_a = 0
 			t.sel_b = t.buf.len
 			t.cur = t.buf.len
 			return true
 		}
-		if ev.scancode == ti_sc_letter_c {
+		if ctrl_letter(ev, `c`, ti_sc_letter_c) {
 			if t.has_sel() {
 				app.set_clipboard(t.selected_text())
 			}
 			return true
 		}
-		if ev.scancode == ti_sc_letter_x {
+		if ctrl_letter(ev, `x`, ti_sc_letter_x) {
 			if t.has_sel() {
 				app.set_clipboard(t.selected_text())
 				t.save_undo()
@@ -601,14 +619,14 @@ fn (mut t TextInput) on_key(ev &GuiEvent, app &App) bool {
 			}
 			return true
 		}
-		if ev.scancode == ti_sc_letter_v {
+		if ctrl_letter(ev, `v`, ti_sc_letter_v) {
 			cl := app.get_clipboard()
 			if cl.len > 0 {
 				t.insert(cl)
 			}
 			return true
 		}
-		if ev.scancode == ti_sc_letter_z {
+		if ctrl_letter(ev, `z`, ti_sc_letter_z) {
 			if s {
 				t.redo()
 			} else {
@@ -842,8 +860,17 @@ fn (mut t TextInput) insert(s string) {
 	if s.len == 0 {
 		return
 	}
+	if t.accept != unsafe { nil } {
+		t.insert_checked(s, t.accept)
+		return
+	}
 	if t.input_filter.len > 0 && t.input_filter_mode == .pattern {
-		t.insert_with_pattern_check(s)
+		pattern := t.input_filter
+		t.insert_checked(s, fn [pattern] (candidate string) bool {
+			// Некорректное регулярное выражение - ввод отклоняется.
+			mut re := regex.regex_opt(pattern) or { return false }
+			return re.matches_string(candidate)
+		})
 		return
 	}
 	rr := if t.input_filter.len > 0 { t.filter_runes(s.runes()) } else { s.runes() }
@@ -863,13 +890,10 @@ fn (mut t TextInput) insert(s string) {
 	t.fire()
 }
 
-// Режим pattern: собирается строка-кандидат «как будет после вставки» и целиком
-// проверяется regexp'ом; если не совпала - вставка отклоняется. При некорректном
-// регулярном выражении ввод молча игнорируется (regex_opt вернул ошибку).
-// Замечание: проверяется весь кандидат, поэтому паттерн должен допускать и
-// промежуточные состояния ввода.
-fn (mut t TextInput) insert_with_pattern_check(s string) {
-	mut re := regex.regex_opt(t.input_filter) or { return }
+// Режим pattern и accept: собирается строка-кандидат «как будет после вставки» и
+// целиком отдаётся check; false - вставка отклоняется. Проверяется весь кандидат,
+// поэтому проверка должна допускать и промежуточные состояния ввода ("" или "-").
+fn (mut t TextInput) insert_checked(s string, check fn (string) bool) {
 	lo := if t.has_sel() { t.sel_lo() } else { t.cur }
 	hi := if t.has_sel() { t.sel_hi() } else { t.cur }
 	rr := s.runes()
@@ -879,7 +903,7 @@ fn (mut t TextInput) insert_with_pattern_check(s string) {
 	}
 	ins := if rr.len > room { rr[..room] } else { rr }
 	candidate := rsplice(t.buf, lo, hi, ins).string()
-	if !re.matches_string(candidate) {
+	if !check(candidate) {
 		return
 	}
 	t.save_undo()

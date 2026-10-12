@@ -174,6 +174,35 @@ fn (mut mb MenuButton) run_active() {
 	}
 }
 
+// choose_action выбирает пункт-действие mi (мышью или Enter/Space): он становится
+// активным действием кнопки (текст, active_idx - «плоский» индекс без разделителей,
+// active_click), меню закрывается, затем зовутся mi.on_click и on_select. Меню
+// закрывается ДО колбэков, как в menu_activate_hovered: обработчик, открывающий другой
+// попап, видит уже свободный слот оверлея. Раньше Enter шёл мимо этого пути: пункт не
+// становился активным, а open оставался true (стрелка «открыта», следующий клик
+// работал как закрытие).
+fn (mut mb MenuButton) choose_action(mi &MenuItem, mut ctx RenderContext) {
+	mb.text = mi.text
+	mut flat_idx := 0
+	for fmi in mb.items {
+		if fmi == unsafe { mi } {
+			break
+		}
+		if fmi.kind != .separator {
+			flat_idx++
+		}
+	}
+	mb.active_idx = flat_idx
+	mb.active_click = mi.on_click
+	mb.close_menu(mut ctx)
+	if mi.on_click != unsafe { nil } {
+		mi.on_click()
+	}
+	if mb.on_select != unsafe { nil } {
+		mb.on_select(flat_idx, mi.text)
+	}
+}
+
 // close_menu закрывает меню (снимает оверлей через state.close_all) и сбрасывает open.
 fn (mut mb MenuButton) close_menu(mut ctx RenderContext) {
 	mb.state.close_all(mut ctx)
@@ -315,29 +344,7 @@ fn (mut mb MenuButton) open_menu(mut ctx RenderContext) {
 								mb.close_menu(mut ctx)
 								return true
 							}
-							// Action item — make it the active action,
-							// update button text & fire callbacks
-							mb.text = mi.text
-							// Find flat index (ignoring separators) for the
-							// active action / on_select payload
-							mut flat_idx := 0
-							for fmi in mb.items {
-								if fmi == unsafe { mi } {
-									break
-								}
-								if fmi.kind != .separator {
-									flat_idx++
-								}
-							}
-							mb.active_idx = flat_idx
-							mb.active_click = mi.on_click
-							if mi.on_click != unsafe { nil } {
-								mi.on_click()
-							}
-							if mb.on_select != unsafe { nil } {
-								mb.on_select(flat_idx, mi.text)
-							}
-							mb.close_menu(mut ctx)
+							mb.choose_action(mi, mut ctx)
 							return true
 						}
 						return true
@@ -415,8 +422,22 @@ fn (mut mb MenuButton) open_menu(mut ctx RenderContext) {
 						if mb.state.levels.len > 0 {
 							last := mb.state.levels.len - 1
 							idx := mb.state.levels[last].hover_idx
-							if idx >= 0 {
-								return menu_activate_hovered(mut mb.state, last, idx, mut ctx)
+							if idx >= 0 && idx < mb.state.levels[last].items.len {
+								mi := mb.state.levels[last].items[idx]
+								// Пункт-действие с клавиатуры - тот же путь, что и мышью:
+								// он становится активным действием кнопки.
+								if mi.kind == .action && mi.enabled {
+									mb.choose_action(mi, mut ctx)
+									return true
+								}
+								handled := menu_activate_hovered(mut mb.state, last, idx, mut
+									ctx)
+								// Флажок закрывает меню через state; open кнопки
+								// сбрасываем вслед, иначе стрелка осталась бы «открытой».
+								if !mb.state.open {
+									mb.open = false
+								}
+								return handled
 							}
 						}
 						return true

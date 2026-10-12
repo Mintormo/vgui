@@ -33,7 +33,9 @@ pub mut:
 	font_size        int   = 14
 	mono_size        int   = 13
 	theme            Theme = light_theme()
-	// target_fps в коде библиотеки нигде не читается (частота кадров задаётся константой в run()).
+	// target_fps - потолок частоты кадров, пока идёт анимация (run() выдерживает бюджет
+	// кадра 1000 / target_fps мс). Без анимации кадры рисуются только по событиям.
+	// Значения вне 1..1000 зажимаются (frame_budget_ms).
 	target_fps int = 60
 }
 
@@ -315,6 +317,19 @@ pub fn (mut app App) update_running() {
 	app.running = false
 }
 
+// frame_budget_ms - длительность кадра анимации в мс по AppConfig.target_fps (зажатому в
+// 1..1000): 60 fps - 16 мс, как было до появления настройки.
+fn frame_budget_ms(target_fps int) u64 {
+	fps := if target_fps < 1 {
+		1
+	} else if target_fps > 1000 {
+		1000
+	} else {
+		target_fps
+	}
+	return u64(1000 / fps)
+}
+
 // needs_animation_now — есть ли окно/диалог, просящее следующий кадр.
 fn (app &App) needs_animation_now() bool {
 	for w in app.windows {
@@ -330,7 +345,7 @@ fn (app &App) needs_animation_now() bool {
 	return false
 }
 
-// Главный цикл: первый кадр -> повторять { пауза до 16 мс при анимации -> pump_events() ->
+// Главный цикл: первый кадр -> повторять { пауза до бюджета кадра при анимации -> pump_events() ->
 // render_all(), если были события или идёт анимация -> update_running() } -> cleanup().
 // Кадр рисуется только при необходимости; без анимации цикл спит в SDL_WaitEventTimeout
 // (до 100 мс), так что простаивающее приложение почти не грузит процессор.
@@ -338,17 +353,17 @@ pub fn (mut app App) run() {
 	app.render_all()
 
 	mut last_render_ms := C.SDL_GetTicks()
+	budget := frame_budget_ms(app.config.target_fps)
 
 	for app.running {
 		any_anim := app.needs_animation_now()
 
-		// Cap animation at 60fps: wait out the remainder of the 16ms frame budget
+		// Потолок частоты кадров анимации: выждать остаток бюджета кадра (AppConfig.target_fps).
 		if any_anim {
 			now := C.SDL_GetTicks()
 			elapsed := now - last_render_ms
-			// 16 мс - бюджет кадра при 60 fps. Жёсткая константа, AppConfig.target_fps не используется.
-			if elapsed < 16 {
-				C.SDL_Delay(u32(16 - elapsed))
+			if elapsed < budget {
+				C.SDL_Delay(u32(budget - elapsed))
 			}
 		}
 
@@ -673,15 +688,7 @@ fn (app &App) handle_window_state_event(raw &C.SDL_Event, mut w Window) {
 			mut ww := 0
 			mut wh := 0
 			C.SDL_GetWindowSize(w.sdl_window, &ww, &wh)
-			if w.ctx.ui_scale != 1.0 {
-				w.ctx.screen_width = f32(ww) / w.ctx.ui_scale
-				w.ctx.screen_height = f32(wh) / w.ctx.ui_scale
-			} else {
-				w.ctx.screen_width = f32(ww)
-				w.ctx.screen_height = f32(wh)
-			}
-			w.config.width = ww
-			w.config.height = wh
+			w.apply_sdl_size(ww, wh)
 		}
 		sdl_event_window_restored {
 			w.minimized = false
@@ -689,15 +696,7 @@ fn (app &App) handle_window_state_event(raw &C.SDL_Event, mut w Window) {
 			mut ww := 0
 			mut wh := 0
 			C.SDL_GetWindowSize(w.sdl_window, &ww, &wh)
-			if w.ctx.ui_scale != 1.0 {
-				w.ctx.screen_width = f32(ww) / w.ctx.ui_scale
-				w.ctx.screen_height = f32(wh) / w.ctx.ui_scale
-			} else {
-				w.ctx.screen_width = f32(ww)
-				w.ctx.screen_height = f32(wh)
-			}
-			w.config.width = ww
-			w.config.height = wh
+			w.apply_sdl_size(ww, wh)
 		}
 		sdl_event_window_shown {
 			w.visible = true

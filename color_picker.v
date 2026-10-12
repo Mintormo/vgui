@@ -349,31 +349,31 @@ fn cp_run_dialog(parent &Window, mut app App, initial Color, show_alpha bool, ti
 	}
 
 	// ── Hex input ──
-	// Разбор по Enter (on_submit). vui_parse_color возвращает прозрачный цвет при
-	// ошибке разбора; условие `c.a > 0 || text.contains('00')` отличает ошибку
-	// от намеренного ввода прозрачного цвета (эвристика: допускает «00» в
-	// любом месте строки, т.е. не строгая проверка).
+	// Цвет применяется, как только текст стал корректным hex (cp_parse_hex - строгий
+	// разбор: прежняя эвристика `c.a > 0 || text.contains('00')` принимала и мусор
+	// с «00» внутри). Неполный ввод цвет не трогает.
 	mut hex_input := text_input('#RRGGBB')
 	hex_input.set_text(cp_color_to_hex(state.current, state.show_alpha))
 	state.hex_input = hex_input
 
-	hex_input.on_submit = fn [mut state] (text string) {
-		c := vui_parse_color(text)
-		if c.a > 0 || text.contains('00') {
-			state.current = c
-			hh, ss, vv := cp_rgb_to_hsv(c.r, c.g, c.b)
-			state.hue = hh
-			state.sat = ss
-			state.val = vv
-			state.alpha = f32(c.a) / 255.0
-			cp_sync_component_inputs(state)
-		}
+	apply_hex := fn [mut state] (text string) {
+		c := cp_parse_hex(text) or { return }
+		state.current = c
+		hh, ss, vv := cp_rgb_to_hsv(c.r, c.g, c.b)
+		state.hue = hh
+		state.sat = ss
+		state.val = vv
+		state.alpha = f32(c.a) / 255.0
+		cp_sync_component_inputs(state)
 	}
+	hex_input.on_change = apply_hex
+	hex_input.on_submit = apply_hex
 
 	// ── RGBA component inputs ──
-	// Числовые поля (до 3 символов, ширина 4 символа). Значения применяются
-	// только по Enter (on_submit -> cp_apply_rgba_from_inputs): если ввести число и
-	// сразу нажать OK, не подтвердив его Enter, правка не попадёт в результат.
+	// Числовые поля (до 3 символов, ширина 4 символа). Значения применяются по мере
+	// набора (on_change), а не только по Enter: раньше число, набранное без Enter,
+	// терялось при нажатии OK. Программная синхронизация полей (set_text) on_change не
+	// зовёт, так что обратной петли нет.
 	mut inp_r := text_input('R')
 	inp_r.chars = 4
 	mut inp_g := text_input('G')
@@ -396,16 +396,16 @@ fn cp_run_dialog(parent &Window, mut app App, initial Color, show_alpha bool, ti
 	state.inp_b = inp_b
 	state.inp_a = inp_a
 
-	inp_r.on_submit = fn [mut state] (text string) {
+	inp_r.on_change = fn [mut state] (text string) {
 		cp_apply_rgba_from_inputs(mut state)
 	}
-	inp_g.on_submit = fn [mut state] (text string) {
+	inp_g.on_change = fn [mut state] (text string) {
 		cp_apply_rgba_from_inputs(mut state)
 	}
-	inp_b.on_submit = fn [mut state] (text string) {
+	inp_b.on_change = fn [mut state] (text string) {
 		cp_apply_rgba_from_inputs(mut state)
 	}
-	inp_a.on_submit = fn [mut state] (text string) {
+	inp_a.on_change = fn [mut state] (text string) {
 		cp_apply_rgba_from_inputs(mut state)
 	}
 
@@ -427,13 +427,13 @@ fn cp_run_dialog(parent &Window, mut app App, initial Color, show_alpha bool, ti
 	state.inp_s = inp_s
 	state.inp_v = inp_v
 
-	inp_h.on_submit = fn [mut state] (text string) {
+	inp_h.on_change = fn [mut state] (text string) {
 		cp_apply_hsv_from_inputs(mut state)
 	}
-	inp_s.on_submit = fn [mut state] (text string) {
+	inp_s.on_change = fn [mut state] (text string) {
 		cp_apply_hsv_from_inputs(mut state)
 	}
-	inp_v.on_submit = fn [mut state] (text string) {
+	inp_v.on_change = fn [mut state] (text string) {
 		cp_apply_hsv_from_inputs(mut state)
 	}
 
@@ -602,6 +602,21 @@ mut:
 	drag_sv    bool
 	drag_hue   bool
 	drag_alpha bool
+}
+
+// cp_parse_hex строго разбирает "#RRGGBB" или "#RRGGBBAA" (решётка необязательна, регистр
+// любой); всё прочее - none.
+fn cp_parse_hex(text string) ?Color {
+	hex := text.trim_space().trim_left('#')
+	if hex.len != 6 && hex.len != 8 {
+		return none
+	}
+	for c in hex {
+		if !c.is_hex_digit() {
+			return none
+		}
+	}
+	return vui_parse_color(hex)
 }
 
 // update_current пересчитывает current (RGBA) из HSV и alpha.

@@ -489,18 +489,32 @@ fn (t &TableView) max_scroll_y() f32 {
 	return max_f32(0, t.total_rows_height() - vp.h)
 }
 
-// Нужна ли полоса прокрутки. Намеренно сравнивается с размером области БЕЗ вычета
-// другой полосы (viewport_rect сам зовёт has_vsb/has_hsb, прямой вызов дал бы
-// рекурсию). Побочный эффект: возможна ситуация, когда содержимое чуть-чуть не
-// влезает только из-за соседней полосы, а полоса не показывается.
+// Нужна ли полоса прокрутки. Полосы зависят друг от друга: вертикальная съедает
+// ширину, и из-за неё может понадобиться горизонтальная, и наоборот. Раньше каждая
+// сравнивалась с областью без вычета соседней, и содержимое, не влезающее только из-за
+// соседней полосы, оставалось без полосы. viewport_rect здесь звать нельзя (он сам
+// зовёт has_vsb/has_hsb), поэтому область считается напрямую.
+fn (t &TableView) scrollbars_needed() (bool, bool) {
+	full_w := t.bounds.x + t.bounds.w - t.pad - t.data_origin_x()
+	full_h := t.bounds.y + t.bounds.h - t.pad - t.data_origin_y()
+	content_w := t.total_cols_width()
+	content_h := t.total_rows_height()
+	mut need_v := content_h > full_h
+	need_h := content_w > full_w - (if need_v { tbl_sb_w } else { 0 })
+	if need_h && !need_v {
+		need_v = content_h > full_h - tbl_sb_w
+	}
+	return need_v, need_h
+}
+
 fn (t &TableView) has_vsb() bool {
-	vp_h := t.bounds.y + t.bounds.h - t.pad - t.data_origin_y()
-	return t.total_rows_height() > vp_h
+	need_v, _ := t.scrollbars_needed()
+	return need_v
 }
 
 fn (t &TableView) has_hsb() bool {
-	vp_w := t.bounds.x + t.bounds.w - t.pad - t.data_origin_x()
-	return t.total_cols_width() > vp_w
+	_, need_h := t.scrollbars_needed()
+	return need_h
 }
 
 // Смещение левого края колонки / верхнего края строки внутри данных (сумма
@@ -803,16 +817,17 @@ fn (mut t TableView) begin_edit(row int, col int) {
 }
 
 // Завершает редактирование с сохранением: пишет буфер в ячейку, зовёт on_change
-// (row, col, новый текст) - всегда, даже если текст не изменился - и выходит из
-// режима. Сначала вызывается колбэк, потом сбрасывается состояние: из колбэка
-// edit_row/edit_col ещё доступны.
+// (row, col, новый текст), только если текст изменился, и выходит из режима. Сначала
+// вызывается колбэк, потом сбрасывается состояние: из колбэка edit_row/edit_col ещё
+// доступны.
 fn (mut t TableView) commit_edit() {
 	if !t.editing {
 		return
 	}
 	new_text := if t.edit_buf.len > 0 { t.edit_buf.string() } else { '' }
+	changed := t.rows[t.edit_row].cells[t.edit_col].text != new_text
 	t.rows[t.edit_row].cells[t.edit_col].text = new_text
-	if t.on_change != unsafe { nil } {
+	if changed && t.on_change != unsafe { nil } {
 		t.on_change(t.edit_row, t.edit_col, new_text)
 	}
 	t.editing = false
@@ -1180,9 +1195,8 @@ pub fn (mut t TableView) draw(mut ctx RenderContext) {
 				}
 
 				// Редактируемая ячейка рисуется «вручную»: фон поля ввода, выделение (полупрозрачный
-				// accent), текст со сдвигом edit_scroll_x и мигающий курсор.
-				// Замечание: edit_scroll_x здесь только читается; в этой функции он не
-				// обновляется (см. открытые вопросы в отчёте).
+				// accent), текст со сдвигом edit_scroll_x и мигающий курсор. Сдвиг подбирается
+				// здесь же, чтобы курсор длинного текста не уходил за край ячейки.
 				if is_editing_cell {
 					// ── Inline edit ──
 					ctx.fill_rect(cell_r, ctx.theme.input_bg)
@@ -1190,6 +1204,15 @@ pub fn (mut t TableView) draw(mut ctx RenderContext) {
 					edit_inner :=
 						Rect{cell_r.x + tbl_cell_pad, cell_r.y, cell_r.w - tbl_cell_pad * 2, cell_r.h}
 					ctx.push_clip(edit_inner)
+					edit_before := if t.edit_cur > 0 && t.edit_cur <= t.edit_buf.len {
+						t.edit_buf[..t.edit_cur].string()
+					} else {
+						''
+					}
+					edit_full := if t.edit_buf.len > 0 { t.edit_buf.string() } else { '' }
+					t.edit_scroll_x = edit_scroll_for_cursor(ctx.measure_text_with_font(edit_before,
+						font).x, ctx.measure_text_with_font(edit_full, font).x, t.edit_scroll_x,
+						edit_inner.w)
 
 					if t.edit_has_sel() {
 						lo := t.edit_sel_lo()
