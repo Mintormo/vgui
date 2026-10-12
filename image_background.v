@@ -20,6 +20,7 @@ module vgui
 // (generation-guarded — see the live-renderer registry in sdl3_window.v).
 // ═══════════════════════════════════════════════════════
 
+// BgMode - режим вписывания картинки в bounds (подробно в шапке файла): fit / fill ("cover") / stretch / tile / center.
 pub enum BgMode {
 	fit
 	fill
@@ -28,6 +29,11 @@ pub enum BgMode {
 	center
 }
 
+// ImageBackground - пассивный виджет-картинка (kind_image_background). Источник - файл (path) ИЛИ байты (data);
+// data приоритетнее. Текстура создаётся лениво в draw() (ensure_texture_loaded) и привязана к рендереру,
+// на котором создана (tex_renderer + tex_renderer_gen - защита от ABA, см. is_renderer_alive_gen).
+// tex_path - для какого path загружена текстура; служебное значение '\x00reload' требует перезагрузки.
+// bg_color (alpha > 0) - сплошная подложка под картинкой со скруглением corner_radius.
 @[heap]
 pub struct ImageBackground {
 pub mut:
@@ -61,6 +67,7 @@ pub fn image_background_file(path string) &ImageBackground {
 	}
 }
 
+// image_background_data - картинка из байт в памяти (PNG/JPG и т.п.); байты копируются (.clone()), так как приходят из чужого кода (Python/ctypes) и хранятся дольше вызова.
 pub fn image_background_data(data []u8) &ImageBackground {
 	return &ImageBackground{
 		data: data.clone()
@@ -69,6 +76,7 @@ pub fn image_background_data(data []u8) &ImageBackground {
 
 // ─── Public API ────────────────────────────────────────
 
+// set_path меняет источник на файл: сбрасывает data и помечает текстуру устаревшей - перезагрузка будет при следующем draw(). Тот же путь игнорируется. Кадр не инвалидирует.
 pub fn (mut ib ImageBackground) set_path(path string) {
 	if ib.path != path {
 		ib.path = path
@@ -78,6 +86,7 @@ pub fn (mut ib ImageBackground) set_path(path string) {
 	}
 }
 
+// set_data меняет источник на байты (копия) и принудительно перезагружает текстуру при следующем draw().
 pub fn (mut ib ImageBackground) set_data(data []u8) {
 	ib.data = data.clone()
 	ib.path = ''
@@ -94,6 +103,10 @@ pub fn (mut ib ImageBackground) set_bg_color(c Color) {
 
 // ─── Texture management ────────────────────────────────
 
+// ensure_texture_loaded лениво (пере)создаёт текстуру: нет источника или актуальная текстура уже есть - выход;
+// иначе уничтожает старую (SDL_DestroyTexture только пока жив её рендерер), грузит поверхность
+// (IMG_Load_IO для байт, IMG_Load для файла), делает текстуру и запоминает рендерер+поколение.
+// При ошибке загрузки tex_path всё равно ставится, чтобы не повторять загрузку каждый кадр (картинка просто не рисуется).
 fn (mut ib ImageBackground) ensure_texture_loaded(ctx &RenderContext) {
 	has_source := ib.path.len > 0 || ib.data.len > 0
 	if !has_source {
@@ -148,6 +161,7 @@ fn (mut ib ImageBackground) ensure_texture_loaded(ctx &RenderContext) {
 	ib.tex_path = ib.path
 }
 
+// destroy_texture освобождает текстуру (только если рендерер ещё жив) и сбрасывает tex_path, чтобы следующий draw() загрузил её заново. Вызывается при очистке окна.
 pub fn (mut ib ImageBackground) destroy_texture() {
 	if unsafe { ib.texture != nil } {
 		if is_renderer_alive_gen(ib.tex_renderer, ib.tex_renderer_gen) {
@@ -166,6 +180,9 @@ fn (ib &ImageBackground) has_texture() bool {
 
 // ─── Drawing ───────────────────────────────────────────
 
+// draw: ленивая загрузка текстуры, подложка bg_color, затем картинка по режиму внутри клипа bounds.
+// fit - масштаб min(bw/tw, bh/th); fill - max(...) (картинка перекрывает область и обрезается клипом);
+// center - исходный размер; tile - сетка копий исходного размера от левого верхнего угла.
 pub fn (mut ib ImageBackground) draw(mut ctx RenderContext) {
 	if !ib.visible {
 		return
@@ -226,6 +243,7 @@ pub fn (mut ib ImageBackground) draw(mut ctx RenderContext) {
 	ctx.pop_clip()
 }
 
+// blit - одна отрисовка всей текстуры в прямоугольник dst (координаты логические, масштаб рендера выставлен окном).
 fn (ib &ImageBackground) blit(mut ctx RenderContext, dst Rect) {
 	sdl_dst := C.SDL_FRect{
 		x: dst.x

@@ -1,5 +1,9 @@
 module vgui
 
+// EventType - тип события библиотеки. GuiEvent - платформонезависимая копия SDL-события: окно приложения
+// (sdl3_window.v) превращает сырой C.SDL_Event через parse_sdl_event и раздаёт виджетам.
+// none_ - «событие без смысла»: пропускается (так помечены неинтересные SDL-события).
+// drop_* - стадии перетаскивания файла/текста в окно (begin -> position* -> file/text -> complete).
 pub enum EventType {
 	none_
 	quit
@@ -25,6 +29,7 @@ pub enum EventType {
 	drop_complete
 }
 
+// MouseButton - кнопка мыши, вызвавшая событие; none_ - не левая/средняя/правая (боковые и т.п.) или событие без кнопки.
 pub enum MouseButton {
 	left
 	middle
@@ -32,12 +37,22 @@ pub enum MouseButton {
 	none_
 }
 
+// GuiEvent - разобранное событие. Какие поля заполнены, зависит от typ (остальные - нули):
+//   key_down/key_up  - keycode (SDL keycode), scancode (физическая клавиша), mod_keys, timestamp
+//   text_input       - text (введённая строка в UTF-8)
+//   mouse_*          - mouse_x/y (логические пиксели окна), mod_keys; mouse_btn и clicks - у down/dbl_click;
+//                      mouse_dx/dy и mouse_buttons - только у mouse_move; wheel_x/y - у mouse_wheel
+//   window_resize    - win_w/win_h (0, 0 для SDL «exposed» - просто запрос перерисовки)
+//   drop_*           - mouse_x/y позиция курсора; text - путь файла (drop_file) или текст (drop_text)
+//   window_id        - SDL id окна-адресата (по нему App выбирает окно)
+//   timestamp        - метка времени SDL в наносекундах
 pub struct GuiEvent {
 pub mut:
 	typ       EventType
 	window_id u32
 	keycode   int
 	scancode  int
+	// битовая маска модификаторов SDL (Ctrl/Shift/Alt...), на момент разбора события; проверять через ctrl()/shift()/alt()
 	mod_keys  u16
 	text      string
 	mouse_x   f32
@@ -62,6 +77,7 @@ pub mut:
 	timestamp     u64
 }
 
+// ctrl / shift / alt - зажат ли хотя бы один из соответствующих модификаторов (левый или правый).
 pub fn (e &GuiEvent) ctrl() bool {
 	return (e.mod_keys & sdl_kmod_ctrl) != 0
 }
@@ -84,6 +100,9 @@ pub fn (e &GuiEvent) alt() bool {
 
 // Extract SDL window_id from raw event.
 // SDL3: window events each have their own type, so we match by type range.
+// get_event_window_id достаёт windowID из сырого события. Раскладка структур SDL зависит от типа события
+// (у клавиатуры, мыши, колеса, окна, drop - свои структуры), поэтому каст делается по ветке type.
+// Для событий без окна (quit и др.) возвращает 0.
 pub fn get_event_window_id(raw &C.SDL_Event) u32 {
 	etype := unsafe { raw.@type }
 	match etype {
@@ -126,6 +145,14 @@ pub fn get_event_window_id(raw &C.SDL_Event) u32 {
 	}
 }
 
+// parse_sdl_event превращает сырое SDL-событие в GuiEvent. Незнакомые типы дают typ == .none_.
+// Особенности:
+//   - Модификаторы берутся глобальным C.SDL_GetModState() в момент разбора (а не из самого события).
+//   - mouse_dbl_click выдаётся ВМЕСТО второго mouse_down, если SDL сообщил clicks >= 2; виджеты,
+//     которым нужен каждый клик, должны обрабатывать оба типа.
+//   - sdl_event_window_pixel_size_changed игнорируется (.none_); а window_exposed превращается в
+//     window_resize с размером 0x0 - окно по нему просто перерисовывается.
+// Только чтение raw: SDL-память не удерживается (text копируется в строку V).
 pub fn parse_sdl_event(raw &C.SDL_Event) GuiEvent {
 	mut ev := GuiEvent{}
 	ev.window_id = get_event_window_id(raw)
@@ -174,6 +201,7 @@ pub fn parse_sdl_event(raw &C.SDL_Event) GuiEvent {
 		}
 		sdl_mousebuttondown {
 			mb := unsafe { &C.SDL_MouseButtonEvent(raw) }
+			// Второй и последующие быстрые клики превращаются в mouse_dbl_click (счёт кликов ведёт SDL).
 			ev.typ = if mb.clicks >= u8(2) {
 				EventType.mouse_dbl_click
 			} else {

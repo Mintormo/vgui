@@ -12,16 +12,37 @@ module vgui
 // then add rows with add_row_texts() or add_row_widgets().
 // Each row is a container whose cells can hold any Widget.
 //
+// Структура файла (по-русски, для ориентации):
+//   * данные: columns (LbColumn), rows (LbRow -> []LbCell), плюс items - зеркало текста первой
+//     колонки для старого однострочного API (add_item/get_selected_text и т.п.). rows и items
+//     обязаны оставаться одной длины (add_*/clear/set_row_cell_text поддерживают это);
+//   * три режима: однострочный текстовый список (columns пуст), таблица с колонками и
+//     ячейками-виджетами, горизонтальная «плёнка» (horizontal) - каждая строка это один элемент
+//     шириной item_width, виджет лежит в cells[0];
+//   * выбор: selected (текущая строка) + необязательный множественный выбор (sel_marks);
+//   * прокрутка: scroll_y/scroll_x и две полосы с перетаскиванием; в режиме колонок по ширине
+//     прокручивается сумма ширин колонок;
+//   * заголовок: сортировка (только сигнал on_sort, сами строки ListBox не переставляет!) и
+//     изменение ширины колонок перетаскиванием границы;
+//   * раскладка/отрисовка: measure() - layout_measure.v (константный scrollable_hint); виджетам
+//     в ячейках bounds раздаёт arrange() (только для видимых строк), draw() их лишь рисует;
+//     hit_children - widget_tree.v; фокус - focus.v (register_list_box/focus_list_box);
+//   * события: handle_event (ниже) - единый обработчик с приоритетом активных перетаскиваний.
+//
+// Header is always read-only. Sort buttons are optional
 // Header is always read-only. Sort buttons are optional
 // per-column (show_sort flag). Clicking sort fires on_sort.
 // ═══════════════════════════════════════════════════════
 
+// Направление сортировки колонки: none_ (не сортируется, имя с подчёркиванием - none зарезервировано), по возрастанию, по убыванию.
 pub enum LbSortDir {
 	none_
 	asc
 	desc
 }
 
+// Колонка: title - заголовок; width - текущая ширина (меняется перетаскиванием границы, не меньше min_w);
+// show_sort - рисовать кнопку сортировки; sort_dir - текущее направление; align - выравнивание текста ячеек.
 pub struct LbColumn {
 pub mut:
 	title     string
@@ -32,12 +53,14 @@ pub mut:
 	align     TextAlign = .left
 }
 
+// Ячейка строки: либо text, либо widget (виджет имеет приоритет; ListBox его не владеет - ссылку должен держать вызывающий код).
 struct LbCell {
 mut:
 	text   string // used in text-only mode
 	widget &Widget = unsafe { nil } // custom widget (overrides text)
 }
 
+// Строка: cells по колонкам; text - зеркало текста первой колонки (старый API); user_data - произвольный указатель пользователя.
 struct LbRow {
 mut:
 	cells     []LbCell
@@ -45,6 +68,9 @@ mut:
 	user_data voidptr = unsafe { nil }
 }
 
+// Размеры по умолчанию: толщина полосы прокрутки, высота шапки, ширина кнопки сортировки, внутренний
+// отступ ячейки, прозрачность линий сетки между строками/колонками, зона захвата границы колонки
+// (± px от границы), ширина элемента в горизонтальном режиме.
 const lb_sb_w_default = f32(8)
 const lb_header_h = f32(26)
 const lb_sort_btn_w = f32(16)
@@ -53,6 +79,9 @@ const lb_grid_color_a = u8(40)
 const lb_resize_zone = f32(5)
 const lb_item_width_default = f32(120)
 
+// ListBox - список / таблица (см. шапку файла). Публичные поля - состояние и колбэки:
+// on_select(индекс, текст первой колонки) - при выборе; on_dbl_click(индекс, текст) - двойной клик
+// или Enter; on_sort(колонка, новое направление). Сеттеры кадр не инвалидируют.
 @[heap]
 pub struct ListBox {
 pub mut:
@@ -64,16 +93,17 @@ pub mut:
 	columns []LbColumn
 	rows    []LbRow
 	// Legacy single-column compat
-	items        []string
-	selected     int = -1
-	scroll_y     f32
-	item_height  f32  = 24
-	pad          f32  = 4
-	visible      bool = true
-	enabled      bool = true
-	focused      bool
-	hovered      bool
-	hover_index  int  = -1
+	items       []string
+	selected    int = -1
+	scroll_y    f32
+	item_height f32  = 24
+	pad         f32  = 4
+	visible     bool = true
+	enabled     bool = true
+	focused     bool
+	hovered     bool
+	hover_index int = -1
+	// // Анимация кольца фокуса (Anim, anim.v) - шагается в draw().
 	focus_anim   Anim = anim_smooth(anim_tau_focus)
 	focus_group  int
 	scroll_speed f32              = 30
@@ -99,6 +129,8 @@ pub mut:
 	scroll_x       f32
 	scroll_x_speed f32 = 30
 	// ── Scrollbar customization ──
+	// Необязательные переопределения вида полос прокрутки: 0 / -1 / прозрачный цвет = взять значение по умолчанию
+	// или из темы (см. eff_sb_* ниже).
 	sb_width             f32
 	sb_radius            f32 = -1
 	sb_min_thumb         f32
@@ -107,6 +139,8 @@ pub mut:
 	sb_thumb_hover_color Color = Color{0, 0, 0, 0}
 	sb_thumb_drag_color  Color = Color{0, 0, 0, 0}
 	// ── Internal ──
+	// Внутреннее состояние перетаскивания и наведения (в публичном API не используется). drag_start_* - позиция
+	// мыши и прокрутка в момент нажатия: смещение вычисляется от них, а не накапливается.
 	sb_dragging           bool
 	sb_hovered            bool
 	sb_drag_start_y       f32
@@ -133,10 +167,12 @@ pub mut:
 
 // ─── Constructors ──────────────────────────────────────
 
+// list_box - пустой вертикальный список (однострочный режим, пока не добавлены колонки).
 pub fn list_box() &ListBox {
 	return &ListBox{}
 }
 
+// list_box_h - горизонтальный список-«плёнка»: каждый элемент шириной item_width (<= 0 - ширина по умолчанию).
 pub fn list_box_h(item_width f32) &ListBox {
 	return &ListBox{
 		horizontal: true
@@ -150,6 +186,10 @@ pub fn (mut lb ListBox) set_item_width(w f32) {
 
 // ─── Column management ─────────────────────────────────
 
+// add_column и add_column_* - добавляют колонку, включают заголовок (show_header) и дополняют уже
+// существующие строки пустыми ячейками, чтобы у каждой строки cells.len >= columns.len. Ширина
+// зажимается не меньше min_w (min_w >= 10). Варианты отличаются набором параметров:
+// sortable - кнопка сортировки, align - выравнивание текста.
 pub fn (mut lb ListBox) add_column(title string, width f32) {
 	lb.columns << LbColumn{
 		title: title
@@ -258,6 +298,7 @@ pub fn (mut lb ListBox) add_column_resizable(title string, width f32, min_w f32,
 	}
 }
 
+// set_column_sort ставит индикатор сортировки колонке и снимает у остальных (одновременно сортируется одна колонка). Строки не переставляет и on_sort не зовёт.
 pub fn (mut lb ListBox) set_column_sort(col int, dir LbSortDir) {
 	if col >= 0 && col < lb.columns.len {
 		// Clear other columns' sort
@@ -270,6 +311,7 @@ pub fn (mut lb ListBox) set_column_sort(col int, dir LbSortDir) {
 
 // ─── Row management (multi-column) ─────────────────────
 
+// add_row_texts - строка из текстов; недостающие ячейки пустые, лишние (больше колонок) тоже сохраняются. Текст [0] попадает в items/row.text для старого API.
 pub fn (mut lb ListBox) add_row_texts(texts []string) {
 	mut cells := []LbCell{cap: max_int(lb.columns.len, texts.len)}
 	for i in 0 .. max_int(lb.columns.len, texts.len) {
@@ -295,6 +337,7 @@ pub fn (mut lb ListBox) add_item_widget(widget &Widget) {
 	}
 }
 
+// add_row_widgets - строка из виджетов-ячеек (по одному на колонку). Ссылки на виджеты ListBox не удерживает от GC/удаления - это забота вызывающего (в Python - список _children).
 pub fn (mut lb ListBox) add_row_widgets(widgets []&Widget) {
 	mut cells := []LbCell{cap: max_int(lb.columns.len, widgets.len)}
 	for i in 0 .. max_int(lb.columns.len, widgets.len) {
@@ -312,6 +355,7 @@ pub fn (mut lb ListBox) add_row_widgets(widgets []&Widget) {
 	}
 }
 
+// set_row_cell_text заменяет ячейку текстом (виджет в ней сбрасывается); для колонки 0 синхронизирует items и row.text.
 pub fn (mut lb ListBox) set_row_cell_text(row int, col int, text string) {
 	if row >= 0 && row < lb.rows.len && col >= 0 && col < lb.rows[row].cells.len {
 		lb.rows[row].cells[col].text = text
@@ -325,6 +369,7 @@ pub fn (mut lb ListBox) set_row_cell_text(row int, col int, text string) {
 	}
 }
 
+// set_row_cell_widget ставит виджет в ячейку (текст ячейки остаётся, но виджет приоритетнее).
 pub fn (mut lb ListBox) set_row_cell_widget(row int, col int, widget &Widget) {
 	if row >= 0 && row < lb.rows.len && col >= 0 && col < lb.rows[row].cells.len {
 		lb.rows[row].cells[col].widget = unsafe { widget }
@@ -353,6 +398,7 @@ pub fn (lb &ListBox) get_row_data(row int) voidptr {
 
 // ─── Legacy single-column API (fully preserved) ────────
 
+// add_item - старый API: без колонок добавляет однострочную строку, с колонками - строку add_row_texts([text]).
 pub fn (mut lb ListBox) add_item(text string) {
 	if lb.columns.len == 0 {
 		lb.items << text
@@ -373,6 +419,7 @@ pub fn (mut lb ListBox) add_items(items []string) {
 	}
 }
 
+// clear удаляет все строки, сбрасывает выбор, прокрутку и hover; колонки остаются.
 pub fn (mut lb ListBox) clear() {
 	lb.items.clear()
 	lb.rows.clear()
@@ -525,10 +572,12 @@ pub fn (lb &ListBox) row_count() int {
 
 // ─── Geometry ──────────────────────────────────────────
 
+// is_multi_col - таблица ли это (есть хотя бы одна колонка).
 fn (lb &ListBox) is_multi_col() bool {
 	return lb.columns.len > 0
 }
 
+// eff_header_h - реальная высота шапки: 0, если шапки нет.
 fn (lb &ListBox) eff_header_h() f32 {
 	if lb.show_header && lb.columns.len > 0 {
 		return lb.header_height
@@ -536,6 +585,7 @@ fn (lb &ListBox) eff_header_h() f32 {
 	return f32(0)
 }
 
+// content_height - полная высота всех строк (для горизонтального режима 0 - вертикальной прокрутки нет).
 pub fn (lb &ListBox) content_height() f32 {
 	if lb.horizontal {
 		return 0
@@ -543,6 +593,7 @@ pub fn (lb &ListBox) content_height() f32 {
 	return f32(lb.rows.len) * lb.item_height
 }
 
+// content_width - полная ширина содержимого: горизонтальный режим - все элементы подряд; таблица - сумма ширин колонок; однострочный режим - 0 (текст по ширине окна).
 fn (lb &ListBox) content_width() f32 {
 	if lb.horizontal {
 		return f32(lb.rows.len) * lb.eff_item_width()
@@ -562,10 +613,12 @@ fn (lb &ListBox) eff_item_width() f32 {
 	return if lb.item_width > 0 { lb.item_width } else { lb_item_width_default }
 }
 
+// data_origin_y - верхняя граница области данных (под шапкой).
 fn (lb &ListBox) data_origin_y() f32 {
 	return lb.bounds.y + lb.pad + lb.eff_header_h()
 }
 
+// viewport_rect - область, где видны строки: bounds минус pad, шапка и места под видимые полосы прокрутки. От неё считается вся геометрия строк.
 fn (lb &ListBox) viewport_rect() Rect {
 	ox := lb.bounds.x + lb.pad
 	oy := lb.data_origin_y()
@@ -635,6 +688,7 @@ fn (lb &ListBox) row_visible_h(i int, vp Rect, iw f32) bool {
 	return !(ix + iw < vp.x || ix > vp.x + vp.w)
 }
 
+// max_scroll/max_scroll_x - предел прокрутки (на сколько содержимое больше viewport), не меньше 0.
 pub fn (lb &ListBox) max_scroll() f32 {
 	if lb.horizontal {
 		return 0
@@ -648,6 +702,7 @@ fn (lb &ListBox) max_scroll_x() f32 {
 	return max_f32(0, lb.content_width() - vp.w)
 }
 
+// has_scrollbar/has_hsb - нужны ли полосы. Вертикальная проверяется по высоте без полосы горизонтальной, поэтому в редком случае, когда появление одной полосы вызывает другую, возможно расхождение на пару px. (Обе ветки has_hsb сейчас идентичны.)
 fn (lb &ListBox) has_scrollbar() bool {
 	if lb.horizontal {
 		return false
@@ -704,6 +759,8 @@ fn (lb &ListBox) eff_sb_thumb_drag(ctx &RenderContext) Color {
 }
 
 // Vertical scrollbar geometry
+// scrollbar_rects/hsb_rects - геометрия полос: (дорожка, бегунок). Длина бегунка = доля видимой части
+// (не меньше sb_min_thumb), положение - доля прокрутки * свободный ход. Пустые Rect, если полоса не нужна.
 fn (lb &ListBox) scrollbar_rects() (Rect, Rect) {
 	vp := lb.viewport_rect()
 	ch := lb.content_height()
@@ -757,6 +814,7 @@ fn (lb &ListBox) hsb_rects() (Rect, Rect) {
 	return track, thumb
 }
 
+// ensure_visible прокручивает минимально необходимо, чтобы строка selected целиком попала в viewport (после перехода с клавиатуры).
 fn (mut lb ListBox) ensure_visible() {
 	if lb.selected < 0 || lb.rows.len == 0 {
 		return
@@ -796,6 +854,7 @@ pub fn (lb &ListBox) row_at(y f32) int {
 	return lb.hit_item(y)
 }
 
+// hit_item/hit_item_h - индекс строки под y (вертикальный) / x (горизонтальный режим) с учётом прокрутки, либо -1.
 fn (lb &ListBox) hit_item(my f32) int {
 	vp := lb.viewport_rect()
 	rel_y := my - vp.y + lb.scroll_y
@@ -816,6 +875,7 @@ fn (lb &ListBox) hit_item_h(mx f32) int {
 	return -1
 }
 
+// hit_sort_col - индекс колонки, у которой курсор над кнопкой сортировки в шапке, либо -1.
 fn (lb &ListBox) hit_sort_col(mx f32, my f32) int {
 	if !lb.show_header || lb.columns.len == 0 {
 		return -1
@@ -858,6 +918,7 @@ fn (lb &ListBox) hit_col_border(mx f32, my f32) int {
 	return -1
 }
 
+// fire_select вызывает on_select(selected, текст), если выбор корректен.
 fn (mut lb ListBox) fire_select() {
 	if lb.on_select != unsafe { nil } && lb.selected >= 0 && lb.selected < lb.rows.len {
 		text := if lb.selected < lb.items.len { lb.items[lb.selected] } else { '' }
@@ -865,6 +926,7 @@ fn (mut lb ListBox) fire_select() {
 	}
 }
 
+// toggle_sort - цикл none -> asc -> desc -> none для колонки; остальным сбрасывает индикатор и зовёт on_sort. Сортировку данных выполняет вызывающий код.
 fn (mut lb ListBox) toggle_sort(col int) {
 	if col < 0 || col >= lb.columns.len {
 		return
@@ -940,6 +1002,10 @@ pub fn (mut lb ListBox) arrange(mut ctx RenderContext) {
 	}
 }
 
+// draw рисует список. Порядок: регистрация в фокус-менеджере (только enabled) и синхронизация
+// флага focused -> анимация кольца фокуса -> фон и рамка -> шапка (колонки, кнопки сортировки,
+// линия при перетаскивании границы) -> строки внутри clip(viewport) -> полосы прокрутки.
+// Виджеты-ячейки здесь только рисуются: их bounds уже выставил arrange().
 pub fn (mut lb ListBox) draw(mut ctx RenderContext) {
 	if !lb.visible {
 		return
@@ -1211,6 +1277,13 @@ pub fn (mut lb ListBox) draw(mut ctx RenderContext) {
 
 // ─── Events ────────────────────────────────────────────
 
+// handle_event: true - событие поглощено. Порядок проверок важен:
+//   1. активные перетаскивания (границы колонки, вертикальный и горизонтальный бегунок) забирают
+//      все события до отпускания левой кнопки;
+//   2. иначе по типу события: mouse_move (hover, курсор, hover_index), mouse_down (границы,
+//      полосы, сортировка, виджеты в ячейках, выбор строки), mouse_up, двойной клик, колесо,
+//      клавиатура (только при focused).
+// Курсор мыши (SDL_CreateSystemCursor) переставляется прямо здесь.
 pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 	if !lb.visible || !lb.enabled {
 		return false
@@ -1365,6 +1438,7 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 				lb.hsb_hovered = false
 			}
 
+			// // Виджеты-ячейки получают mouse_move для собственного hover.
 			// Pass move events to widget cells (for hover effects inside custom widgets)
 			if lb.columns.len > 0 || lb.horizontal {
 				lb.dispatch_to_row_widgets(event, app)
@@ -1444,6 +1518,7 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 					}
 				}
 
+				// // Клик сначала отдаём виджету-ячейке (кнопке и т.п.); выбор строки - только если ячейка событие не взяла.
 				// Try to dispatch to row widget first
 				if (lb.columns.len > 0 || lb.horizontal) && lb.dispatch_to_row_widgets(event, app) {
 					return true
@@ -1481,6 +1556,7 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 					return true
 				}
 			}
+			// // Клик мимо списка: снимаем фокус (событие не поглощаем - его обработают другие виджеты).
 			if lb.focused && !lb.hovered {
 				ctx_ptr := app.get_active_ctx()
 				if unsafe { ctx_ptr != nil } {
@@ -1532,6 +1608,7 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 			}
 		}
 		.mouse_wheel {
+			// // (координаты берутся из живого ctx.mouse_*, т.к. в событии колеса x/y могут быть устаревшими)
 			// Колесо - списку под курсором, фокус не нужен (не брать
 			// колесо - флажок wheel). Есть что прокручивать по оси - колесо
 			// поглощается и на краю: не уходит соседу или родителю.
@@ -1580,6 +1657,7 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 				}
 			}
 
+			// // Home/End/PageUp/PageDown: выбор прыгает, затем ensure_visible (прокрутка) и key_select (Shift - диапазон).
 			if is_home_key(event.keycode, event.scancode) {
 				if lb.rows.len > 0 {
 					lb.selected = 0
@@ -1620,6 +1698,7 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 			}
 
 			match event.keycode {
+				// // Стрелки зацикливают список (с первой на последнюю и обратно). В горизонтальном режиме работают Left/Right.
 				sdl_k_up {
 					if !lb.horizontal && lb.rows.len > 0 {
 						lb.selected = if lb.selected <= 0 {
@@ -1711,6 +1790,10 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 }
 
 // Dispatch an event to visible cell widgets. Returns true if any widget handled it.
+// dispatch_to_row_widgets пересылает событие виджетам-ячейкам видимых строк (снизу вверх - верхний
+// рисуется последним, значит первым должен получить событие). Перед этим bounds ячейки пересчитываются
+// заново (set_widget_bounds): arrange() мог ещё не успеть после прокрутки/смены колонок, а hit-test виджета
+// опирается на его bounds. true - какой-то виджет событие обработал.
 fn (mut lb ListBox) dispatch_to_row_widgets(event &GuiEvent, app &App) bool {
 	if lb.horizontal {
 		return lb.dispatch_to_row_widgets_h(event, app)
@@ -1755,6 +1838,7 @@ fn (mut lb ListBox) dispatch_to_row_widgets(event &GuiEvent, app &App) bool {
 	return false
 }
 
+// dispatch_to_row_widgets_h - то же для горизонтального режима (виджет только в cells[0]).
 fn (mut lb ListBox) dispatch_to_row_widgets_h(event &GuiEvent, app &App) bool {
 	vp := lb.viewport_rect()
 	iw := lb.eff_item_width()

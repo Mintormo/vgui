@@ -5,8 +5,48 @@ import os
 
 // ═══════════════════════════════════════════════════════
 // CodeEditor — multiline text editor widget with optional minimap
+//
+// Многострочный редактор кода: нумерация строк, подсветка синтаксиса (через
+// интерфейс SyntaxHighlighter, syntax_highlighter.v), выделение, отмена/повтор,
+// горизонтальная и вертикальная прокрутка, мини-карта справа.
+//
+// Модель данных:
+//   - Текст хранится как `lines [][]rune` - по строке на элемент, в рунах, чтобы
+//     курсор и колонки работали по символам Unicode, а не по байтам UTF-8.
+//     Перевод строки внутри элемента не бывает; пустой текст = одна пустая строка
+//     (инвариант: lines.len >= 1, на нём держатся обращения lines[cur_line]).
+//   - Курсор - (cur_line, cur_col), cur_col в рунах 0..len(строки).
+//   - Выделение - пара CePos sel_a (якорь) и sel_b (подвижный конец); {-1,-1}
+//     означает "нет выделения". Порядок A/B не нормализован: границы получают
+//     через sel_start()/sel_end().
+//   - Табуляция в тексте остаётся символом `\t`, но при измерении и рисовании
+//     раскрывается в tab_size пробелов (ce_expand_tabs), поэтому ширину считают
+//     всегда по раскрытой строке. Клавиша Tab вставляет пробелы, а не `\t`.
+//
+// Связи с остальной библиотекой:
+//   - Фокус: в отличие от TextInput/Button, CodeEditor НЕ регистрируется в
+//     ctx.focus (FocusManager, focus.v): фокус - просто флаг `focused`,
+//     выставляемый кликом и снимаемый кликом мимо или Esc. Поэтому Tab внутри
+//     редактора - это отступ, а не переход фокуса. Ввод текста идёт событием
+//     text_input (PROJECT.md, «Текстовый ввод SDL - только по фокусу»).
+//   - Отмена: UndoHistory[CeUndoEntry] (undo.v) - снимки всего текста целиком.
+//   - Инвалидация: пока редактор в фокусе и не readonly, draw() каждый кадр
+//     просит следующий через mark_anim_rect (мигание курсора); кольцо фокуса -
+//     Anim (anim.v).
+//   - Раскладка: bounds выставляет контейнер, размер задаёт measure() из
+//     layout_measure.v.
+//   - Буфер обмена - App.set_clipboard/get_clipboard; кодировки файлов -
+//     encoding.v.
+//
+// Раскладка внутри bounds (слева направо): pad | gutter (номера строк) |
+// область текста (content_rect) | вертикальная полоса прокрутки | мини-карта |
+// pad. Горизонтальная полоса занимает нижние ce_sb_w px (место под неё
+// резервируется всегда, даже когда полосы не видно).
 // ═══════════════════════════════════════════════════════
 
+// Лимит глубины отмены (снимков), отступ Tab в пробелах по умолчанию, период
+// мигания курсора (мс; половина периода курсор виден, половина скрыт), скорость
+// прокрутки колесом (px на "тик"), отступы gutter/текста и ширина полос прокрутки.
 const ce_max_undo = 200
 const ce_tab_spaces = 4
 const ce_cursor_blink_ms = u64(1060)
@@ -24,12 +64,15 @@ const sc_letter_v = 25
 const sc_letter_x = 27
 const sc_letter_z = 29
 
+// CeUndoEntry - снимок для отмены: полная копия всех строк и положение курсора.
+// Выделение в снимок не входит (после undo/redo оно сбрасывается).
 struct CeUndoEntry {
 	lines    [][]rune
 	cur_line int
 	cur_col  int
 }
 
+// CePos - позиция в тексте (строка, колонка в рунах). line < 0 - "не задана".
 struct CePos {
 mut:
 	line int
@@ -40,6 +83,7 @@ fn ce_pos(line int, col int) CePos {
 	return CePos{line, col}
 }
 
+// before - строго ли a раньше b в порядке чтения (сначала строка, потом колонка).
 fn (a CePos) before(b CePos) bool {
 	return a.line < b.line || (a.line == b.line && a.col < b.col)
 }
@@ -56,6 +100,10 @@ fn ce_pos_max(a CePos, b CePos) CePos {
 	return if a.before(b) { b } else { a }
 }
 
+// CodeEditor - редактор кода (см. шапку файла). Цвета с альфой 0 означают
+// "взять из темы" (ctx.theme.eff_ce_*). Поля sel_a/sel_b/cur_*/scroll_* можно
+// читать снаружи, но менять лучше методами (set_text, goto_line и т.д.), иначе
+// нарушатся инварианты (курсор внутри текста, lines.len >= 1).
 @[heap]
 pub struct CodeEditor {
 pub mut:
@@ -95,7 +143,7 @@ pub mut:
 	history               UndoHistory[CeUndoEntry] = UndoHistory[CeUndoEntry]{
 		limit: ce_max_undo
 	}
-	drag                  bool
+	drag                  bool // левая кнопка зажата в тексте: движение мыши тянет выделение
 	focus_anim            Anim = anim_smooth(anim_tau_focus)
 	focus_group           int
 	vsb_dragging          bool
@@ -107,21 +155,27 @@ pub mut:
 	hsb_drag_start_x      f32
 	hsb_drag_start_scroll f32
 	// ── Minimap ──
+	// minimap_scale - во сколько раз мини-карта уже/ниже основного текста
+	// (высота строки и ширина символа умножаются на него)
 	show_minimap     bool
 	minimap_width    f32 = 80
 	minimap_scale    f32 = 0.25
 	minimap_dragging bool
 	minimap_hovered  bool
-	on_change        fn () = unsafe { nil }
-	on_cursor_move   fn () = unsafe { nil }
+	on_change        fn () = unsafe { nil } // текст изменён (в т.ч. undo/redo); set_text колбэк НЕ зовёт
+	on_cursor_move   fn () = unsafe { nil } // курсор/выделение сдвинуты
 }
 
+// code_editor создаёт пустой редактор (одна пустая строка).
 pub fn code_editor() &CodeEditor {
 	return &CodeEditor{
 		lines: [[]rune{}]
 	}
 }
 
+// set_text заменяет весь текст. Переводы строк CRLF/CR нормализуются к LF.
+// Курсор и прокрутка уходят в начало, выделение сбрасывается, история отмены
+// забывается; on_change НЕ вызывается (это программная загрузка, не правка).
 pub fn (mut e CodeEditor) set_text(text string) {
 	e.lines.clear()
 	raw_lines := text.replace('\r\n', '\n').replace('\r', '\n').split('\n')
@@ -139,12 +193,15 @@ pub fn (mut e CodeEditor) set_text(text string) {
 	e.history.clear()
 }
 
+// load_file читает файл как UTF-8 (без разбора BOM; для других кодировок -
+// load_file_encoded / load_file_auto). false - файл не прочитан.
 pub fn (mut e CodeEditor) load_file(path string) bool {
 	content := os.read_file(path) or { return false }
 	e.set_text(content)
 	return true
 }
 
+// get_text возвращает весь текст, строки соединены '\n' (без завершающего перевода строки).
 pub fn (e &CodeEditor) get_text() string {
 	mut parts := []string{cap: e.lines.len}
 	for line in e.lines {
@@ -153,6 +210,10 @@ pub fn (e &CodeEditor) get_text() string {
 	return parts.join('\n')
 }
 
+// ce_expand_tabs заменяет каждый '\t' на tab_size пробелов (не выравнивание по
+// колонкам табуляции, а простая подстановка). Единственное место, где текст
+// превращается в "экранный": по нему измеряют ширину и рисуют.
+// Внимание: берёт срез строки из 16 пробелов, поэтому tab_size > 16 приведёт к панике.
 fn ce_expand_tabs(s string, tab_size int) string {
 	if !s.contains('\t') {
 		return s
@@ -161,10 +222,12 @@ fn ce_expand_tabs(s string, tab_size int) string {
 	return s.replace('\t', spaces)
 }
 
+// get_line_count - число строк (>= 1).
 pub fn (e &CodeEditor) get_line_count() int {
 	return e.lines.len
 }
 
+// get_line - строка idx (с нуля) или '' при выходе за границы.
 pub fn (e &CodeEditor) get_line(idx int) string {
 	if idx >= 0 && idx < e.lines.len {
 		return if e.lines[idx].len > 0 { e.lines[idx].string() } else { '' }
@@ -172,10 +235,15 @@ pub fn (e &CodeEditor) get_line(idx int) string {
 	return ''
 }
 
+// set_highlighter подключает подсветку синтаксиса (nil отключает). Редактор
+// хранит голый указатель, не владеет объектом: владелец обязан держать его живым.
 pub fn (mut e CodeEditor) set_highlighter(h &SyntaxHighlighter) {
 	e.highlighter = unsafe { h }
 }
 
+// goto_line ставит курсор в начало строки line (с нуля, зажимается в границы),
+// снимает выделение. Прокрутку к курсору не делает (она произойдёт при вводе
+// с клавиатуры через ensure_cursor_visible) и on_cursor_move не вызывает.
 pub fn (mut e CodeEditor) goto_line(line int) {
 	e.cur_line = clamp_int(line, 0, e.lines.len - 1)
 	e.cur_col = 0
@@ -184,6 +252,7 @@ pub fn (mut e CodeEditor) goto_line(line int) {
 
 // ─── Selection helpers ─────────────────────────────────
 
+// has_sel - есть ли непустое выделение (обе позиции заданы и различны).
 fn (e &CodeEditor) has_sel() bool {
 	return e.sel_a.line >= 0 && e.sel_b.line >= 0 && !e.sel_a.eq(e.sel_b)
 }
@@ -201,6 +270,8 @@ fn (mut e CodeEditor) clear_sel() {
 	e.sel_b = CePos{-1, -1}
 }
 
+// ensure_sel начинает выделение в текущей позиции курсора, если его ещё нет
+// (якорь sel_a = курсор). Вызывается перед сдвигом курсора с Shift.
 fn (mut e CodeEditor) ensure_sel() {
 	if e.sel_a.line < 0 {
 		e.sel_a = ce_pos(e.cur_line, e.cur_col)
@@ -208,6 +279,8 @@ fn (mut e CodeEditor) ensure_sel() {
 	}
 }
 
+// selected_text возвращает выделенный фрагмент (строки через '\n'); колонки
+// зажимаются в длину строки, на случай если текст изменился под выделением.
 fn (e &CodeEditor) selected_text() string {
 	if !e.has_sel() {
 		return ''
@@ -235,6 +308,8 @@ fn (e &CodeEditor) selected_text() string {
 
 // ─── Undo/redo ─────────────────────────────────────────
 
+// snap делает снимок текста и курсора для истории отмены. Копирует каждую
+// строку (clone), иначе снимок делил бы память с живым текстом.
 fn (e &CodeEditor) snap() CeUndoEntry {
 	mut lines_copy := [][]rune{cap: e.lines.len}
 	for line in e.lines {
@@ -247,10 +322,14 @@ fn (e &CodeEditor) snap() CeUndoEntry {
 	}
 }
 
+// save_undo кладёт в историю снимок состояния ДО правки. Протокол из undo.v:
+// звать только когда правка точно произойдёт (save обрывает ветку redo).
 fn (mut e CodeEditor) save_undo() {
 	e.history.save(e.snap())
 }
 
+// restore возвращает текст и курсор из снимка, сбрасывает выделение и сообщает
+// об изменении (on_change).
 fn (mut e CodeEditor) restore(entry CeUndoEntry) {
 	e.lines.clear()
 	for line in entry.lines {
@@ -276,6 +355,7 @@ pub fn (mut e CodeEditor) redo() bool {
 	return true
 }
 
+// can_undo / can_redo - есть ли что отменять / повторять (для пунктов меню «Правка»).
 pub fn (e &CodeEditor) can_undo() bool {
 	return e.history.can_undo()
 }
@@ -289,6 +369,7 @@ pub fn (mut e CodeEditor) clear_undo() {
 	e.history.clear()
 }
 
+// fire_change / fire_cursor_move - безопасный вызов колбэков (nil пропускается).
 fn (mut e CodeEditor) fire_change() {
 	if e.on_change != unsafe { nil } {
 		e.on_change()
@@ -303,6 +384,11 @@ fn (mut e CodeEditor) fire_cursor_move() {
 
 // ─── Delete selection ──────────────────────────────────
 
+// delete_sel удаляет выделенный фрагмент и ставит курсор в его начало.
+// Однострочное выделение - вырезание из одной строки; многострочное -
+// склейка "начало первой строки + хвост последней" и удаление промежуточных
+// строк. Сам историю не пишет и on_change не зовёт: это делает вызывающий
+// (save_undo до, fire_change после).
 fn (mut e CodeEditor) delete_sel() {
 	if !e.has_sel() {
 		return
@@ -347,6 +433,12 @@ fn (mut e CodeEditor) delete_sel() {
 
 // ─── Insert text at cursor ─────────────────────────────
 
+// insert_text вставляет text в позицию курсора (заменяя выделение, если оно есть):
+// сохраняет снимок для отмены, нормализует переводы строк и зовёт on_change.
+// Однострочная вставка просто вклеивается в строку. Многострочная режет текущую
+// строку по курсору на before/after, первую строку вставки приклеивает к before,
+// последнюю - перед after, промежуточные вставляются отдельными строками;
+// курсор встаёт в конец вставленного (перед after). Автоотступа не применяет.
 fn (mut e CodeEditor) insert_text(text string) {
 	if text.len == 0 {
 		return
@@ -406,6 +498,9 @@ fn (mut e CodeEditor) insert_text(text string) {
 }
 
 // ─── Geometry helpers ──────────────────────────────────
+// Все размеры - логические px. Шрифт - моноширинный (.mono по умолчанию):
+// char_width измеряет 'M' и годится как ширина любого символа только для
+// моноширинных шрифтов (используется для gutter и мини-карты).
 
 fn (e &CodeEditor) eff_font(ctx &RenderContext) voidptr {
 	return ctx.get_font_immut(e.font_style, e.font_size)
@@ -421,6 +516,9 @@ fn (e &CodeEditor) char_width(ctx &RenderContext) f32 {
 	return ctx.measure_text_with_font('M', font).x
 }
 
+// gutter_width - ширина колонки номеров строк: разрядность числа строк (не
+// меньше 2 цифр, чтобы ширина не прыгала на 9->10) * ширина символа + поля.
+// 0, если номера выключены.
 fn (e &CodeEditor) gutter_width(ctx &RenderContext) f32 {
 	if !e.show_line_numbers {
 		return f32(0)
@@ -430,6 +528,8 @@ fn (e &CodeEditor) gutter_width(ctx &RenderContext) f32 {
 	return f32(digits) * cw + ce_gutter_pad * 2
 }
 
+// content_rect - прямоугольник области текста (без gutter, полос прокрутки и
+// мини-карты). Клип отрисовки текста, расчёт прокрутки и hit-test идут по нему.
 fn (e &CodeEditor) content_rect(ctx &RenderContext) Rect {
 	gw := e.gutter_width(ctx)
 	mm := if e.show_minimap { e.minimap_width } else { f32(0) }
@@ -450,6 +550,9 @@ fn (e &CodeEditor) max_scroll_y(ctx &RenderContext) f32 {
 	return max_f32(0, e.total_content_height(ctx) - cr.h)
 }
 
+// max_content_width - ширина самой длинной строки (после раскрытия табов) плюс
+// поля. Перебирает ВСЕ строки и измеряет текст - O(размер текста), зовётся
+// на каждый кадр и событие мыши, на больших файлах это заметно.
 fn (e &CodeEditor) max_content_width(ctx &RenderContext) f32 {
 	font := e.eff_font(ctx)
 	mut max_w := f32(0)
@@ -468,6 +571,9 @@ fn (e &CodeEditor) max_scroll_x(ctx &RenderContext) f32 {
 	return max_f32(0, e.max_content_width(ctx) - cr.w)
 }
 
+// ensure_cursor_visible подкручивает вид так, чтобы курсор был виден: по
+// вертикали - строка целиком, по горизонтали - с запасом 20 px от края.
+// Зовётся после каждой клавиатурной правки/перемещения.
 fn (mut e CodeEditor) ensure_cursor_visible(ctx &RenderContext) {
 	lh := e.line_height(ctx)
 	cr := e.content_rect(ctx)
@@ -493,11 +599,17 @@ fn (mut e CodeEditor) ensure_cursor_visible(ctx &RenderContext) {
 	e.scroll_x = clamp_f32(e.scroll_x, 0, e.max_scroll_x(ctx))
 }
 
+// clamp_cursor возвращает курсор в допустимые границы текста.
 fn (mut e CodeEditor) clamp_cursor() {
 	e.cur_line = clamp_int(e.cur_line, 0, e.lines.len - 1)
 	e.cur_col = clamp_int(e.cur_col, 0, e.lines[e.cur_line].len)
 }
 
+// hit_pos переводит координаты мыши в позицию текста. Строка - по высоте
+// строки с учётом прокрутки. Колонка: перебираются все границы между рунами,
+// выбирается ближайшая к точке по ширине префикса (с раскрытыми табами) - так
+// клик в левую/правую половину символа ставит курсор до/после него.
+// Сложность O(длина строки^2) на вызов (каждый префикс измеряется заново).
 fn (e &CodeEditor) hit_pos(mx f32, my f32, ctx &RenderContext) CePos {
 	cr := e.content_rect(ctx)
 	lh := e.line_height(ctx)
@@ -524,6 +636,9 @@ fn (e &CodeEditor) hit_pos(mx f32, my f32, ctx &RenderContext) CePos {
 
 // ─── Scrollbar geometry ────────────────────────────────
 
+// vsb_rects - (дорожка, бегунок) вертикальной полосы; пустые Rect{}, если весь
+// текст помещается. Дорожка стоит слева от мини-карты; высота бегунка
+// пропорциональна доле видимого (не меньше 20 px).
 fn (e &CodeEditor) vsb_rects(ctx &RenderContext) (Rect, Rect) {
 	cr := e.content_rect(ctx)
 	ch := e.total_content_height(ctx)
@@ -550,12 +665,14 @@ fn (e &CodeEditor) vsb_rects(ctx &RenderContext) (Rect, Rect) {
 	return track, thumb
 }
 
+// has_vsb / has_hsb - нужна ли полоса прокрутки (содержимое больше видимой области).
 fn (e &CodeEditor) has_vsb(ctx &RenderContext) bool {
 	return e.total_content_height(ctx) > e.content_rect(ctx).h
 }
 
 // ─── Horizontal scrollbar ──────────────────────────────
 
+// hsb_rects - (дорожка, бегунок) горизонтальной полосы; устроена как vsb_rects.
 fn (e &CodeEditor) hsb_rects(ctx &RenderContext) (Rect, Rect) {
 	cr := e.content_rect(ctx)
 	cw := e.max_content_width(ctx)
@@ -586,7 +703,12 @@ fn (e &CodeEditor) has_hsb(ctx &RenderContext) bool {
 }
 
 // ─── Minimap ───────────────────────────────────────────
+// Мини-карта - уменьшенное изображение всего текста справа: каждая строка
+// рисуется полоской высотой line_height * minimap_scale, а видимая область
+// выделена рамкой. Если карта выше окна, она сама прокручивается синхронно с
+// основным текстом (minimap_scroll_y). Клик/перетаскивание по ней двигает вид.
 
+// minimap_rect - прямоугольник мини-карты (пустой, если она выключена).
 fn (e &CodeEditor) minimap_rect(ctx &RenderContext) Rect {
 	if !e.show_minimap {
 		return Rect{}
@@ -608,6 +730,8 @@ fn (e &CodeEditor) minimap_total_h(ctx &RenderContext) f32 {
 	return f32(e.lines.len) * e.minimap_line_h(ctx)
 }
 
+// minimap_scroll_y - сдвиг самой мини-карты: когда она выше своей области,
+// прокручивается пропорционально прокрутке основного текста (0..максимум).
 fn (e &CodeEditor) minimap_scroll_y(ctx &RenderContext) f32 {
 	mr := e.minimap_rect(ctx)
 	total := e.minimap_total_h(ctx)
@@ -621,6 +745,11 @@ fn (e &CodeEditor) minimap_scroll_y(ctx &RenderContext) f32 {
 	return (e.scroll_y / ms) * (total - mr.h)
 }
 
+// draw_minimap рисует мини-карту: фон, затем для каждой видимой в ней строки
+// горизонтальную полоску. С подсветкой - по полоске на каждый токен цветом токена
+// (пробельные токены пропускаются), без неё - одна полоска цвета текста от первого
+// непробельного символа. Ширина символа берётся не меньше 0.5 px, чтобы текст
+// не пропадал. Поверх - полупрозрачный прямоугольник видимой области.
 fn (e &CodeEditor) draw_minimap(mut ctx RenderContext) {
 	mr := e.minimap_rect(ctx)
 	if mr.w < 4 || mr.h < 4 {
@@ -690,6 +819,8 @@ fn (e &CodeEditor) draw_minimap(mut ctx RenderContext) {
 	}
 
 	// Visible viewport indicator
+	// Позиция и высота рамки - то, что видно в основном тексте, пересчитанное
+	// из строк основного масштаба в строки мини-карты.
 	cr := e.content_rect(ctx)
 	vis_top := (e.scroll_y / lh) * mm_lh - mm_scroll
 	vis_h := (cr.h / lh) * mm_lh
@@ -700,6 +831,8 @@ fn (e &CodeEditor) draw_minimap(mut ctx RenderContext) {
 	ctx.pop_clip()
 }
 
+// minimap_y_to_scroll переводит Y мыши на мини-карте в scroll_y основного текста
+// так, чтобы строка под курсором оказалась в центре видимой области.
 fn (e &CodeEditor) minimap_y_to_scroll(my f32, ctx &RenderContext) f32 {
 	mr := e.minimap_rect(ctx)
 	lh := e.line_height(ctx)
@@ -716,6 +849,12 @@ fn (e &CodeEditor) minimap_y_to_scroll(my f32, ctx &RenderContext) f32 {
 // Drawing
 // ═══════════════════════════════════════════════════════
 
+// draw рисует редактор. Порядок: фон и рамка (цвет рамки плавно смешивается с
+// цветом фокуса по focus_anim), свечение фокуса, gutter, текст (подсветка текущей
+// строки, выделение, строки с подсветкой синтаксиса), курсор, полосы прокрутки,
+// мини-карта. Рисуются только строки, попадающие в видимую область
+// (first_vis..last_vis), поэтому стоимость кадра не зависит от размера файла
+// (кроме max_content_width для горизонтальной прокрутки).
 pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
 	if !e.visible {
 		return
@@ -742,6 +881,8 @@ pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
 	cr := e.content_rect(ctx)
 	gw := e.gutter_width(ctx)
 
+	// Зажимаем прокрутку каждый кадр: за время между кадрами могли смениться
+	// текст, размер окна или шрифт, и прежнее значение вышло за допустимый предел.
 	e.scroll_y = clamp_f32(e.scroll_y, 0, e.max_scroll_y(ctx))
 	e.scroll_x = clamp_f32(e.scroll_x, 0, e.max_scroll_x(ctx))
 
@@ -761,7 +902,9 @@ pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
 		ctx.draw_rounded_rect(e.bounds.expanded(1), glow, ctx.theme.border_radius + 1)
 	}
 
-	// Gutter
+	// Gutter: колонка номеров строк слева; номера выровнены по правому краю,
+	// справа тонкая разделительная линия. Клип по gutter_r, чтобы номера не
+	// вылезали за колонку при прокрутке.
 	if e.show_line_numbers && gw > 0 {
 		gutter_r := Rect{e.bounds.x + e.pad, e.bounds.y + e.pad, gw, e.bounds.h - e.pad * 2}
 		gutter_bg := if e.gutter_bg.a > 0 { e.gutter_bg } else { ctx.theme.eff_ce_gutter_bg() }
@@ -791,7 +934,8 @@ pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
 		ctx.pop_clip()
 	}
 
-	// Text area
+	// Text area: всё ниже (кроме полос и мини-карты) рисуется под клипом cr.
+	// Координаты строки i: y = cr.y + i*lh - scroll_y; x = cr.x - scroll_x.
 	ctx.push_clip(cr)
 
 	tc := if e.text_color.a > 0 { e.text_color } else { ctx.theme.eff_ce_text() }
@@ -818,10 +962,15 @@ pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
 			continue
 		}
 
+		// Подсветка строки с курсором - только пока редактор в фокусе.
 		if e.highlight_cur_line && i == e.cur_line && e.focused {
 			ctx.fill_rect(Rect{cr.x, ly, cr.w, lh}, cur_line_c)
 		}
 
+		// Выделение: прямоугольник по строке от sx до ex. На первой строке
+		// выделения sx - ширина текста до начальной колонки, на последней ex -
+		// до конечной; на промежуточных строках берётся вся ширина области (cr.w).
+		// Ширины считаются по раскрытым табам, как и сам текст.
 		if e.has_sel() {
 			s := e.sel_start()
 			en := e.sel_end()
@@ -850,6 +999,9 @@ pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
 			}
 		}
 
+		// Текст строки. С подсветкой: tokenize() делит строку на цветные куски,
+		// они выводятся подряд, каждый следующий смещается на ширину предыдущего
+		// (токены вместе дают исходную строку, табы раскрываются в каждом).
 		line := e.lines[i]
 		if line.len > 0 {
 			text := line.string()
@@ -870,7 +1022,8 @@ pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
 		}
 	}
 
-	// Cursor
+	// Cursor: мигает по системным часам SDL; первую половину периода виден.
+	// Кадры при этом запрашиваются в начале draw (mark_anim_rect).
 	if e.focused && !e.readonly {
 		ms := C.SDL_GetTicks()
 		if ms % ce_cursor_blink_ms < ce_cursor_blink_ms / 2 {
@@ -890,7 +1043,7 @@ pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
 
 	ctx.pop_clip()
 
-	// Vertical scrollbar
+	// Vertical scrollbar (цвет бегунка: перетаскивание > hover > обычный)
 	if e.has_vsb(ctx) {
 		track, thumb := e.vsb_rects(ctx)
 		if ctx.theme.scrollbar_bg.a > 0 {
@@ -932,6 +1085,21 @@ pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
 // Event handling
 // ═══════════════════════════════════════════════════════
 
+// handle_event обрабатывает ввод; true - событие поглощено.
+// Порядок (первое подходящее выигрывает): активное перетаскивание мини-карты,
+// затем вертикальной и горизонтальной полос - пока такое перетаскивание идёт,
+// поглощаются ВСЕ события; затем обычные события:
+//   mouse_move   - hover полос/мини-карты; при зажатой кнопке в тексте тянет выделение;
+//   mouse_down   - клик по мини-карте / бегунку полосы начинает перетаскивание,
+//                  иначе берёт фокус и ставит курсор (с Shift - расширяет выделение);
+//                  клик мимо виджета снимает фокус;
+//   mouse_up     - завершает выделение мышью (пустое выделение сбрасывается);
+//   mouse_dbl_click - выбор слова;
+//   mouse_wheel  - прокрутка (с Shift - по горизонтали); только если в фокусе и wheel=true;
+//   text_input   - вставка набранных символов (игнорируется при Ctrl и readonly);
+//   key_down     - handle_key (только при фокусе).
+// Для расчёта геометрии нужен активный контекст (app.get_active_ctx()); если его
+// нет (nil), часть веток молча пропускается.
 pub fn (mut e CodeEditor) handle_event(event &GuiEvent, app &App) bool {
 	if !e.visible || !e.enabled {
 		return false
@@ -1031,6 +1199,8 @@ pub fn (mut e CodeEditor) handle_event(event &GuiEvent, app &App) bool {
 	match event.typ {
 		.mouse_move {
 			e.hovered = e.bounds.contains(event.mouse_x, event.mouse_y)
+			// Выделение мышью: пока кнопка зажата, подвижный конец выделения
+			// следует за курсором мыши (даже за пределами виджета).
 			if e.drag && e.focused && unsafe { ctx_ptr != nil } {
 				pos := e.hit_pos(event.mouse_x, event.mouse_y, ctx_ptr)
 				e.cur_line = pos.line
@@ -1095,7 +1265,9 @@ pub fn (mut e CodeEditor) handle_event(event &GuiEvent, app &App) bool {
 							return true
 						}
 					}
-					// Focus + cursor
+					// Focus + cursor: клик в тексте берёт фокус, ставит курсор и
+					// начинает выделение (якорь sel_a); с Shift выделение
+					// продолжается от прежнего якоря.
 					mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
 					e.focused = true
 					pos := e.hit_pos(event.mouse_x, event.mouse_y, ctx_ptr)
@@ -1114,6 +1286,7 @@ pub fn (mut e CodeEditor) handle_event(event &GuiEvent, app &App) bool {
 				}
 				return true
 			}
+			// Нажатие мимо редактора снимает фокус и выделение.
 			if e.focused && !e.hovered {
 				e.focused = false
 				e.drag = false
@@ -1166,6 +1339,9 @@ pub fn (mut e CodeEditor) handle_event(event &GuiEvent, app &App) bool {
 			if !e.focused || e.readonly {
 				return false
 			}
+			// При зажатом Ctrl SDL всё равно может прислать text_input для
+			// сочетания (например Ctrl+V -> 'v'); это не ввод, а горячая клавиша,
+			// которую уже обработал key_down, - поглощаем без вставки.
 			mod_state := C.SDL_GetModState()
 			if (mod_state & sdl_kmod_ctrl) != 0 {
 				return true
@@ -1190,6 +1366,15 @@ pub fn (mut e CodeEditor) handle_event(event &GuiEvent, app &App) bool {
 
 // ─── Key handling ──────────────────────────────────────
 
+// handle_key обрабатывает нажатие клавиши в сфокусированном редакторе.
+// Буквенные горячие клавиши (Ctrl+A/C/V/X/Z) распознаются И по keycode, И по
+// физическому scancode: при русской раскладке SDL отдаёт в keycode кириллицу,
+// и сочетание иначе не сработало бы. В режиме readonly доступны только
+// навигация, выделение и копирование. Порядок веток: readonly -> Home/End ->
+// Ctrl+клавиша -> Shift+Insert -> прочие клавиши (Enter, Backspace, Delete, Tab,
+// стрелки, Esc) -> PageUp/PageDown. После каждого изменения/перемещения
+// вызывается ensure_cursor_visible (если есть контекст). Возвращает true, если
+// клавиша поглощена.
 fn (mut e CodeEditor) handle_key(ev &GuiEvent, app &App, ctx_ptr &RenderContext) bool {
 	ctrl := ev.ctrl()
 	shift := ev.shift()
@@ -1468,6 +1653,11 @@ fn (mut e CodeEditor) handle_key(ev &GuiEvent, app &App, ctx_ptr &RenderContext)
 }
 
 // ─── Cursor movement ───────────────────────────────────
+// Общая схема перемещений: с Shift выделение растёт (ensure_sel заводит якорь
+// до сдвига, после сдвига sel_b = новая позиция), без Shift выделение сбрасывается.
+// Каждое перемещение зовёт on_cursor_move. При вертикальном перемещении колонка
+// просто обрезается по длине новой строки; "желаемая" колонка НЕ запоминается,
+// поэтому после прохода через короткую строку прежняя колонка не восстановится.
 
 fn (mut e CodeEditor) move_cursor_up(shift bool) {
 	if shift {
@@ -1501,6 +1691,9 @@ fn (mut e CodeEditor) move_cursor_down(shift bool) {
 	e.fire_cursor_move()
 }
 
+// move_cursor_left / right: на символ (или на слово при ctrl). Без Shift при
+// наличии выделения курсор просто уходит к левому/правому краю выделения,
+// как в большинстве редакторов. На границе строки переходит на соседнюю.
 fn (mut e CodeEditor) move_cursor_left(ctrl bool, shift bool) {
 	if shift {
 		e.ensure_sel()
@@ -1560,6 +1753,7 @@ fn (mut e CodeEditor) move_cursor_right(ctrl bool, shift bool) {
 	e.fire_cursor_move()
 }
 
+// key_home / key_end - в начало / конец текущей строки (без "умного" Home к первому непробелу).
 fn (mut e CodeEditor) key_home(shift bool) {
 	if shift {
 		e.ensure_sel()
@@ -1588,6 +1782,7 @@ fn (mut e CodeEditor) key_end(shift bool) {
 
 // ─── Editing keys ──────────────────────────────────────
 
+// ce_leading_indent - число ведущих пробелов/табов в строке (в рунах).
 fn ce_leading_indent(line []rune) int {
 	mut n := 0
 	for r in line {
@@ -1600,6 +1795,9 @@ fn ce_leading_indent(line []rune) int {
 	return n
 }
 
+// key_enter разрывает строку по курсору (заменяя выделение). При auto_indent
+// новая строка начинается с тех же ведущих пробелов/табов, что у исходной
+// (копируются сами руны, поэтому таб остаётся табом).
 fn (mut e CodeEditor) key_enter() {
 	e.save_undo()
 	if e.has_sel() {
@@ -1633,6 +1831,9 @@ fn (mut e CodeEditor) key_enter() {
 	e.fire_change()
 }
 
+// key_backspace: удаляет выделение, иначе символ слева (с ctrl - слово слева);
+// в начале строки склеивает её с предыдущей. Каждая реальная правка пишет
+// снимок отмены; если удалять нечего (начало текста), снимок не создаётся.
 fn (mut e CodeEditor) key_backspace(ctrl bool) {
 	if e.has_sel() {
 		e.save_undo()
@@ -1698,6 +1899,8 @@ fn (mut e CodeEditor) key_backspace(ctrl bool) {
 	}
 }
 
+// key_delete - зеркало key_backspace: символ/слово справа, в конце строки
+// склеивает со следующей.
 fn (mut e CodeEditor) key_delete(ctrl bool) {
 	if e.has_sel() {
 		e.save_undo()
@@ -1754,11 +1957,19 @@ fn (mut e CodeEditor) key_delete(ctrl bool) {
 	}
 }
 
+// key_tab вставляет tab_size пробелов (не символ '\t'; существующие табы в
+// тексте остаются). Срез из 4 пробелов: при tab_size > 4 будет паника (на
+// практике tab_size = 4 по умолчанию).
 fn (mut e CodeEditor) key_tab() {
 	spaces := '    '[..e.tab_size]
 	e.insert_text(spaces)
 }
 
+// key_shift_tab убирает до tab_size ведущих пробелов/табов у ТЕКУЩЕЙ строки
+// (многострочное выделение не обрабатывается - сдвигается только строка курсора).
+// Замечание: снимок для отмены сохраняется до проверки, есть ли что убирать,
+// так что нажатие на строке без отступа добавляет пустой шаг в историю и
+// обрывает ветку redo.
 fn (mut e CodeEditor) key_shift_tab() {
 	e.save_undo()
 	line := e.lines[e.cur_line]
@@ -1777,7 +1988,11 @@ fn (mut e CodeEditor) key_shift_tab() {
 }
 
 // ─── Word boundaries ───────────────────────────────────
+// is_word (text_input.v) решает, считается ли руна частью слова.
 
+// word_left возвращает колонку начала слова слева от курсора: пропускает
+// не-словные символы назад, затем само слово. На колонке 0 остаётся 0
+// (на предыдущую строку не переходит).
 fn (e &CodeEditor) word_left() int {
 	line := e.lines[e.cur_line]
 	if e.cur_col == 0 {
@@ -1793,6 +2008,8 @@ fn (e &CodeEditor) word_left() int {
 	return p
 }
 
+// word_right возвращает колонку начала следующего слова: пропускает остаток
+// текущего слова, затем разделители. В конце строки остаётся на её длине.
 fn (e &CodeEditor) word_right() int {
 	line := e.lines[e.cur_line]
 	n := line.len
@@ -1809,6 +2026,8 @@ fn (e &CodeEditor) word_right() int {
 	return p
 }
 
+// select_word_at_cursor выделяет слово под курсором (двойной щелчок); курсор
+// уходит в конец слова. На не-словном символе выделение пустое (a == b == p).
 fn (mut e CodeEditor) select_word_at_cursor() {
 	line := e.lines[e.cur_line]
 	if line.len == 0 {
@@ -1830,6 +2049,8 @@ fn (mut e CodeEditor) select_word_at_cursor() {
 
 // ─── File I/O with encoding ────────────────────────────
 
+// load_file_encoded читает файл в указанной кодировке (имя разбирает
+// parse_encoding, encoding.v) и заменяет текст через set_text. false - не прочитан.
 pub fn (mut e CodeEditor) load_file_encoded(path string, encoding string) bool {
 	data := os.read_bytes(path) or { return false }
 	enc := parse_encoding(encoding)
@@ -1838,12 +2059,15 @@ pub fn (mut e CodeEditor) load_file_encoded(path string, encoding string) bool {
 	return true
 }
 
+// save_file пишет текст в файл как UTF-8 с переводами строк LF. false - ошибка записи.
 pub fn (e &CodeEditor) save_file(path string) bool {
 	text := e.get_text()
 	os.write_file(path, text) or { return false }
 	return true
 }
 
+// save_file_encoded пишет текст в заданной кодировке. line_ending: '\r\n' -
+// CRLF; пустая строка и любое другое значение - LF.
 pub fn (e &CodeEditor) save_file_encoded(path string, encoding string, line_ending string) bool {
 	mut text := e.get_text()
 	le := if line_ending.len > 0 { line_ending } else { '\n' }
@@ -1856,6 +2080,9 @@ pub fn (e &CodeEditor) save_file_encoded(path string, encoding string, line_endi
 	return true
 }
 
+// load_file_auto читает файл: при UTF-8 BOM (EF BB BF) берёт UTF-8, иначе
+// fallback_encoding. Сам BOM срезает decode_bytes (encoding.v). Другие
+// кодировки автоматически не определяются.
 pub fn (mut e CodeEditor) load_file_auto(path string, fallback_encoding string) bool {
 	data := os.read_bytes(path) or { return false }
 	enc := if data.len >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {

@@ -11,6 +11,11 @@ import time
 //   dp.on_change = fn (y int, m int, d int) { ... }
 // ═══════════════════════════════════════════════════════
 
+// DatePicker - поле-кнопка с датой 'YYYY-MM-DD'. Клик открывает модальный диалог-календарь (dp_open_dialog);
+// после подтверждения year/month/day обновляются и вызывается on_change(year, month, day).
+// Сама дата не проверяется на корректность при создании (date_picker_ymd принимает любые числа);
+// set_date зажимает месяц в 1..12, день в допустимый для месяца.
+// Тексты (названия месяцев, кнопки) не локализованы - английские литералы.
 @[heap]
 pub struct DatePicker {
 pub mut:
@@ -25,6 +30,7 @@ pub mut:
 	on_change fn (int, int, int) = unsafe { nil }
 }
 
+// date_picker создаёт виджет с сегодняшней датой (локальное время, time.now()).
 pub fn date_picker() &DatePicker {
 	now := time.now()
 	return &DatePicker{
@@ -34,6 +40,7 @@ pub fn date_picker() &DatePicker {
 	}
 }
 
+// date_picker_ymd - виджет с заданной датой (без валидации).
 pub fn date_picker_ymd(y int, m int, d int) &DatePicker {
 	return &DatePicker{
 		year:  y
@@ -42,10 +49,12 @@ pub fn date_picker_ymd(y int, m int, d int) &DatePicker {
 	}
 }
 
+// get_date возвращает (год, месяц 1-12, день 1-31).
 pub fn (dp &DatePicker) get_date() (int, int, int) {
 	return dp.year, dp.month, dp.day
 }
 
+// set_date задаёт дату программно (on_change не вызывается); месяц зажимается в 1..12, день - в число дней этого месяца. Кадр не инвалидирует.
 pub fn (mut dp DatePicker) set_date(y int, m int, d int) {
 	dp.year = y
 	dp.month = clamp_int(m, 1, 12)
@@ -64,6 +73,7 @@ fn dp_is_leap(y int) bool {
 	return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
+// dp_days_in_month - число дней в месяце (високосный февраль учтён; неверный месяц даёт 30).
 fn dp_days_in_month(y int, m int) int {
 	return match m {
 		1 {
@@ -112,6 +122,8 @@ fn dp_days_in_month(y int, m int) int {
 	}
 }
 
+// // (Конгруэнция Целлера. Янв и фев считаются 13-м и 14-м месяцем предыдущего года; h у Целлера: 0=сб, 1=вс,
+// // поэтому (h + 6) % 7 приводит к 0=вс. Дальше DpArea сдвигает на понедельник как первый день недели.)
 // Zeller's congruence: day of week for given date (0=Sun, 1=Mon, ..., 6=Sat)
 fn dp_day_of_week(y int, m int, d int) int {
 	mut yy := y
@@ -128,6 +140,7 @@ fn dp_day_of_week(y int, m int, d int) int {
 	return if dow < 0 { dow + 7 } else { dow }
 }
 
+// dp_month_name - английское название месяца; '?' для неверного номера.
 fn dp_month_name(m int) string {
 	return match m {
 		1 { 'January' }
@@ -148,6 +161,7 @@ fn dp_month_name(m int) string {
 
 // ─── Drawing ───────────────────────────────────────────
 
+// draw рисует поле: скруглённый фон (подсветка при наведении) и дату по центру. Календарь рисуется не здесь, а в диалоге (DpArea).
 pub fn (mut dp DatePicker) draw(mut ctx RenderContext) {
 	if !dp.visible {
 		return
@@ -171,6 +185,7 @@ pub fn (mut dp DatePicker) draw(mut ctx RenderContext) {
 
 // ─── Events ────────────────────────────────────────────
 
+// handle_event: ЛКМ по виджету открывает диалог выбора (вложенный цикл событий внутри dp_open_dialog, возврат - после закрытия диалога).
 pub fn (mut dp DatePicker) handle_event(event &GuiEvent, app &App) bool {
 	if !dp.visible || !dp.enabled {
 		return false
@@ -193,6 +208,7 @@ pub fn (mut dp DatePicker) handle_event(event &GuiEvent, app &App) bool {
 
 // ─── Standalone calendar dialog ────────────────────────
 
+// DateDialogConfig - параметры date_dialog (@[params]). year/month/day равные 0 означают «сегодня» (отдельно по каждому полю).
 @[params]
 pub struct DateDialogConfig {
 pub mut:
@@ -217,6 +233,9 @@ pub fn date_dialog(parent &Window, mut app App, cfg DateDialogConfig) (int, int,
 
 // ─── Widget dialog ─────────────────────────────────────
 
+// dp_open_dialog открывает календарь для виджета. Родительское окно находится по активному контексту
+// (app.get_active_ctx): сперва среди окон приложения, затем среди диалогов (виджет может лежать в диалоге).
+// Не нашли - молча ничего не делаем. После подтверждения обновляет дату и зовёт on_change.
 fn dp_open_dialog(mut dp DatePicker, app &App) {
 	ctx_ptr := app.get_active_ctx()
 	if unsafe { ctx_ptr == nil } {
@@ -257,6 +276,11 @@ fn dp_open_dialog(mut dp DatePicker, app &App) {
 
 // ─── Shared modal dialog implementation ────────────────
 
+// dp_run_dialog - общая реализация модального календаря для виджета и date_dialog. Создаёт Dialog
+// (тема и шрифты наследуются от parent), держит собственный цикл process_events/render_all (пауза 16 мс)
+// до OK / Cancel / закрытия окна. Возвращает (год, месяц, день, подтверждено); при отмене - исходные
+// значения и false. Диалог одноразовый: снимается с app (remove_dialog) и освобождается (win.cleanup()).
+// OK также срабатывает двойным кликом по дню (см. DpArea.handle_event).
 fn dp_run_dialog(parent &Window, mut app App, year int, month int, day int, title string) (int, int, int, bool) {
 	if unsafe { parent == nil } {
 		return year, month, day, false
@@ -349,6 +373,7 @@ fn dp_run_dialog(parent &Window, mut app App, year int, month int, day int, titl
 
 // ─── Dialog state ──────────────────────────────────────
 
+// DpState - состояние открытого календаря, общее для DpArea (рисование/мышь) и кнопок диалога (замыкания). confirmed/cancelled - условия выхода из цикла dp_run_dialog.
 struct DpState {
 mut:
 	year      int
@@ -362,6 +387,7 @@ mut:
 
 // ─── Calendar draw area ────────────────────────────────
 
+// DpArea - внутренний виджет календарной сетки (навигация по месяцам, заголовок дней недели, сетка дней). Живёт только внутри диалога, наружу не экспортируется.
 struct DpArea {
 mut:
 	bounds  Rect
@@ -371,6 +397,9 @@ mut:
 
 const dp_day_names = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']
 
+// draw рисует календарь: строка «Месяц Год» со стрелками <>, заголовок Пн..Вс и 6 строк по 7 ячеек.
+// Неделя начинается с понедельника: первый день месяца смещён на first_dow = (dow_вс0 + 6) % 7 ячеек.
+// Высота ячейки делит оставшуюся после шапки высоту на 6 строк (максимум строк в месяце).
 fn (mut a DpArea) draw(mut ctx RenderContext) {
 	if unsafe { a.state == nil } {
 		return
@@ -447,6 +476,10 @@ fn (mut a DpArea) draw(mut ctx RenderContext) {
 	}
 }
 
+// handle_event - мышь календаря: наведение определяет a.hovered (день), клик в полосе навигации у левого/правого
+// края (40 px) листает месяц, клик по дню выбирает его, двойной клик - выбирает и подтверждает, колесо над
+// областью листает месяцы. Геометрия повторяет draw() (те же отступы и сетка). После смены месяца день
+// зажимается в его длину (31 янв -> 28/29 фев).
 fn (mut a DpArea) handle_event(event &GuiEvent, app &App) bool {
 	if unsafe { a.state == nil } {
 		return false
@@ -454,6 +487,7 @@ fn (mut a DpArea) handle_event(event &GuiEvent, app &App) bool {
 	mut s := a.state
 
 	// Use fixed font height — we don't need ctx_ptr for event geometry
+	// Фиксированная высота шрифта: ctx в обработчике событий недоступен. В draw() используется реальная высота шрифта (font_height_of), поэтому при шрифте не 16 px сетка попаданий может слегка не совпадать с нарисованной.
 	fh := f32(16)
 
 	pad := f32(4)

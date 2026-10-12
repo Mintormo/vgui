@@ -8,7 +8,16 @@ module vgui
 //   - preset color variants (info, success, warning, error, neutral)
 //   - custom bg/fg colors
 //   - optional dot mode (no text, just a colored circle)
+//
+// Badge - чисто отображающий виджет: не фокусируется, события не обрабатывает
+// (handle_event всегда false), поэтому в фокус-учёт (focus.v) не регистрируется
+// и анимаций не имеет - mark_anim не нужен. Размер даёт preferred_size()
+// (его использует measure() из layout_measure.v при раскладке), положение
+// bounds выставляет контейнер в arrange() (через Layouted, widget_tree.v).
 // ═══════════════════════════════════════════════════════
+
+// BadgeVariant - готовая цветовая схема значка; цвета берутся из активной темы
+// в resolve_colors(), так что значок следует за сменой темы.
 
 pub enum BadgeVariant {
 	info
@@ -19,6 +28,8 @@ pub enum BadgeVariant {
 	accent
 }
 
+// Badge - значок-"пилюля" с текстом/числом или точка-индикатор (dot_mode).
+// Поля bg/fg с альфой 0 означают "не задано": вместо них действует variant.
 @[heap]
 pub struct Badge {
 pub mut:
@@ -34,18 +45,21 @@ pub mut:
 	pad_y    f32  = 3
 }
 
+// badge создаёт значок с произвольным текстом (вариант .info).
 pub fn badge(text string) &Badge {
 	return &Badge{
 		text: text
 	}
 }
 
+// badge_count - значок с числом n (просто text = n.str(); без "99+" и т.п.).
 pub fn badge_count(n int) &Badge {
 	return &Badge{
 		text: n.str()
 	}
 }
 
+// badge_dot - значок-точка без текста (круг 10x10 по preferred_size).
 pub fn badge_dot() &Badge {
 	return &Badge{
 		dot_mode: true
@@ -54,6 +68,9 @@ pub fn badge_dot() &Badge {
 
 // ─── Size hint (for auto-sizing in containers) ─────────
 
+// preferred_size - желаемый размер (w, h): для точки - 10x10, для текста -
+// размер текста плюс pad_x/pad_y с каждой стороны; ширина не меньше высоты,
+// чтобы короткий текст ("1") давал круг, а не вытянутую по вертикали пилюлю.
 pub fn (b &Badge) preferred_size(ctx &RenderContext) (f32, f32) {
 	if b.dot_mode {
 		d := f32(10)
@@ -68,6 +85,9 @@ pub fn (b &Badge) preferred_size(ctx &RenderContext) (f32, f32) {
 
 // ─── Drawing ───────────────────────────────────────────
 
+// draw рисует значок в bounds: в dot_mode - круг по меньшей стороне, иначе
+// скруглённый прямоугольник (радиус = полвысоты, т.е. пилюля) и по центру текст.
+// Текст обрезается по bounds, если контейнер выделил места меньше желаемого.
 pub fn (mut b Badge) draw(mut ctx RenderContext) {
 	if !b.visible {
 		return
@@ -100,6 +120,9 @@ pub fn (mut b Badge) draw(mut ctx RenderContext) {
 	}
 }
 
+// resolve_colors возвращает пару (фон, цвет текста). Приоритет: явный bg
+// (с автоматическим белым текстом, если fg не задан) > цвета варианта из темы
+// (с заменой текста на fg, если он задан).
 fn (b &Badge) resolve_colors(ctx &RenderContext) (Color, Color) {
 	// Custom overrides take priority
 	if b.bg.a > 0 {
@@ -130,6 +153,7 @@ fn (b &Badge) resolve_colors(ctx &RenderContext) (Color, Color) {
 	return bg, fg
 }
 
+// handle_event: значок не интерактивен, событие никогда не поглощается.
 pub fn (mut b Badge) handle_event(event &GuiEvent, app &App) bool {
 	return false
 }

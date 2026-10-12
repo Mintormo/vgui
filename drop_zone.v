@@ -19,6 +19,12 @@ module vgui
 // file in, or click to pick one.
 // ═══════════════════════════════════════════════════════
 
+// DropZone - прямоугольная цель для перетаскивания файлов/текста в окно (SDL3 drag-and-drop) с необязательным
+// режимом «клик = выбрать файл». События drop_* приходят от окна (events.v); координаты курсора - в mouse_x/y.
+// Колбэки: on_drop_file(path) - путь сброшенного (или выбранного кликом) файла, on_drop_text(text) - сброшенный
+// текст. accept_files / accept_text отключают приём соответствующего вида. hovering - над зоной сейчас
+// перетаскивание (подсветка), pressed - ЛКМ зажата внутри зоны в режиме click_to_browse.
+// Все поля browse_* используются только при click_to_browse = true (см. dz_open_browse).
 @[heap]
 pub struct DropZone {
 pub mut:
@@ -42,6 +48,7 @@ pub mut:
 	on_drop_text fn (text string) = unsafe { nil }
 }
 
+// drop_zone создаёт зону с подписью text (может быть многострочной, разделитель '\n').
 pub fn drop_zone(text string) &DropZone {
 	return &DropZone{
 		text: text
@@ -50,6 +57,7 @@ pub fn drop_zone(text string) &DropZone {
 
 // ─── Drawing ───────────────────────────────────────────
 
+// draw рисует скруглённую панель (при подсветке - фон подмешан к акценту, рамка акцентная) и подпись по центру, строка за строкой.
 pub fn (mut d DropZone) draw(mut ctx RenderContext) {
 	if !d.visible {
 		return
@@ -91,6 +99,11 @@ pub fn (mut d DropZone) draw(mut ctx RenderContext) {
 
 // ─── Events ────────────────────────────────────────────
 
+// handle_event обрабатывает два независимых потока событий.
+// 1) Мышь (только если click_to_browse): нажатие и отпускание ЛКМ внутри зоны = клик, который открывает диалог выбора (dz_open_browse).
+// 2) drop_*: drop_position подсвечивает зону, но НЕ поглощает событие (чтобы остальные зоны тоже его увидели);
+//    drop_file / drop_text поглощаются (true) только если точка сброса внутри bounds и приём разрешён - иначе
+//    событие уходит дальше, например в обработчик на уровне окна.
 pub fn (mut d DropZone) handle_event(event &GuiEvent, app &App) bool {
 	if !d.visible {
 		return false

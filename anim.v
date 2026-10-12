@@ -118,8 +118,8 @@ pub mut:
 	value f32 // текущее значение — по нему рисуют
 	goal  f32 // цель
 mut:
-	from       f32 // .tween: откуда идёт переход
-	elapsed    f32 // .tween: мс от начала перехода
+	from    f32 // .tween: откуда идёт переход
+	elapsed f32 // .tween: мс от начала перехода
 	// true, пока идёт переход. Нужен отдельно от value != goal: у .tween
 	// он отмечает, что from/elapsed уже инициализированы для текущей цели.
 	running bool

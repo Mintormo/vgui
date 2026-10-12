@@ -35,14 +35,30 @@ module vgui
 //     - Documents
 //     - Projects
 //   on_click: nav_handler
+//
+// Устройство:
+//   - items - исходный путь; segments - то, что реально видно на экране.
+//     Segments пересчитываются в layout() при КАЖДОМ draw() (по bounds и
+//     тексту), поэтому после переполнения (overflow) индексы сегментов и
+//     элементов расходятся: сегмент 0 - многоточие, остальные соответствуют
+//     items[hidden_before..]. Перевод - segment_to_item_index().
+//   - Раскладка: размер задаёт контейнер (bounds), виджет сам измеряет текст
+//     и сам обрезает/сворачивает путь под ширину. Фокуса и анимаций нет.
+//   - Клики по сегментам -> on_click(индекс_в_items, текст). Последний
+//     сегмент ("текущий") по умолчанию не кликабелен (current_clickable).
 // ═══════════════════════════════════════════════════════
 
+// Константы по умолчанию: разделитель, горизонтальный/вертикальный внутренний
+// отступ, поля вокруг сегмента (расширяют зону hover/клика), минимальная
+// ширина сегмента (в этом файле не используется).
 const bc_default_separator = ' › '
 const bc_pad_h = f32(8)
 const bc_pad_v = f32(4)
 const bc_sep_pad = f32(2)
 const bc_min_segment_w = f32(20)
 
+// BcSegment - один видимый на экране сегмент пути (или многоточие).
+// x/w - абсолютная позиция и ширина текста, считаются в layout().
 struct BcSegment {
 mut:
 	text    string
@@ -54,6 +70,8 @@ mut:
 	truncated bool
 }
 
+// Breadcrumbs - хлебные крошки. Цвета с альфой 0 = взять из темы (eff_*);
+// bg_color/border_color по умолчанию прозрачные (т.е. фон и рамка не рисуются).
 @[heap]
 pub struct Breadcrumbs {
 pub mut:
@@ -79,7 +97,7 @@ pub mut:
 	current_color   Color = Color{0, 0, 0, 0}
 	separator_color Color = Color{0, 0, 0, 0}
 	hover_bg_color  Color = Color{0, 0, 0, 0}
-	// Internal layout
+	// Internal layout (пересобирается в layout() каждый кадр)
 	segments      []BcSegment
 	sep_w         f32  // measured separator width
 	overflow      bool // true when items don't fit
@@ -90,10 +108,12 @@ pub mut:
 
 // ─── Constructors ──────────────────────────────────────
 
+// breadcrumbs создаёт пустой виджет (разделитель " › ").
 pub fn breadcrumbs() &Breadcrumbs {
 	return &Breadcrumbs{}
 }
 
+// breadcrumbs_with_items создаёт виджет с копией списка items.
 pub fn breadcrumbs_with_items(items []string) &Breadcrumbs {
 	return &Breadcrumbs{
 		items: items.clone()
@@ -102,14 +122,17 @@ pub fn breadcrumbs_with_items(items []string) &Breadcrumbs {
 
 // ─── Public API ────────────────────────────────────────
 
+// add дописывает элемент в конец пути (то же, что push).
 pub fn (mut bc Breadcrumbs) add(item string) {
 	bc.items << item
 }
 
+// set_items заменяет путь копией items.
 pub fn (mut bc Breadcrumbs) set_items(items []string) {
 	bc.items = items.clone()
 }
 
+// clear удаляет все элементы и сбрасывает состояние раскладки.
 pub fn (mut bc Breadcrumbs) clear() {
 	bc.items.clear()
 	bc.segments.clear()
@@ -117,6 +140,7 @@ pub fn (mut bc Breadcrumbs) clear() {
 	bc.overflow = false
 }
 
+// get_items возвращает копию списка элементов.
 pub fn (bc &Breadcrumbs) get_items() []string {
 	return bc.items.clone()
 }
@@ -129,12 +153,15 @@ pub fn (mut bc Breadcrumbs) push(item string) {
 	bc.items << item
 }
 
+// pop удаляет последний элемент (пустой путь - ничего не делает).
 pub fn (mut bc Breadcrumbs) pop() {
 	if bc.items.len > 0 {
 		bc.items.delete(bc.items.len - 1)
 	}
 }
 
+// set_path_from_string разбирает строку path по разделителю sep, обрезает
+// пробелы по краям частей и отбрасывает пустые части. Прежний путь заменяется.
 pub fn (mut bc Breadcrumbs) set_path_from_string(path string, sep string) {
 	bc.items.clear()
 	if path.len == 0 {
@@ -149,11 +176,14 @@ pub fn (mut bc Breadcrumbs) set_path_from_string(path string, sep string) {
 	}
 }
 
+// get_path склеивает элементы через sep.
 pub fn (bc &Breadcrumbs) get_path(sep string) string {
 	return bc.items.join(sep)
 }
 
 // ─── Effective colors ──────────────────────────────────
+// eff_*: свой цвет (альфа > 0) или цвет из темы; фон и рамка без своего цвета
+// остаются прозрачными, радиус по умолчанию - половина радиуса темы (не меньше 3).
 
 fn (bc &Breadcrumbs) eff_bg(_ &RenderContext) Color {
 	if bc.bg_color.a > 0 {
@@ -213,6 +243,15 @@ fn (bc &Breadcrumbs) eff_radius(ctx &RenderContext) f32 {
 
 // ─── Layout ────────────────────────────────────────────
 
+// layout пересчитывает bc.segments под текущие bounds и items.
+// Три случая:
+//   1. всё помещается - сегменты идут подряд, между ними sep_w;
+//   2. не помещается - overflow: слева многоточие "…", справа как можно
+//      больше последних элементов; первый элемент (items[0]) никогда не
+//      показывается в свёрнутом виде (цикл ниже останавливается на i > 0);
+//   3. не помещается даже многоточие + последний элемент целиком - последний
+//      элемент усекается по ширине (bc_truncate_text), segments = [… , усечённый].
+// Заполняет также hidden_before - сколько элементов с начала скрыто.
 fn (mut bc Breadcrumbs) layout(ctx &RenderContext) {
 	bc.segments.clear()
 	bc.hidden_before = 0
@@ -330,6 +369,8 @@ fn (mut bc Breadcrumbs) layout(ctx &RenderContext) {
 }
 
 // Truncate text to fit max_w with ellipsis
+// Бинарный поиск по числу рун (а не байт, чтобы не рвать UTF-8): наибольший
+// префикс, который вместе с "…" влезает в max_w. Пустая строка при max_w <= 0.
 fn bc_truncate_text(ctx &RenderContext, text string, max_w f32, font voidptr) string {
 	if max_w <= 0 {
 		return ''
@@ -382,6 +423,10 @@ fn (bc &Breadcrumbs) segment_to_item_index(seg_idx int) int {
 
 // ─── Drawing ───────────────────────────────────────────
 
+// draw пересчитывает раскладку (layout) и рисует сегменты: подложка-"пилюля"
+// под наведённым кликабельным сегментом, текст (цвет по приоритету: disabled >
+// многоточие > hover > текущий > обычный) и разделитель после каждого сегмента,
+// кроме последнего. Всё под клипом bounds.
 pub fn (mut bc Breadcrumbs) draw(mut ctx RenderContext) {
 	if !bc.visible || bc.items.len == 0 {
 		return
@@ -471,6 +516,9 @@ pub fn (mut bc Breadcrumbs) draw(mut ctx RenderContext) {
 	ctx.pop_clip()
 }
 
+// is_segment_clickable - можно ли кликнуть сегмент seg_idx (ему соответствует
+// элемент item_idx): нельзя при disabled, для многоточия и для последнего
+// элемента, если не включён current_clickable.
 fn (bc &Breadcrumbs) is_segment_clickable(seg_idx int, item_idx int) bool {
 	if !bc.enabled {
 		return false
@@ -491,6 +539,8 @@ fn (bc &Breadcrumbs) is_segment_clickable(seg_idx int, item_idx int) bool {
 
 // ─── Hit testing ──────────────────────────────────────
 
+// hit_segment - индекс сегмента под точкой или -1. По Y достаточно попасть в
+// bounds; по X зона шире текста на bc_sep_pad с каждой стороны.
 fn (bc &Breadcrumbs) hit_segment(mx f32, my f32) int {
 	if my < bc.bounds.y || my > bc.bounds.y + bc.bounds.h {
 		return -1
@@ -508,6 +558,9 @@ fn (bc &Breadcrumbs) hit_segment(mx f32, my f32) int {
 
 // ─── Events ────────────────────────────────────────────
 
+// handle_event: mouse_move обновляет hovered сегментов и курсор (рука над
+// кликабельным сегментом, стрелка иначе); левый mouse_down по кликабельному
+// сегменту вызывает on_click(индекс в items, текст) и поглощает событие.
 pub fn (mut bc Breadcrumbs) handle_event(event &GuiEvent, app &App) bool {
 	if !bc.visible || !bc.enabled || bc.items.len == 0 {
 		return false

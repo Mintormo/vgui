@@ -1,8 +1,45 @@
 // Файл: ./markdown_view.v
 module vgui
 
+// ═══════════════════════════════════════════════════════
+// MarkdownView - виджет просмотра (и простого редактирования) Markdown.
+//
+// Что в файле, по порядку:
+//   1. типы данных: MarkdownMode, «inline-спаны» (MdSpan - кусок строки со стилем), блоки (MdBlock -
+//      абзац, заголовок, код, элемент списка, цитата, hr, картинка, таблица), кэш раскладки
+//      (MdLine / MdRenderSpan - уже разбитые по строкам и позиционированные куски текста);
+//   2. структура MarkdownView и её публичный API (set_text/load_file/set_mode/зум шрифта ...);
+//   3. «Effective colors» - eff_*(): цвет из поля виджета -> из темы -> запасной;
+//   4. парсер: parse() режет текст на блоки (строчно, один проход), parse_inline_spans() разбирает
+//      внутристрочную разметку (**жирный**, *курсив*, `код`, ~~зачёркнутый~~, [ссылки](url), ![картинки](url));
+//   5. раскладка: layout() превращает блоки в MdLine с абсолютными (от начала документа) y и
+//      относительными x; layout_spans() - перенос слов;
+//   6. отрисовка: draw() и draw_* - рисует только видимые строки, наполняет списки областей для
+//      мыши (links, copy_btns) заново каждый кадр;
+//   7. события: handle_event (ссылки, кнопки «копировать» у блоков кода, прокрутка, зум Ctrl+колесо);
+//   8. зум шрифта и cleanup() текстур картинок.
+//
+// Как это работает вместе (поток данных):
+//   set_text(text) -> parse() заполняет blocks, dirty = true
+//   draw() -> ensure_layout() (если dirty или изменилась ширина) -> layout() заполняет lines,
+//             anchor_map, total_h/total_w -> цикл по видимым строкам.
+// Если mode == .source, всё это не используется: рисуется и получает события вложенный CodeEditor
+// (md.editor), а при возврате в .preview текст читается из редактора и разбирается заново.
+//
+// Связи с остальной библиотекой: measure() - layout_measure.v (константный scrollable_hint),
+// тема - Theme.md_* (цвета), текст/шрифты - RenderContext, подсказка по ссылке - Tooltip через
+// ctx.pending_tooltips, копирование - app.set_clipboard. Фокус-менеджером виджет не пользуется:
+// клавиши принимаются, пока курсор мыши над виджетом (hovered).
+//
+// Поддерживается: ATX/Setext-заголовки, абзацы с жёстким переносом (два пробела или \ в конце),
+// списки (- * + и 1.) с вложенностью по отступу и чекбоксами [ ]/[x], цитаты (с вложенностью >>),
+// блоки кода (``` / ~~~ и с отступом), таблицы GFM, горизонтальная черта, картинки с расширением
+// синтаксиса масштаба/выравнивания. Не поддерживается: вложенные блоки в списках/цитатах, HTML,
+// ссылки-ссылки ([a][b]), форматирование внутри ячеек таблицы (рисуется plain-текст).
+// ═══════════════════════════════════════════════════════
 import os
 
+// Режим виджета: preview - отрисованный Markdown; source - исходный текст в редакторе (CodeEditor).
 pub enum MarkdownMode {
 	preview
 	source
@@ -10,6 +47,7 @@ pub enum MarkdownMode {
 
 // ─── Inline span types ─────────────────────────────────
 
+// Вид inline-спана (куска текста внутри строки). hard_break - принудительный перенос строки внутри абзаца.
 enum MdSpanKind {
 	text
 	bold
@@ -22,6 +60,9 @@ enum MdSpanKind {
 	hard_break
 }
 
+// Inline-спан: text - содержимое (для code/strikethrough/bold... без разметки); url/alt - для link и image.
+// Для image: image_scale - доля доступной ширины (0 = авто, 0.5 = 50%); image_img_align - выравнивание самой
+// картинки, image_align - подписи (alt). Поле checked сейчас нигде не заполняется (чекбоксы хранятся в MdBlock).
 struct MdSpan {
 mut:
 	kind            MdSpanKind
@@ -36,6 +77,7 @@ mut:
 
 // ─── Block element types ───────────────────────────────
 
+// Вид блока верхнего уровня. empty_line - пустая строка исходника (даёт небольшой вертикальный зазор).
 enum MdBlockKind {
 	paragraph
 	heading
@@ -48,18 +90,25 @@ enum MdBlockKind {
 	table
 }
 
+// Ячейка таблицы GFM: разобранные спаны (при отрисовке пока склеиваются в plain-текст) и выравнивание колонки.
 struct MdTableCell {
 mut:
 	spans []MdSpan
 	align MdAlign
 }
 
+// Выравнивание (колонки таблицы, подписи или самой картинки).
 enum MdAlign {
 	left
 	center
 	right
 }
 
+// Блок документа - результат parse(). Используются не все поля сразу, а только относящиеся к kind:
+//   heading: level (1-6), spans, anchor (GitHub-подобный slug для переходов по #якорю);
+//   list_item: level (глубина вложенности = число пробелов / 2), ordered + list_index, is_checkbox/is_checked;
+//   blockquote: quote_depth (число «>»); code_block: code_lang, code_text; image_block: image_*;
+//   table: table_header, table_rows, table_aligns; paragraph: spans.
 struct MdBlock {
 mut:
 	kind            MdBlockKind
@@ -89,6 +138,10 @@ mut:
 
 // ─── Layout cache ──────────────────────────────────────
 
+// Одна визуальная строка после раскладки. y - абсолютная координата от верха документа (без прокрутки);
+// height - высота; block_idx - индекс блока-источника; is_first - первая строка блока (для списка: рисовать маркер;
+// для таблицы: это строка заголовка); indent - отступ слева (список, цитата, код); prefix - маркер списка
+// («•» или «N.»), задан только у первой строки элемента.
 struct MdLine {
 mut:
 	y         f32
@@ -100,6 +153,9 @@ mut:
 	prefix    string
 }
 
+// Позиционированный кусок текста внутри MdLine: x - смещение от левого края строки (без indent), w - ширина.
+// Один слово/пробел = один спан. Флаги is_link/is_code/is_strike управляют подчёркиванием, фоном и перечёркиванием.
+// Для картинок (is_image) text хранит alt, image_h - полная высота (картинка + подпись), caption_h - высота подписи.
 struct MdRenderSpan {
 mut:
 	x               f32
@@ -122,6 +178,7 @@ mut:
 	caption_h       f32     // computed caption height (may be multi-line)
 }
 
+// Прямоугольник ссылки в ЭКРАННЫХ координатах (с учётом прокрутки); пересобирается каждым draw() и используется hit-test'ом мыши.
 struct MdLinkHit {
 mut:
 	url string
@@ -131,6 +188,7 @@ mut:
 	h   f32
 }
 
+// Область кнопки «копировать» у блока кода (экранные координаты, пересобирается в draw()); block_idx - какой блок копировать.
 struct MdCopyBtnHit {
 mut:
 	block_idx int
@@ -140,14 +198,19 @@ mut:
 	h         f32
 }
 
+// Кнопка копирования кода: размер, отступ от угла блока, сколько мс показывать галочку «скопировано».
 const md_copy_btn_size = f32(22)
 const md_copy_btn_margin = f32(6)
 const md_copy_feedback_ms = u64(1200)
 
+// Границы и шаг зума шрифта по умолчанию (Ctrl+колесо, Ctrl+=/-).
 const md_default_font_min = 8
 const md_default_font_max = 48
 const md_default_font_step = 2
 
+// Константы раскладки (px): pad - внутренний отступ виджета; *_gap - вертикальные зазоры; *_indent - сдвиги
+// вложенных элементов; md_image_max_h - высота области под картинку, пока её реальный размер неизвестен;
+// md_sb_w - толщина полос прокрутки; md_table_cell_pad_* - поля ячеек таблицы.
 const md_default_pad = f32(12)
 const md_line_gap = f32(4)
 const md_paragraph_gap = f32(8)
@@ -166,6 +229,21 @@ const md_table_cell_pad_v = f32(5)
 const md_table_row_gap = f32(0)
 const md_checkbox_size = f32(13)
 
+// MarkdownView. Состояние:
+//   text / blocks / lines - исходник, разобранные блоки, строки раскладки (кэш);
+//   dirty + last_w - признаки «раскладку надо пересчитать» (изменился текст, шрифт или ширина окна);
+//   total_h / total_w - размеры всего содержимого (total_w > 0 только если есть картинки с явным масштабом -
+//     текст всегда переносится, поэтому горизонтальная прокрутка нужна лишь им);
+//   scroll_x / scroll_y - прокрутка; vsb_* / hsb_* - состояние полос и их перетаскивания;
+//   editor - вложенный CodeEditor для режима .source;
+//   image_cache - SDL-текстуры картинок по разрешённому пути; image_size_cache - размеры в пикселях (для
+//     точной высоты картинок с масштабом в раскладке);
+//   links / copy_btns - области под мышь, заполняются в draw(); hovered_* - что под курсором;
+//   anchor_map - slug заголовка -> y (для переходов по #якорям);
+//   base_dir - каталог для относительных путей картинок и ссылок (выставляет load_file);
+//   *_color - переопределения цветов (альфа 0 = взять из темы, см. eff_*);
+//   on_link_click / on_navigate_md / on_link_hover - колбэки (см. handle_link_click);
+//   font_size = 0 - размер по умолчанию контекста; base_font_size запоминается при первом зуме для Ctrl+0.
 @[heap]
 pub struct MarkdownView {
 pub mut:
@@ -242,12 +320,15 @@ pub mut:
 
 // ─── Constructors ──────────────────────────────────────
 
+// Объявление C.system - в этом файле не используется (возможно, остаток прежнего кода).
 fn C.system(cmd &char) int
 
+// open_system_browser открывает URL во внешней программе по умолчанию (SDL_OpenURL).
 pub fn open_system_browser(url string) {
 	C.SDL_OpenURL(url.str)
 }
 
+// markdown_view создаёт пустой виджет вместе с внутренним CodeEditor для режима .source (без номеров строк и миникарты).
 pub fn markdown_view() &MarkdownView {
 	mut md := &MarkdownView{}
 	mut ce := code_editor()
@@ -261,6 +342,8 @@ pub fn markdown_view() &MarkdownView {
 // resolve_url разрешает URL относительно base_dir.
 // Для http/https/mailto — возвращает как есть.
 // Для относительных путей — соединяет с base_dir.
+// resolve_url приводит ссылку к рабочему виду: http(s), mailto, якорь (#...) и абсолютный путь остаются как есть;
+// относительный путь соединяется с base_dir (если он задан).
 fn (md &MarkdownView) resolve_url(url string) string {
 	if url.starts_with('http://') || url.starts_with('https://') || url.starts_with('mailto:')
 		|| url.starts_with('#') || os.is_abs_path(url) {
@@ -274,6 +357,10 @@ fn (md &MarkdownView) resolve_url(url string) string {
 
 // md_heading_to_slug converts heading text to a GitHub-style anchor slug:
 // lowercase, spaces→hyphens, only alphanumerics and hyphens kept.
+// md_heading_to_slug строит slug заголовка по правилам GitHub: нижний регистр, пробелы/_/- -> '-', остальные ASCII-знаки
+// отбрасываются, не-ASCII буквы (кириллица) сохраняются. Затем повторные '-' схлопываются и края обрезаются.
+// Замечание: `u8(r)` усекает руну до младшего байта, поэтому редкие не-ASCII знаки, у которых младший байт совпал с
+// пробелом/дефисом, превращаются в '-' (на кириллице и латинице не проявляется).
 fn md_heading_to_slug(text string) string {
 	mut s := ''
 	for r in text.to_lower().runes() {
@@ -298,6 +385,7 @@ fn md_heading_to_slug(text string) string {
 
 // scroll_to_anchor scrolls the view so the heading with the given slug is at the top.
 // Returns true if the anchor was found.
+// scroll_to_anchor прокручивает так, чтобы заголовок со slug был у верхнего края (не дальше max_scroll). false - якоря нет. Нужен готовый anchor_map, т.е. хотя бы одна раскладка.
 pub fn (mut md MarkdownView) scroll_to_anchor(slug string) bool {
 	if y := md.anchor_map[slug] {
 		ms := md.max_scroll()
@@ -308,6 +396,8 @@ pub fn (mut md MarkdownView) scroll_to_anchor(slug string) bool {
 }
 
 // handle_link_click: разрешает URL и решает, что делать.
+// handle_link_click решает, что делать со ссылкой: #якорь - прокрутка; путь на .md/.markdown (не http) - on_navigate_md
+// или, если колбэка нет, загрузка файла в этот же виджет (load_file); всё остальное - внешний браузер.
 pub fn (mut md MarkdownView) handle_link_click(raw_url string) {
 	url := md.resolve_url(raw_url)
 
@@ -340,6 +430,8 @@ pub fn markdown_view_with_text(text string) &MarkdownView {
 
 // ─── Public API ────────────────────────────────────────
 
+// set_text заменяет документ: разбирает заново, помечает раскладку устаревшей, сбрасывает прокрутку и кэш размеров картинок,
+// синхронизирует редактор режима .source. Кадр не инвалидирует.
 pub fn (mut md MarkdownView) set_text(text string) {
 	md.text = text
 	md.parse()
@@ -353,6 +445,7 @@ pub fn (mut md MarkdownView) set_text(text string) {
 	}
 }
 
+// get_text - актуальный текст; в режиме .source берётся из редактора (там могут быть несохранённые правки).
 pub fn (md &MarkdownView) get_text() string {
 	if md.mode == .source && unsafe { md.editor != nil } {
 		return md.editor.get_text()
@@ -360,6 +453,7 @@ pub fn (md &MarkdownView) get_text() string {
 	return md.text
 }
 
+// load_file читает файл, запоминает его каталог как base_dir (для относительных картинок/ссылок) и вызывает set_text. false - не удалось прочитать.
 pub fn (mut md MarkdownView) load_file(path string) bool {
 	content := os.read_file(path) or { return false }
 	md.base_dir = os.dir(path)
@@ -367,12 +461,14 @@ pub fn (mut md MarkdownView) load_file(path string) bool {
 	return true
 }
 
+// save_file записывает get_text() в файл. false - ошибка записи.
 pub fn (md &MarkdownView) save_file(path string) bool {
 	text := md.get_text()
 	os.write_file(path, text) or { return false }
 	return true
 }
 
+// set_mode переключает режим. При возврате из .source в .preview текст забирается из редактора и разбирается заново (иначе правки не отобразятся).
 pub fn (mut md MarkdownView) set_mode(mode MarkdownMode) {
 	if md.mode == mode {
 		return
@@ -396,6 +492,8 @@ pub fn (mut md MarkdownView) toggle_mode() {
 
 // ─── Effective colors ──────────────────────────────────
 
+// eff_* (до конца блока) - «эффективный» цвет: своё поле виджета (альфа > 0), иначе цвет Theme.md_* (если задан), иначе
+// производное от общих цветов темы. Так тема может красить Markdown, а приложение - переопределять отдельные цвета.
 fn (md &MarkdownView) eff_bg(ctx &RenderContext) Color {
 	if md.bg_color.a > 0 {
 		return md.bg_color
@@ -537,8 +635,15 @@ fn (md &MarkdownView) eff_table_header_bg(ctx &RenderContext) Color {
 
 // ═══════════════════════════════════════════════════════
 // Markdown parser
+//
+// Парсер построчный: parse() идёт по строкам исходника и на каждой пробует варианты в фиксированном порядке
+// (пустая строка -> hr -> ATX-заголовок -> Setext -> ограждённый код -> код с отступом -> цитата -> таблица -> маркированный
+// список -> нумерованный -> одиночная картинка -> абзац). ПОРЯДОК ВАЖЕН: например, hr проверяется раньше Setext и
+// списка (строка '---'), а код с отступом - раньше списка, но с исключением для строк, похожих на элемент списка.
+// Абзац - «всё остальное»: собирает строки, пока не встретит начало другого блока.
 // ═══════════════════════════════════════════════════════
 
+// parse разбирает md.text в md.blocks (см. описание порядка проверок выше). Переводы строк нормализуются к '\n'. Пустой текст даёт пустой список блоков.
 fn (mut md MarkdownView) parse() {
 	md.blocks.clear()
 	if md.text.len == 0 {
@@ -672,6 +777,7 @@ fn (mut md MarkdownView) parse() {
 			continue
 		}
 
+		// Цитата: подряд идущие строки с '>' склеиваются в ОДИН блок через пробел (переносы внутри цитаты не сохраняются); quote_depth - максимальное число '>' в блоке.
 		// Blockquote (supports nesting via multiple > chars)
 		if trimmed.starts_with('>') {
 			mut quote_lines := []string{}
@@ -707,6 +813,7 @@ fn (mut md MarkdownView) parse() {
 			continue
 		}
 
+		// Таблица распознаётся парой строк: строка с '|' и сразу за ней строка-разделитель (|---|:--:|). Выравнивание колонок берётся из разделителя.
 		// GFM table: detect | ... | ... pattern
 		if md_is_table_row(trimmed) && i + 1 < raw_lines.len
 			&& md_is_table_separator(raw_lines[i + 1].trim_space()) {
@@ -751,6 +858,7 @@ fn (mut md MarkdownView) parse() {
 			continue
 		}
 
+		// Глубина вложенности списка = число ведущих пробелов / 2 (таб = 4 пробела); '[ ]' / '[x]' после маркера превращают пункт в чекбокс.
 		// Unordered list item (supports - * +), with checkbox
 		if md_is_unordered_list_item(line) {
 			indent_count := md_count_leading_spaces(line)
@@ -792,6 +900,7 @@ fn (mut md MarkdownView) parse() {
 			continue
 		}
 
+		// Строка вида '![alt](url ...)' целиком - отдельный блок-картинка; такая же разметка в середине текста обрабатывается inline-парсером.
 		// Standalone image
 		if md_is_standalone_image(trimmed) {
 			alt, url, scale, img_align, cap_align := md_parse_image(trimmed)
@@ -807,6 +916,7 @@ fn (mut md MarkdownView) parse() {
 			continue
 		}
 
+		// Абзац: набираем строки, пока очередная не является началом другого блока (список, заголовок, код, таблица, картинка, setext). Остальное см. parse_paragraph_lines.
 		// Paragraph (with hard line break support)
 		mut para_lines := []string{}
 		for i < raw_lines.len {
@@ -855,6 +965,7 @@ fn (mut md MarkdownView) parse() {
 }
 
 // parse_paragraph_lines handles hard line breaks within paragraphs
+// parse_paragraph_lines склеивает строки абзаца в спаны: мягкий перенос - пробел; жёсткий (два пробела или '\\' в конце) - спан hard_break.
 fn parse_paragraph_lines(lines []string) []MdSpan {
 	mut all_spans := []MdSpan{}
 	for li, line in lines {
@@ -889,6 +1000,7 @@ fn parse_paragraph_lines(lines []string) []MdSpan {
 
 // ─── Block parser helpers ──────────────────────────────
 
+// md_is_hr: строка из >= 3 одинаковых '-', '*' или '_' (допускаются пробелы между ними).
 fn md_is_hr(line string) bool {
 	if line.len < 3 {
 		return false
@@ -911,6 +1023,7 @@ fn md_is_hr(line string) bool {
 	return count >= 3
 }
 
+// md_is_setext_h1/h2: строка-подчёркивание заголовка Setext ('===' для H1; '--' и длиннее для H2).
 fn md_is_setext_h1(line string) bool {
 	if line.len < 1 {
 		return false
@@ -935,6 +1048,7 @@ fn md_is_setext_h2(line string) bool {
 	return line.len >= 2
 }
 
+// md_parse_heading разбирает ATX-заголовок: (уровень 1..6, текст без закрывающих '#'). Уровень 0 - не заголовок (нет пробела после '#', больше 6 решёток).
 fn md_parse_heading(line string) (int, string) {
 	mut level := 0
 	for level < line.len && line[level] == `#` {
@@ -957,6 +1071,7 @@ fn md_parse_heading(line string) (int, string) {
 	return level, text
 }
 
+// md_count_leading_spaces - ширина отступа в пробелах; таб считается за 4.
 fn md_count_leading_spaces(line string) int {
 	mut n := 0
 	for ch in line.bytes() {
@@ -971,6 +1086,7 @@ fn md_count_leading_spaces(line string) int {
 	return n
 }
 
+// md_is_unordered_list_item: маркер '-', '*' или '+' и пробел после него.
 fn md_is_unordered_list_item(line string) bool {
 	t := line.trim_space()
 	if t.len < 2 {
@@ -983,6 +1099,7 @@ fn md_is_unordered_list_item(line string) bool {
 	return t[1] == ` `
 }
 
+// md_is_ordered_list_item: цифры, точка и пробел ('1. текст').
 fn md_is_ordered_list_item(line string) bool {
 	t := line.trim_space()
 	if t.len < 3 {
@@ -998,6 +1115,7 @@ fn md_is_ordered_list_item(line string) bool {
 	return i + 1 < t.len && t[i + 1] == ` `
 }
 
+// md_parse_ordered_list_item возвращает (номер, текст) для элемента нумерованного списка или none.
 fn md_parse_ordered_list_item(line string) ?(int, string) {
 	t := line.trim_space()
 	if t.len < 3 {
@@ -1021,6 +1139,7 @@ fn md_parse_ordered_list_item(line string) ?(int, string) {
 	return digits.int(), t[i + 2..].trim_space()
 }
 
+// md_is_standalone_image: строка целиком является '![...](...)' (последняя ')' - в конце строки).
 fn md_is_standalone_image(line string) bool {
 	t := line.trim_space()
 	if !t.starts_with('![') {
@@ -1030,6 +1149,7 @@ fn md_is_standalone_image(line string) bool {
 	return end == t.len - 1
 }
 
+// md_parse_image разбирает '![alt](url [=N% опции])' в (alt, url, масштаб, выравнивание картинки, выравнивание подписи). Некорректная разметка даёт пустой url.
 fn md_parse_image(line string) (string, string, f32, MdAlign, MdAlign) {
 	t := line.trim_space()
 	bracket_end := t.index(']') or { return '', '', 0, MdAlign.left, MdAlign.left }
@@ -1109,6 +1229,7 @@ fn md_split_url_scale(raw string) (string, f32, MdAlign, MdAlign) {
 	return url, pct / 100.0, img_align, cap_align
 }
 
+// md_parse_align: 'center' / 'right', всё остальное - left.
 fn md_parse_align(s string) MdAlign {
 	return match s {
 		'center' { MdAlign.center }
@@ -1119,10 +1240,12 @@ fn md_parse_align(s string) MdAlign {
 
 // ─── GFM Table helpers ─────────────────────────────────
 
+// md_is_table_row: строка похожа на строку таблицы (начинается с '|' или содержит ' | '). Эвристика, поэтому обычный текст с ' | ' тоже подходит - но таблицей он станет только при следующей строке-разделителе.
 fn md_is_table_row(line string) bool {
 	return line.starts_with('|') || line.contains(' | ')
 }
 
+// md_is_table_separator: строка из '|', '-', ':' и пробелов, содержит '|' и '-'.
 fn md_is_table_separator(line string) bool {
 	if !line.contains('|') {
 		return false
@@ -1135,6 +1258,7 @@ fn md_is_table_separator(line string) bool {
 	return line.contains('-')
 }
 
+// md_parse_table_row режет строку таблицы по '|' (крайние '|' отбрасываются). Экранированный '\\|' в ячейке не поддерживается.
 fn md_parse_table_row(line string) []string {
 	mut cells := []string{}
 	mut s := line.trim_space()
@@ -1151,6 +1275,7 @@ fn md_parse_table_row(line string) []string {
 	return cells
 }
 
+// md_parse_table_aligns: ':--:' - центр, '--:' - вправо, иначе влево.
 fn md_parse_table_aligns(line string) []MdAlign {
 	cells := md_parse_table_row(line)
 	mut aligns := []MdAlign{}
@@ -1171,8 +1296,14 @@ fn md_parse_table_aligns(line string) []MdAlign {
 
 // ═══════════════════════════════════════════════════════
 // Inline span parser
+//
+// parse_inline_spans() - ручной сканер по байтам с накопителем buf для обычного текста. На каждой позиции проверяются
+// разметки в порядке приоритета: экранирование '\\x' -> картинка '![' -> ссылка '[' -> код (`` и `) -> ~~зачёркнутый~~ ->
+// ***жирный курсив*** -> **жирный** -> *курсив*. Если закрывающий разделитель не найден (find_*_end вернул none),
+// символ остаётся обычным текстом. Содержимое спанов НЕ разбирается рекурсивно: внутри **жирного** ссылки и код не работают.
 // ═══════════════════════════════════════════════════════
 
+// parse_inline_spans разбирает строку в []MdSpan (см. описание сканера выше).
 fn parse_inline_spans(text string) []MdSpan {
 	mut spans := []MdSpan{}
 	if text.len == 0 {
@@ -1341,6 +1472,7 @@ fn parse_inline_spans(text string) []MdSpan {
 			}
 		}
 
+		// Курсив '_' открывается только в начале строки или после пробела - чтобы snake_case внутри слов не превращался в курсив ('*' работает везде).
 		// Italic *text* or _text_  (underscore only between word boundaries)
 		if c == `*` || c == `_` {
 			ok := c == `*` || (c == `_` && (i == 0 || bytes[i - 1] == ` `))
@@ -1379,6 +1511,7 @@ fn parse_inline_spans(text string) []MdSpan {
 	return spans
 }
 
+// find_link_end: от '[' по start ищет парную ']' с учётом вложенных скобок, затем требует '(' и ищет ближайшую ')'. Возвращает индекс ')' или none. Скобки внутри URL не поддерживаются.
 fn find_link_end(text string, start int) ?int {
 	mut depth := 0
 	mut i := start
@@ -1406,6 +1539,7 @@ fn find_link_end(text string, start int) ?int {
 	return none
 }
 
+// parse_link_at извлекает (текст, url) из '[текст](url)' по индексам [start, end].
 fn parse_link_at(text string, start int, end int) (string, string) {
 	bracket_end := text.index_after(']', start) or { return '', '' }
 	link_text := text[start + 1..bracket_end]
@@ -1413,10 +1547,12 @@ fn parse_link_at(text string, start int, end int) (string, string) {
 	return link_text, url
 }
 
+// find_image_end: как find_link_end, но для '![alt](url)' (старт сдвигается за '!').
 fn find_image_end(text string, start int) ?int {
 	return find_link_end(text, start + 1)
 }
 
+// parse_image_at: как md_parse_image, но для картинки внутри строки.
 fn parse_image_at(text string, start int, end int) (string, string, f32, MdAlign, MdAlign) {
 	bracket_end := text.index_after(']', start + 1) or {
 		return '', '', 0, MdAlign.left, MdAlign.left
@@ -1427,6 +1563,7 @@ fn parse_image_at(text string, start int, end int) (string, string, f32, MdAlign
 	return alt, url, scale, img_align, cap_align
 }
 
+// find_code_end/find_double_code_end/find_strike_end: индекс закрывающего '`', '``' или '~~' либо none.
 fn find_code_end(text string, start int) ?int {
 	for i := start + 1; i < text.len; i++ {
 		if text[i] == `\`` {
@@ -1454,6 +1591,7 @@ fn find_strike_end(text string, start int) ?int {
 	return none
 }
 
+// find_delim_end ищет закрывающий разделитель выделения (*, **, ***, _ ...). Пропускает позиции, где за разделителем стоит ещё такой же символ, чтобы '**' не принимался за закрытие '*'.
 fn find_delim_end(text string, start int, delim string) ?int {
 	dl := delim.len
 	for i := start; i <= text.len - dl; i++ {
@@ -1470,6 +1608,7 @@ fn find_delim_end(text string, start int, delim string) ?int {
 // ─── Caption helpers ───────────────────────────────────
 
 // md_caption_wrap splits text into lines that fit within max_w using the given font.
+// md_caption_wrap переносит подпись картинки по словам под ширину max_w (шрифт font); возвращает строки.
 fn md_caption_wrap(text string, ctx &RenderContext, font voidptr, max_w f32) []string {
 	if text.len == 0 {
 		return []
@@ -1497,6 +1636,7 @@ fn md_caption_wrap(text string, ctx &RenderContext, font voidptr, max_w f32) []s
 }
 
 // md_caption_height returns the total height reserved for the caption (0 if no caption).
+// md_caption_height - высота подписи: число строк * md_image_caption_line_h; 0, если подписи нет.
 fn md_caption_height(text string, ctx &RenderContext, font voidptr, max_w f32) f32 {
 	if text.len == 0 {
 		return 0
@@ -1508,8 +1648,13 @@ fn md_caption_height(text string, ctx &RenderContext, font voidptr, max_w f32) f
 
 // ═══════════════════════════════════════════════════════
 // Layout engine
+//
+// Раскладка нужна, чтобы не разбирать и не измерять текст каждый кадр: layout() один раз превращает blocks в плоский
+// список lines (абсолютные y от верха документа), а draw() только отсекает невидимые строки по прокрутке и рисует.
+// Пересчёт - при dirty (новый текст, смена шрифта, загрузка размера картинки) или смене ширины (ensure_layout).
 // ═══════════════════════════════════════════════════════
 
+// ensure_layout пересчитывает раскладку, только если она устарела: dirty, изменилась ширина w или строк ещё нет.
 fn (mut md MarkdownView) ensure_layout(ctx &RenderContext, w f32) {
 	if !md.dirty && md.last_w == w && md.lines.len > 0 {
 		return
@@ -1519,6 +1664,10 @@ fn (mut md MarkdownView) ensure_layout(ctx &RenderContext, w f32) {
 	md.last_w = w
 }
 
+// layout превращает blocks в lines для ширины max_w. Доступная ширина avail_w = max_w - 2*pad - md_sb_w (место под полосу
+// прокрутки резервируется всегда, чтобы появление полосы не меняло переносы). y накапливается сверху вниз: у каждого вида блока
+// свои зазоры. Заодно заполняются anchor_map (y заголовков) и total_h/total_w. Для таблиц создаётся по одной строке на ряд
+// (содержимое ячеек рисует draw_table_line, а не layout_spans); для блока кода - по строке на строку кода.
 fn (mut md MarkdownView) layout(ctx &RenderContext, max_w f32) {
 	md.lines.clear()
 	md.links.clear()
@@ -1570,6 +1719,7 @@ fn (mut md MarkdownView) layout(ctx &RenderContext, max_w f32) {
 					y += ln.height
 				}
 				y += md_heading_gap_bottom
+				// Под H1/H2 рисуется линия (draw_heading_line) - резервируем под неё 6 px.
 				// Heading underline for H1/H2 — account for separator height
 				if block.level <= 2 {
 					y += 6
@@ -1664,6 +1814,7 @@ fn (mut md MarkdownView) layout(ctx &RenderContext, max_w f32) {
 					avail_w
 				}
 				caption_h := md_caption_height(block.image_alt, ctx, cap_font, target_w_l)
+				// Высота картинки: если задан масштаб и реальный размер уже известен (image_size_cache) - по пропорциям, иначе запас md_image_max_h. Размер узнаётся при первой отрисовке и тогда раскладка пересчитывается (dirty).
 				// use real image dimensions if cached, else fall back to md_image_max_h
 				img_area_h := if block.image_scale > 0 {
 					if sz := md.image_size_cache[block.image_url] {
@@ -1719,6 +1870,7 @@ fn (mut md MarkdownView) layout(ctx &RenderContext, max_w f32) {
 					y += row_h
 				}
 				y += md_paragraph_gap
+				// table_y и col_w вычислены, но не используются (заглушки от предупреждений компилятора; ширину колонок реально считает draw_table_line).
 				_ = table_y
 				_ = col_w
 			}
@@ -1727,6 +1879,7 @@ fn (mut md MarkdownView) layout(ctx &RenderContext, max_w f32) {
 
 	md.total_h = y + md.pad
 
+	// total_w нужен только для горизонтальной прокрутки, а текст всегда переносится - поэтому он считается лишь по картинкам с явным масштабом.
 	// compute total_w only from images with explicit scale — text always wraps, never triggers HSB
 	mut max_content_w := f32(0)
 	for ln in md.lines {
@@ -1743,6 +1896,7 @@ fn (mut md MarkdownView) layout(ctx &RenderContext, max_w f32) {
 	md.total_w = if max_content_w > 0 { max_content_w + md.pad * 2 } else { 0 }
 }
 
+// Контекст, в котором раскладываются спаны (абзац/заголовок/пункт/цитата). Сейчас используется для выбора цвета заголовка; md_span_font параметр игнорирует.
 enum MdLayoutContext {
 	paragraph
 	heading
@@ -1750,6 +1904,12 @@ enum MdLayoutContext {
 	blockquote
 }
 
+// layout_spans раскладывает спаны блока по строкам шириной max_w (перенос слов). Возвращает []MdLine БЕЗ y/block_idx - их
+// проставляет вызывающий layout(). Параметры: line_h - высота строки шрифта; default_style/default_size - базовый стиль
+// (напр. .bold у заголовка, .italic у цитаты); is_quote - красить цветом цитаты; параметр `_ voidptr` не используется.
+// Алгоритм: спан делится на слова и пробелы; слово, не помещающееся в остаток строки, переносит строку; слово шире целой
+// строки режется по символам; ведущие пробелы в начале строки отбрасываются; картинка всегда занимает отдельную строку;
+// hard_break завершает строку принудительно.
 fn (md &MarkdownView) layout_spans(spans []MdSpan, ctx &RenderContext, max_w f32, line_h f32, _ voidptr, default_style FontStyle, default_size int, is_quote bool, lctx MdLayoutContext) []MdLine {
 	mut result := []MdLine{}
 	if spans.len == 0 {
@@ -1867,6 +2027,7 @@ fn (md &MarkdownView) layout_spans(spans []MdSpan, ctx &RenderContext, max_w f32
 			continue
 		}
 
+		// Делим на «слова» и одиночные пробелы (пробелы отдельными элементами, чтобы перенос не терял и не дублировал их).
 		// Word-wrap: split into words, handle long words without spaces
 		mut words := []string{}
 		mut buf := ''
@@ -1907,6 +2068,7 @@ fn (md &MarkdownView) layout_spans(spans []MdSpan, ctx &RenderContext, max_w f32
 				}
 			}
 
+			// Слово длиннее строки (длинный URL и т.п.) - режем по символам, иначе оно вылезло бы за правый край.
 			// Long word that doesn't fit even on empty line: split char by char
 			if ww > max_w && current_x == 0 && word != ' ' {
 				mut char_buf := ''
@@ -1982,6 +2144,7 @@ fn (md &MarkdownView) layout_spans(spans []MdSpan, ctx &RenderContext, max_w f32
 	return result
 }
 
+// md_span_font выбирает стиль шрифта спана с учётом базового: жирный внутри курсива (цитата) = bold_italic и наоборот; код = mono. Размер возвращается без изменений.
 fn md_span_font(span MdSpan, default_style FontStyle, default_size int, _ MdLayoutContext) (FontStyle, int) {
 	mut style := default_style
 	mut size := default_size
@@ -2013,6 +2176,7 @@ fn md_span_font(span MdSpan, default_style FontStyle, default_size int, _ MdLayo
 	return style, size
 }
 
+// md_heading_font_size: размер заголовка = базовый (14, если 0) + прибавка по уровню (H1 +14 ... H6 +1).
 fn md_heading_font_size(level int, base int) int {
 	b := if base <= 0 { 14 } else { base }
 	return match level {
@@ -2030,6 +2194,7 @@ fn md_heading_font_size(level int, base int) int {
 // Geometry
 // ═══════════════════════════════════════════════════════
 
+// Нужны ли полосы - считается совместно, т.к. появление одной уменьшает область и может вызвать вторую.
 // Returns (has_vsb, has_hsb) — computed together to avoid circular dependency
 fn (md &MarkdownView) sb_flags() (bool, bool) {
 	// First pass: check without accounting for the other scrollbar
@@ -2051,6 +2216,7 @@ fn (md &MarkdownView) has_hsb() bool {
 	return hsb
 }
 
+// viewport - область содержимого: bounds минус места под видимые полосы.
 fn (md &MarkdownView) viewport() Rect {
 	vsb, hsb := md.sb_flags()
 	mut w := md.bounds.w
@@ -2072,6 +2238,7 @@ fn (md &MarkdownView) max_scroll_x() f32 {
 	return max_f32(0, md.total_w - md.viewport().w)
 }
 
+// vsb_rects/hsb_rects: (дорожка, бегунок) полос прокрутки; пустые Rect, если полоса не нужна. Размер бегунка пропорционален видимой доле (не меньше 20 px).
 fn (md &MarkdownView) vsb_rects() (Rect, Rect) {
 	if !md.has_vsb() {
 		return Rect{}, Rect{}
@@ -2120,8 +2287,13 @@ fn (md &MarkdownView) hsb_rects() (Rect, Rect) {
 
 // ═══════════════════════════════════════════════════════
 // Drawing
+//
+// Кадр: фон и рамка -> (режим .source: рисует CodeEditor и выходит) -> ensure_layout + clamp прокрутки -> проход по строкам,
+// которые попадают в видимую область -> кнопки копирования поверх -> подсказка ссылки -> полосы прокрутки.
+// Координаты на экране = bounds + pad + line.indent + span.x по x, bounds.y + line.y - scroll_y по y.
 // ═══════════════════════════════════════════════════════
 
+// draw рисует виджет (описание кадра выше). Побочные эффекты: пересобирает md.links и md.copy_btns (области под мышь), может поставить анимацию (mark_anim) для таймера подсказки и индикации «скопировано», добавляет Tooltip в ctx.pending_tooltips.
 pub fn (mut md MarkdownView) draw(mut ctx RenderContext) {
 	if !md.visible {
 		return
@@ -2158,6 +2330,7 @@ pub fn (mut md MarkdownView) draw(mut ctx RenderContext) {
 	md.links.clear()
 	md.copy_btns.clear()
 
+	// Фон блока кода рисуется один раз на весь блок (а не на каждую строку), поэтому сначала собираем его общий прямоугольник по строкам блока.
 	// Pre-compute code block backgrounds (block_idx → Rect) — single O(lines) pass
 	mut code_bg_rects := map[int]Rect{}
 	for ln in md.lines {
@@ -2183,6 +2356,7 @@ pub fn (mut md MarkdownView) draw(mut ctx RenderContext) {
 		}
 	}
 
+	// block_line_start заполняется, но дальше в draw() не читается (остаток прежней реализации таблиц; таблицы ищут начало блока в draw_table_line).
 	// Collect line indices per block for table rendering
 	mut block_line_start := map[int]int{}
 	for li, ln in md.lines {
@@ -2299,11 +2473,13 @@ pub fn (mut md MarkdownView) draw(mut ctx RenderContext) {
 		md.draw_line_spans(line, ly, ox, mut ctx)
 	}
 
+	// Кнопки копирования рисуем вторым проходом, чтобы они лежали поверх текста кода.
 	// Draw copy buttons for code blocks on top of code content
 	md.draw_copy_buttons(mut ctx)
 
 	ctx.pop_clip()
 
+	// Подсказка с адресом ссылки появляется после link_tooltip_delay мс наведения: пока ждём, просим кадры (mark_anim), потом выдаём Tooltip.
 	// Link tooltip: check delay timer and enqueue for rendering
 	if md.hovered_link_url.len > 0 && md.link_hover_start > 0 {
 		if !md.link_tooltip_showing {
@@ -2357,6 +2533,7 @@ pub fn (mut md MarkdownView) draw(mut ctx RenderContext) {
 	}
 }
 
+// draw_copy_buttons рисует кнопки «копировать» у блоков кода: иконка из двух квадратов или галочка (md_copy_feedback_ms после клика). Список кнопок наполнил draw().
 fn (mut md MarkdownView) draw_copy_buttons(mut ctx RenderContext) {
 	if md.copy_btns.len == 0 {
 		return
@@ -2413,6 +2590,7 @@ fn (mut md MarkdownView) draw_copy_buttons(mut ctx RenderContext) {
 	}
 }
 
+// draw_heading_line рисует строку заголовка (цвет заголовка, ссылки в нём подчёркиваются и регистрируются в md.links); у H1/H2 после последней строки блока добавляет горизонтальную линию.
 fn (mut md MarkdownView) draw_heading_line(block MdBlock, line &MdLine, li int, ly f32, ox f32, vp Rect, mut ctx RenderContext) {
 	tc := md.eff_heading(ctx)
 
@@ -2454,6 +2632,7 @@ fn (mut md MarkdownView) draw_heading_line(block MdBlock, line &MdLine, li int, 
 	}
 }
 
+// draw_line_spans рисует спаны строки: фон у inline-кода, текст, подчёркивание ссылки (и регистрация MdLinkHit), перечёркивание, картинки (draw_inline_image).
 fn (mut md MarkdownView) draw_line_spans(line &MdLine, ly f32, ox f32, mut ctx RenderContext) {
 	for span in line.spans {
 		span_x := md.bounds.x + md.pad + ox + line.indent + span.x
@@ -2498,6 +2677,10 @@ fn (mut md MarkdownView) draw_line_spans(line &MdLine, ly f32, ox f32, mut ctx R
 	}
 }
 
+// draw_inline_image рисует картинку внутри абзаца (![...]() в тексте). Текстура создаётся лениво при первом показе и кэшируется
+// по разрешённому пути (image_cache); размер запоминается в image_size_cache, и если задан масштаб - раскладка помечается
+// dirty, чтобы высота строки стала точной. Нет файла - вместо картинки рисуется «[Image: ...]». Подпись переносится по словам
+// под картинкой с выравниванием image_align.
 fn (mut md MarkdownView) draw_inline_image(span MdRenderSpan, ix f32, ly f32, line_h f32, mut ctx RenderContext) {
 	mut path := span.image_url
 	if md.base_dir.len > 0 && !os.is_abs_path(path) {
@@ -2599,6 +2782,9 @@ fn (mut md MarkdownView) draw_inline_image(span MdRenderSpan, ix f32, ly f32, li
 	}
 }
 
+// draw_table_line рисует ОДНУ строку таблицы (layout создал по строке на ряд). Номер ряда определяется поиском первой строки блока;
+// is_first - заголовок. Колонки одинаковой ширины (ширина поровну), текст ячеек - plain (md_spans_to_plain), выравнивание по
+// table_aligns; границы рисуются как 1-px линии.
 fn (mut md MarkdownView) draw_table_line(block MdBlock, line &MdLine, li int, ly f32, ox f32, vp Rect, mut ctx RenderContext) {
 	ncols := if block.table_header.len > 0 { block.table_header.len } else { 1 }
 	col_w := (vp.w - md.pad * 2) / f32(ncols)
@@ -2673,6 +2859,7 @@ fn (mut md MarkdownView) draw_table_line(block MdBlock, line &MdLine, li int, ly
 	}
 }
 
+// md_spans_to_plain склеивает text всех спанов (форматирование теряется).
 fn md_spans_to_plain(spans []MdSpan) string {
 	mut s := ''
 	for span in spans {
@@ -2681,6 +2868,7 @@ fn md_spans_to_plain(spans []MdSpan) string {
 	return s
 }
 
+// draw_image_block рисует отдельный блок-картинку (логика как у draw_inline_image, но с выравниванием самой картинки image_img_align по ширине области и без reflow по строке). Высота области под картинку без масштаба - не больше md_image_max_h.
 fn (mut md MarkdownView) draw_image_block(block MdBlock, ly f32, ox f32, vp Rect, mut ctx RenderContext) {
 	avail_w_d := vp.w - md.pad * 2
 	cap_font_d := ctx.get_font(.italic, md.font_size)
@@ -2799,6 +2987,11 @@ fn (mut md MarkdownView) draw_image_block(block MdBlock, ly f32, ox f32, vp Rect
 // Events
 // ═══════════════════════════════════════════════════════
 
+// handle_event: true - событие поглощено. В режиме .source всё делегируется CodeEditor. В preview приоритет: перетаскивание бегунков
+// (vsb/hsb) -> mouse_move (hover ссылок и кнопок копирования, курсор-«рука», колбэк on_link_hover, таймер подсказки) ->
+// mouse_down (бегунки, кнопка копирования -> буфер обмена, ссылка -> on_link_click или handle_link_click; любой клик внутри
+// виджета поглощается) -> колесо (Ctrl - зум шрифта, Shift/wheel_x - горизонтально, иначе вертикально) -> клавиши (Ctrl +/-/0,
+// стрелки, PageUp/PageDown, Home/End; только при hovered). Hit-test идёт по спискам md.links / md.copy_btns предыдущего draw().
 pub fn (mut md MarkdownView) handle_event(event &GuiEvent, app &App) bool {
 	if !md.visible || !md.enabled {
 		return false
@@ -3110,6 +3303,7 @@ fn (mut md MarkdownView) capture_base_font_size(ctx &RenderContext) {
 }
 
 // clamp_font_size clamps a size to the configured [min, max] range.
+// clamp_font_size держит размер в [min_font_size, max_font_size] (с защитой от некорректных границ).
 fn (md &MarkdownView) clamp_font_size(sz int) int {
 	mut lo := md.min_font_size
 	mut hi := md.max_font_size
@@ -3120,6 +3314,7 @@ fn (md &MarkdownView) clamp_font_size(sz int) int {
 	return sz
 }
 
+// zoom_in_font/zoom_out_font: шаг font_size_step от текущего (фактического) размера; true - размер изменился (раскладка помечается dirty). Первый вызов запоминает исходный размер для сброса.
 pub fn (mut md MarkdownView) zoom_in_font(ctx &RenderContext) bool {
 	md.capture_base_font_size(ctx)
 	cur := md.resolve_font_size(ctx)
@@ -3146,6 +3341,7 @@ pub fn (mut md MarkdownView) zoom_out_font(ctx &RenderContext) bool {
 	return true
 }
 
+// reset_font_size возвращает размер, запомненный при первом зуме (Ctrl+0); если зума не было - размер по умолчанию (0). true - что-то изменилось.
 pub fn (mut md MarkdownView) reset_font_size() bool {
 	if md.base_font_size <= 0 {
 		// nothing to reset to — set 0 so the context default is used
@@ -3164,6 +3360,7 @@ pub fn (mut md MarkdownView) reset_font_size() bool {
 	return true
 }
 
+// set_font_size: sz <= 0 - размер по умолчанию контекста; иначе размер зажимается в границы. Если исходный размер ещё не запомнен, запоминает его как базовый.
 pub fn (mut md MarkdownView) set_font_size(sz int) {
 	if sz <= 0 {
 		md.font_size = 0
@@ -3184,6 +3381,7 @@ pub fn (md &MarkdownView) get_font_size() int {
 	return md.font_size
 }
 
+// set_min_font_size/set_max_font_size/set_font_size_step: значения < 1 игнорируются; границы взаимно подтягиваются, текущий размер приводится в диапазон.
 pub fn (mut md MarkdownView) set_min_font_size(sz int) {
 	if sz < 1 {
 		return
@@ -3241,6 +3439,9 @@ pub fn (md &MarkdownView) get_font_size_step() int {
 // Cleanup
 // ═══════════════════════════════════════════════════════
 
+// cleanup освобождает SDL-текстуры картинок и кэши. Замечание: SDL_DestroyTexture вызывается без проверки is_renderer_alive_gen,
+// в отличие от ImageView.destroy_texture (см. PROJECT.md, «Время жизни SDL-текстур») - если renderer окна уже уничтожен, это
+// повторное освобождение; безопасность зависит от порядка teardown вызывающего кода.
 pub fn (mut md MarkdownView) cleanup() {
 	for _, tex in md.image_cache {
 		if unsafe { tex != nil } {

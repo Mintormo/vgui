@@ -11,8 +11,25 @@ module vgui
 // Icon support:
 //   - icon_path: file icon (png, svg, webp via SDL2_image)
 //   - icon_text: text-based icon (emoji/symbol prefix)
+//   - icon_name: имя глифа из встроенного шрифта Lucide (icon.v)
+//
+// Связи с остальной библиотекой:
+//   - фокус: draw() регистрирует кнопку в ctx.focus (register_button) в
+//     группе focus_group, если кнопка enabled и не no_focus (focus.v);
+//   - события: клик срабатывает по ОТПУСКАНИЮ над кнопкой, нажатие только
+//     фокусирует и взводит pressed (PROJECT.md, "Клик срабатывает по
+//     отпусканию"); Space/Enter при фокусе активируют кнопку;
+//   - анимации: четыре Anim (hover/press/focus/active, anim.v); кадр просится
+//     точечно через mark_anim_rect(bounds) (PROJECT.md, "Анимации" и
+//     "Инвалидация и dirty regions");
+//   - раскладка: размер кнопки считает measure() в layout_measure.v, bounds
+//     выставляет контейнер (Layouted, widget_tree.v).
 // ═══════════════════════════════════════════════════════
 
+// ButtonStyle - цветовая схема кнопки (фон/текст/рамка берутся из темы):
+// normal - обычная; accent - залитая акцентным цветом; outline - только
+// рамка акцента; flat - без фона и рамки до наведения; danger/success -
+// красная/зелёная заливка с белым текстом.
 pub enum ButtonStyle {
 	normal
 	accent
@@ -22,6 +39,9 @@ pub enum ButtonStyle {
 	success
 }
 
+// Button - кнопка: обычная (momentary) или переключаемая (toggle).
+// Содержимое рисуется в порядке приоритета иконок: icon_name (Lucide) >
+// icon_path (файл) > icon_text (эмодзи-префикс) > только текст.
 pub struct Button {
 pub mut:
 	type_tag int = kind_button // тег типа, см. widget_tag.v
@@ -47,12 +67,12 @@ pub mut:
 	// Legacy: text-based icon (emoji/symbol prefix)
 	icon_text    string
 	tooltip      string
-	radius       f32       = -1
+	radius       f32       = -1 // < 0 - брать радиус из темы (eff_radius)
 	border_width f32       = 1
 	font_style   FontStyle = .regular
-	font_size    int
+	font_size    int // 0 - размер по умолчанию
 	on_click     fn () = unsafe { nil }
-	// Animation
+	// Animation: значения 0..1, двигаются в draw() через Anim.update
 	hover_anim  Anim
 	press_anim  Anim = anim_smooth(anim_tau_press)
 	focus_anim  Anim = anim_smooth(anim_tau_focus)
@@ -63,12 +83,14 @@ pub mut:
 
 // ─── Constructors ──────────────────────────────────────
 
+// button - обычная кнопка с текстом.
 pub fn button(text string) &Button {
 	return &Button{
 		text: text
 	}
 }
 
+// button_with_icon - кнопка с текстом и иконкой из файла (icon_path).
 pub fn button_with_icon(text string, icon_path string) &Button {
 	return &Button{
 		text:      text
@@ -76,12 +98,14 @@ pub fn button_with_icon(text string, icon_path string) &Button {
 	}
 }
 
+// icon_button - кнопка только с иконкой из файла (без текста).
 pub fn icon_button(icon_path string) &Button {
 	return &Button{
 		icon_path: icon_path
 	}
 }
 
+// icon_button_sized - то же, но с заданным размером иконки (логические px).
 pub fn icon_button_sized(icon_path string, icon_size f32) &Button {
 	return &Button{
 		icon_path: icon_path
@@ -89,7 +113,7 @@ pub fn icon_button_sized(icon_path string, icon_size f32) &Button {
 	}
 }
 
-// Toggle button constructors
+// Toggle button constructors: кнопка-переключатель (toggle = true)
 pub fn toggle_button(text string) &Button {
 	return &Button{
 		text:   text
@@ -107,10 +131,13 @@ pub fn toggle_button_with_icon(text string, icon_path string) &Button {
 
 // ─── Public helpers ────────────────────────────────────
 
+// is_active - состояние toggle-кнопки (у обычной кнопки поле не используется).
 pub fn (b &Button) is_active() bool {
 	return b.active
 }
 
+// set_active ставит состояние toggle программно: on_toggle НЕ вызывается,
+// кадр не инвалидируется.
 pub fn (mut b Button) set_active(v bool) {
 	b.active = v
 }
@@ -148,6 +175,9 @@ fn (b &Button) is_visually_pressed() bool {
 	return b.pressed
 }
 
+// draw: регистрация в фокус-учёте, шаг четырёх анимаций, расчёт цветов по
+// style (смешивание bg с hover/pressed-цветами пропорционально значению Anim),
+// тень при наведении, фон, рамка, кольцо фокуса, содержимое (draw_content).
 pub fn (mut b Button) draw(mut ctx RenderContext) {
 	if !b.visible {
 		return
@@ -269,6 +299,9 @@ pub fn (mut b Button) draw(mut ctx RenderContext) {
 	b.draw_content(mut ctx, fg)
 }
 
+// draw_content рисует иконку и/или текст по центру bounds цветом fg.
+// Все ветки заканчиваются pop_clip() ровно один раз (парный push_clip выше),
+// поэтому каждый ранний return сначала снимает клип.
 fn (b &Button) draw_content(mut ctx RenderContext, fg Color) {
 	// A lucide icon_name that doesn't resolve to a known glyph (typo, etc.)
 	// must not blank out the button — fall through to the file/text icon or
@@ -347,6 +380,8 @@ fn (b &Button) draw_content(mut ctx RenderContext, fg Color) {
 	ctx.pop_clip()
 }
 
+// do_activate - "сработала" кнопка (отпускание мыши над ней или Space/Enter):
+// для toggle сначала переключает active и зовёт on_toggle, затем всегда on_click.
 fn (mut b Button) do_activate() {
 	if b.toggle {
 		b.active = !b.active
@@ -359,6 +394,10 @@ fn (mut b Button) do_activate() {
 	}
 }
 
+// handle_event обрабатывает мышь и клавиатуру; true - событие поглощено.
+// mouse_move обновляет hovered (уход курсора отменяет нажатие); mouse_down
+// фокусирует (если не no_focus) и взводит pressed; mouse_up над кнопкой
+// активирует; Tab двигает фокус; Space/Enter активируют сфокусированную.
 pub fn (mut b Button) handle_event(event &GuiEvent, app &App) bool {
 	if !b.visible || !b.enabled {
 		return false

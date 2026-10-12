@@ -71,6 +71,13 @@ module vgui
 //   FocusManager, Theme, RenderContext, Color, Rect
 // ═══════════════════════════════════════════════════════
 
+// Как это работает на самом деле: каждый флаг -d vgui_no_<имя> лишь меняет результат функции
+// has_<имя>() ниже ($if <флаг> ? {...} - проверка на этапе компиляции, константа true/false).
+// Сам код виджетов из сборки НЕ исключается - все исходники модуля компилируются всегда.
+// Флаги используются там, где код явно спрашивает has_*() (например, ui_builder.v при создании
+// виджета по имени типа) и в print_enabled_features(). Остальная библиотека на них не смотрит.
+// Все has_*() ниже однотипны: true, если флаг отключения не задан.
+
 // ─── Basic input widgets ───────────────────────────────
 
 pub fn has_button() bool {
@@ -249,7 +256,7 @@ pub fn has_hotkeys() bool {
 
 // ─── Diagnostic helper ─────────────────────────────────
 
-// Print all enabled features (useful for debugging build configs)
+// print_enabled_features печатает в stdout список включённых возможностей (для отладки сборки).
 pub fn print_enabled_features() {
 	println('vgui enabled features:')
 	if has_button() { println('  ✓ button') }

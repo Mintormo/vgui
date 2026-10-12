@@ -19,8 +19,30 @@ import math
 //   mut cp := vgui.color_picker()
 //   cp.color = Color{255, 0, 0, 255}
 //   cp.on_change = fn (c Color) { ... }
+//
+// Устройство:
+//   - Сам виджет ColorPicker - только кнопка-образец: рисует текущий цвет и его
+//     hex-запись; по клику открывает МОДАЛЬНЫЙ диалог (cp_open_dialog).
+//   - Диалог (cp_run_dialog) - отдельное окно-Dialog, собранное из обычных
+//     виджетов (HBox/VBox, TextInput, Button, Label) и двух внутренних
+//     самописных: CpArea (квадрат насыщенность/яркость + полосы оттенка и
+//     альфы) и CpPreview (старый/новый цвет). Общее состояние - CpState,
+//     на него ссылаются колбэки и оба внутренних виджета.
+//   - Цвет внутри диалога хранится в HSV (hue 0..360, sat/val 0..1, alpha 0..1):
+//     так оттенок не теряется при серых цветах (s=0 или v=0), а RGB выводится
+//     из HSV (update_current). Ввод в RGB/hex-поля идёт обратным путём.
+//   - Модальность реализована вложенным циклом событий прямо в
+//     cp_run_dialog (process_events/render_all/SDL_Delay), поэтому вызов
+//     блокирует колбэк, из которого пришёл; результат - (цвет, подтверждено).
+//     color_dialog() - тот же диалог без виджета (отдельная функция для приложений).
+//   - Нативного диалога цвета в SDL3 нет (PROJECT.md, «Нативные диалоги ОС»),
+//     поэтому диалог кастомный.
+//   - Фокус-учёт и анимации у самого ColorPicker отсутствуют.
 // ═══════════════════════════════════════════════════════
 
+// ColorPicker - кнопка-образец цвета. Поле color меняется после подтверждения
+// в диалоге (с вызовом on_change); show_alpha включает альфа-канал в диалоге
+// и в hex-подписи (#RRGGBBAA).
 @[heap]
 pub struct ColorPicker {
 pub mut:
@@ -34,16 +56,19 @@ pub mut:
 	on_change  fn (Color) = unsafe { nil }
 }
 
+// color_picker создаёт образец с красным цветом по умолчанию.
 pub fn color_picker() &ColorPicker {
 	return &ColorPicker{}
 }
 
+// color_picker_with_color создаёт образец с заданным начальным цветом.
 pub fn color_picker_with_color(c Color) &ColorPicker {
 	return &ColorPicker{
 		color: c
 	}
 }
 
+// get_color / set_color - текущий цвет; set_color on_change не вызывает.
 pub fn (cp &ColorPicker) get_color() Color {
 	return cp.color
 }
@@ -52,6 +77,8 @@ pub fn (mut cp ColorPicker) set_color(c Color) {
 	cp.color = c
 }
 
+// cp_color_to_hex форматирует цвет как "#RRGGBB"; альфа добавляется
+// (#RRGGBBAA) только если alpha == true И c.a != 255 (непрозрачный цвет всегда короткий).
 fn cp_color_to_hex(c Color, alpha bool) string {
 	if alpha && c.a != 255 {
 		return '#${cp_hex2(c.r)}${cp_hex2(c.g)}${cp_hex2(c.b)}${cp_hex2(c.a)}'
@@ -59,6 +86,7 @@ fn cp_color_to_hex(c Color, alpha bool) string {
 	return '#${cp_hex2(c.r)}${cp_hex2(c.g)}${cp_hex2(c.b)}'
 }
 
+// cp_hex2 - байт в две шестнадцатеричные цифры верхнего регистра.
 fn cp_hex2(v u8) string {
 	hi := v >> 4
 	lo := v & 0x0F
@@ -70,6 +98,8 @@ fn cp_hex2(v u8) string {
 
 // ─── HSV ↔ RGB conversion ─────────────────────────────
 
+// cp_rgb_to_hsv - стандартное RGB (0..255) -> HSV: H в градусах 0..360,
+// S и V в долях 0..1. Для серых (d == 0) оттенок считается 0.
 fn cp_rgb_to_hsv(r u8, g u8, b u8) (f32, f32, f32) {
 	rf := f32(r) / 255.0
 	gf := f32(g) / 255.0
@@ -96,6 +126,10 @@ fn cp_rgb_to_hsv(r u8, g u8, b u8) (f32, f32, f32) {
 	return h, s, v
 }
 
+// cp_hsv_to_rgb - обратное преобразование. Круг оттенков делится на 6 секторов
+// по 60 градусов (i = номер сектора, ff = доля внутри него); p, q, t - три
+// "промежуточных" значения канала по классической формуле. h >= 360 приводится
+// к 0 (иначе сектор 6 не имел бы ветки). Округление: +0.5 перед усечением до u8.
 fn cp_hsv_to_rgb(h f32, s f32, v f32) (u8, u8, u8) {
 	if s <= 0 {
 		val := u8(v * 255 + 0.5)
@@ -144,6 +178,7 @@ fn cp_hsv_to_rgb(h f32, s f32, v f32) (u8, u8, u8) {
 	return u8(rf * 255 + 0.5), u8(gf * 255 + 0.5), u8(bf * 255 + 0.5)
 }
 
+// cp_hue_color - чистый оттенок h при полной насыщенности и яркости (для полосы оттенков).
 fn cp_hue_color(h f32) Color {
 	r, g, b := cp_hsv_to_rgb(h, 1.0, 1.0)
 	return Color{r, g, b, 255}
@@ -151,6 +186,11 @@ fn cp_hue_color(h f32) Color {
 
 // ─── Drawing ───────────────────────────────────────────
 
+// draw: заливает bounds цветом (с рамкой; у прозрачного цвета рамка рисуется
+// дважды - сначала input_border, затем поверх hover/обычной), в центре hex-запись
+// моноширинным шрифтом; цвет текста (чёрный/белый) выбирается по яркости фона
+// (формула Rec.601: 0.299R + 0.587G + 0.114B, порог 128).
+// Заливка не смешивается с шахматкой, поэтому прозрачность цвета на образце не видна.
 pub fn (mut cp ColorPicker) draw(mut ctx RenderContext) {
 	if !cp.visible {
 		return
@@ -178,6 +218,8 @@ pub fn (mut cp ColorPicker) draw(mut ctx RenderContext) {
 
 // ─── Events ────────────────────────────────────────────
 
+// handle_event: hover и левый клик; клик открывает модальный диалог
+// (cp_open_dialog) и возвращает управление только после его закрытия.
 pub fn (mut cp ColorPicker) handle_event(event &GuiEvent, app &App) bool {
 	if !cp.visible || !cp.enabled {
 		return false
@@ -200,6 +242,8 @@ pub fn (mut cp ColorPicker) handle_event(event &GuiEvent, app &App) bool {
 
 // ─── Standalone dialog ─────────────────────────────────
 
+// ColorDialogConfig - параметры автономного диалога color_dialog
+// (@[params]: можно передавать именованно, color_dialog(parent, mut app, title: 'X')).
 @[params]
 pub struct ColorDialogConfig {
 pub mut:
@@ -218,6 +262,12 @@ pub fn color_dialog(parent &Window, mut app App, cfg ColorDialogConfig) (Color, 
 
 // ─── Widget dialog ─────────────────────────────────────
 
+// cp_open_dialog находит окно-родителя диалога и запускает cp_run_dialog.
+// Родитель - то окно (или временный диалог), чей RenderContext сейчас активен
+// (app.get_active_ctx()): виджет не хранит указателя на своё окно (его у
+// виджетов нет намеренно), поэтому окно ищется обходом app.windows и app.dialogs.
+// Если активного контекста или родителя нет - тихо ничего не делает.
+// При подтверждении пишет цвет в cp.color и зовёт on_change.
 fn cp_open_dialog(mut cp ColorPicker, app &App) {
 	ctx_ptr := app.get_active_ctx()
 	if unsafe { ctx_ptr == nil } {
@@ -255,6 +305,13 @@ fn cp_open_dialog(mut cp ColorPicker, app &App) {
 
 // ─── Shared modal dialog implementation ────────────────
 
+// cp_run_dialog строит диалог и крутит вложенный цикл событий, пока пользователь
+// не нажмёт OK/Cancel или не закроет окно. Возвращает (цвет, подтверждено);
+// при отмене/закрытии - текущее состояние цвета, но confirmed == false (вызывающий
+// обязан смотреть на флаг). Настройки окна (шрифты, тема, масштаб) копируются
+// у родителя. Временный диалог сам освобождает ресурсы на выходе
+// (remove_dialog + win.cleanup) - см. PROJECT.md, «Временные модальные диалоги
+// освобождают себя сами». Если создать окно не удалось - (initial, false).
 fn cp_run_dialog(parent &Window, mut app App, initial Color, show_alpha bool, title string) (Color, bool) {
 	if unsafe { parent == nil } {
 		return initial, false
@@ -292,6 +349,10 @@ fn cp_run_dialog(parent &Window, mut app App, initial Color, show_alpha bool, ti
 	}
 
 	// ── Hex input ──
+	// Разбор по Enter (on_submit). vui_parse_color возвращает прозрачный цвет при
+	// ошибке разбора; условие `c.a > 0 || text.contains('00')` отличает ошибку
+	// от намеренного ввода прозрачного цвета (эвристика: допускает «00» в
+	// любом месте строки, т.е. не строгая проверка).
 	mut hex_input := text_input('#RRGGBB')
 	hex_input.set_text(cp_color_to_hex(state.current, state.show_alpha))
 	state.hex_input = hex_input
@@ -310,6 +371,9 @@ fn cp_run_dialog(parent &Window, mut app App, initial Color, show_alpha bool, ti
 	}
 
 	// ── RGBA component inputs ──
+	// Числовые поля (до 3 символов, ширина 4 символа). Значения применяются
+	// только по Enter (on_submit -> cp_apply_rgba_from_inputs): если ввести число и
+	// сразу нажать OK, не подтвердив его Enter, правка не попадёт в результат.
 	mut inp_r := text_input('R')
 	inp_r.chars = 4
 	mut inp_g := text_input('G')
@@ -374,6 +438,7 @@ fn cp_run_dialog(parent &Window, mut app App, initial Color, show_alpha bool, ti
 	}
 
 	// ── helper: make a label+input pair row ──
+	// Ниже - три замыкания-фабрики строк правой колонки (подпись+поле, заголовок секции).
 	lbl_color := Color{180, 180, 180, 255}
 
 	make_lbl := fn [lbl_color] (text string) &Label {
@@ -474,6 +539,10 @@ fn cp_run_dialog(parent &Window, mut app App, initial Color, show_alpha bool, ti
 	dlg.show()
 
 	// Modal loop
+	// Вложенный цикл: обрабатываем события всего приложения, синхронизируем
+	// поля ввода с состоянием (только не сфокусированные - чтобы не перебивать
+	// набор пользователя), рисуем кадр; SDL_Delay(16) ~ 60 кадров/с, чтобы цикл
+	// не грел процессор. Выход - OK/Cancel, закрытие окна диалога или выход из приложения.
 	for app.running && dlg.is_open() && !state.confirmed && !state.cancelled {
 		app.process_events()
 		// Sync hex input (only when not focused)
@@ -502,6 +571,11 @@ fn cp_run_dialog(parent &Window, mut app App, initial Color, show_alpha bool, ti
 
 // ─── Internal dialog state ─────────────────────────────
 
+// CpState - общее изменяемое состояние диалога, разделяемое по указателю между
+// колбэками, CpArea и CpPreview. original - цвет при открытии (правая половина
+// превью "Old"), current - редактируемый цвет. hue/sat/val/alpha - первичное
+// представление (HSV), current - производное от него (update_current).
+// drag_* - какой из элементов CpArea сейчас перетаскивается мышью.
 struct CpState {
 mut:
 	original   Color
@@ -530,12 +604,15 @@ mut:
 	drag_alpha bool
 }
 
+// update_current пересчитывает current (RGBA) из HSV и alpha.
 fn (mut s CpState) update_current() {
 	r, g, b := cp_hsv_to_rgb(s.hue, s.sat, s.val)
 	s.current = Color{r, g, b, u8(s.alpha * 255 + 0.5)}
 }
 
 // Apply RGBA from text inputs → state
+// Нечисловой ввод превращается в 0 (String.int()), значения зажимаются в 0..255;
+// HSV пересчитывается из нового RGB.
 fn cp_apply_rgba_from_inputs(mut s CpState) {
 	r := clamp_int(if unsafe { s.inp_r != nil } { s.inp_r.get_text().int() } else { 0 }, 0, 255)
 	g := clamp_int(if unsafe { s.inp_g != nil } { s.inp_g.get_text().int() } else { 0 }, 0, 255)
@@ -550,6 +627,7 @@ fn cp_apply_rgba_from_inputs(mut s CpState) {
 }
 
 // Apply HSV from text inputs → state
+// H зажимается в 0..360, S и V - в 0..100 (проценты).
 fn cp_apply_hsv_from_inputs(mut s CpState) {
 	h := clamp_int(if unsafe { s.inp_h != nil } { s.inp_h.get_text().int() } else { 0 }, 0, 360)
 	sv := clamp_int(if unsafe { s.inp_s != nil } { s.inp_s.get_text().int() } else { 0 }, 0, 100)
@@ -561,6 +639,8 @@ fn cp_apply_hsv_from_inputs(mut s CpState) {
 }
 
 // Force-sync all component inputs to current state values
+// Принудительно переписывает текст всех полей (R,G,B,A,H,S,V) по состоянию,
+// включая сфокусированные - вызывается после разбора hex-строки.
 fn cp_sync_component_inputs(s &CpState) {
 	if unsafe { s.inp_r != nil } {
 		mut r := unsafe { s.inp_r }
@@ -647,12 +727,22 @@ fn cp_sync_inputs_if_not_focused(s &CpState) {
 
 // ─── Custom draw area for SV + Hue + Alpha ─────────────
 
+// CpArea - внутренний виджет диалога: слева квадрат S(x)/V(y, вверху = 1) для
+// текущего оттенка, справа вертикальные полосы оттенка (сверху 0, снизу 360) и
+// альфы (сверху 1, снизу 0). Размер квадрата - меньшая из сторон за вычетом
+// ширины полос (draw и handle_event считают геометрию одинаково; при изменении
+// править обе). bounds выставляет HBox диалога.
 struct CpArea {
 mut:
 	bounds Rect
 	state  &CpState = unsafe { nil }
 }
 
+// draw рисует SV-квадрат сеткой 32x32 залитых прямоугольников (+1 px к размеру
+// клетки, чтобы не было щелей от округления), полосу оттенков из 36 цветных
+// ступеней и полосу альфы (ступени текущего цвета с убывающей прозрачностью,
+// без шахматки). Маркеры: кольцо на SV, горизонтальные черточки на полосах.
+// Слишком малая область (< 20 px) не рисуется.
 fn (mut a CpArea) draw(mut ctx RenderContext) {
 	if unsafe { a.state == nil } {
 		return
@@ -726,9 +816,14 @@ fn (mut a CpArea) draw(mut ctx RenderContext) {
 		ctx.draw_rect(Rect{alpha_x - 2, alpha_cy - 2, alpha_w + 4, 4}, color_black)
 	}
 
-	_ = math.cosf(0) // ensure math import used
+	_ = math.cosf(0) // ensure math import used (заглушка, чтобы импорт math не считался лишним)
 }
 
+// handle_event: нажатие левой кнопки в одном из трёх прямоугольников начинает
+// перетаскивание соответствующего элемента (drag_*) и сразу ставит значение;
+// mouse_move при активном перетаскивании обновляет значение (координаты
+// зажимаются в 0..1, поэтому можно уводить мышь за пределы); mouse_up
+// завершает все перетаскивания. Каждое изменение пересчитывает current.
 fn (mut a CpArea) handle_event(event &GuiEvent, _ &App) bool {
 	if unsafe { a.state == nil } {
 		return false
@@ -812,12 +907,15 @@ fn (mut a CpArea) handle_event(event &GuiEvent, _ &App) bool {
 
 // ─── Preview widget: shows old vs new color ────────────
 
+// CpPreview - внутренний виджет: прямоугольник из двух половин, слева старый
+// цвет (original) с подписью Old, справа новый (current) с подписью New.
 struct CpPreview {
 mut:
 	bounds Rect
 	state  &CpState = unsafe { nil }
 }
 
+// draw рисует обе половины, рамку и подписи (подробнее о клипе - в комментарии ниже).
 fn (mut p CpPreview) draw(mut ctx RenderContext) {
 	if unsafe { p.state == nil } {
 		return

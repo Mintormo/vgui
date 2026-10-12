@@ -20,8 +20,31 @@ module vgui
 // The display rect (where the buffer is shown inside `bounds`) is computed each
 // frame in fit mode (aspect-preserved, centered) or stretch mode, and reused to
 // map mouse coordinates back to pixel coordinates.
+//
+// Связи с остальной библиотекой (PROJECT.md, разделы «Canvas (kind 50)»,
+// «Canvas: инструменты поверх снимка», «Canvas: слой детализации»,
+// «Кольцо пипетки», «Текстовый ввод SDL - только по фокусу; Canvas.take_keys»):
+//   - Фокус: draw() регистрирует холст в ctx.focus (register_canvas), клик
+//     инструмента берёт фокус (focus_canvas) - иначе клавиши не дойдут до on_input.
+//   - Текстура: потоковая SDL-текстура привязана к рендереру через пару
+//     (tex_renderer, tex_renderer_gen); уничтожать её можно только если рендерер
+//     ещё жив (is_renderer_alive_gen, PROJECT.md «Время жизни SDL-текстур»).
+//   - Раскладка: bounds выставляет контейнер (Layouted/widget_tree.v), размер
+//     по содержимому не считается (см. Canvas.measure в layout_measure.v).
+//   - C-ABI: поля/методы отдаются в Python через vgui_canvas_* (vgui_capi);
+//     событие on_input передаётся указателем на CanvasInputEvent
+//     (VOIDP_DISPATCHER), Python читает поля геттерами.
+//
+// Порядок слоёв при отрисовке (draw): основное изображение -> слой детализации
+// (detail) -> полосы прокрутки -> on_overlay (графика инструмента) -> кольцо
+// кисти (brush_cursor). Три последних не трогают буфер пикселей.
+//
+// Приоритет обработки событий (handle_event): активный штрих (drawing) >
+// перетаскивание панорамы (panning) > перетаскивание полос прокрутки > обычные
+// события (hover/enter/leave, нажатие, колесо, клавиши).
 // ═══════════════════════════════════════════════════════
 
+// Ширина полосы прокрутки (логические px) и границы масштаба (экранных px на пиксель буфера).
 const cv_sb_w = f32(12)
 const cv_min_zoom = f32(0.02)
 const cv_max_zoom = f32(32.0)
@@ -91,6 +114,10 @@ fn mouse_btn_to_int(b MouseButton) int {
 	}
 }
 
+// Canvas - виджет-холст: RGBA-буфер + потоковая текстура + навигация
+// (zoom/pan/полосы прокрутки) + мышиный/клавиатурный ввод для инструментов.
+// Режимы показа: auto_fit (вписать с сохранением пропорций), stretch (растянуть
+// на bounds без пропорций), либо ручной zoom со scroll_x/scroll_y.
 @[heap]
 pub struct Canvas {
 pub mut:
@@ -210,6 +237,8 @@ pub mut:
 
 // ─── Constructor ───────────────────────────────────────
 
+// canvas создаёт холст width x height, залитый непрозрачным белым. Размеры
+// меньше 1 заменяются на 1 (пустой буфер сломал бы деление в map_to_pixel).
 pub fn canvas(width int, height int) &Canvas {
 	w := if width > 0 { width } else { 1 }
 	h := if height > 0 { height } else { 1 }
@@ -223,11 +252,15 @@ pub fn canvas(width int, height int) &Canvas {
 
 // ─── Pixel access ──────────────────────────────────────
 
+// in_bounds - лежит ли пиксель (x, y) внутри буфера.
 @[inline]
 fn (c &Canvas) in_bounds(x int, y int) bool {
 	return x >= 0 && y >= 0 && x < c.width && y < c.height
 }
 
+// set_pixel записывает пиксель (молча игнорирует выход за границы) и помечает
+// буфер грязным: текстура обновится при следующем draw(). Сам кадр окна НЕ
+// инвалидируется - в своём цикле звать Window.invalidate*.
 pub fn (mut c Canvas) set_pixel(x int, y int, col Color) {
 	if !c.in_bounds(x, y) {
 		return
@@ -240,6 +273,7 @@ pub fn (mut c Canvas) set_pixel(x int, y int, col Color) {
 	c.dirty = true
 }
 
+// get_pixel читает пиксель; вне буфера - прозрачный чёрный {0,0,0,0}.
 pub fn (c &Canvas) get_pixel(x int, y int) Color {
 	if !c.in_bounds(x, y) {
 		return Color{0, 0, 0, 0}
@@ -248,6 +282,7 @@ pub fn (c &Canvas) get_pixel(x int, y int) Color {
 	return Color{c.pixels[i], c.pixels[i + 1], c.pixels[i + 2], c.pixels[i + 3]}
 }
 
+// fill заливает весь буфер цветом col (включая альфу, без смешивания).
 pub fn (mut c Canvas) fill(col Color) {
 	for i := 0; i < c.pixels.len; i += 4 {
 		c.pixels[i] = col.r
@@ -266,6 +301,9 @@ pub fn (mut c Canvas) clear() {
 	c.dirty = true
 }
 
+// pixels_ptr - указатель на сырой RGBA-буфер (width*height*4 байт) для прямого
+// чтения/записи из Python. Указатель действителен, пока буфер не пересоздан
+// (load_*, изменение размера); после записи надо вызвать mark_dirty().
 pub fn (c &Canvas) pixels_ptr() voidptr {
 	if c.pixels.len == 0 {
 		return unsafe { nil }
@@ -273,6 +311,7 @@ pub fn (c &Canvas) pixels_ptr() voidptr {
 	return c.pixels.data
 }
 
+// pixels_len - размер буфера в байтах (width*height*4).
 pub fn (c &Canvas) pixels_len() int {
 	return c.pixels.len
 }
@@ -287,12 +326,17 @@ pub fn (mut c Canvas) set_pixels(src voidptr, n int) {
 	c.dirty = true
 }
 
+// mark_dirty сообщает, что буфер изменён снаружи (через pixels_ptr): текстура
+// будет перезалита при следующем draw().
 pub fn (mut c Canvas) mark_dirty() {
 	c.dirty = true
 }
 
 // ─── Primitives ────────────────────────────────────────
+// Примитивы рисуют прямо в буфер через set_pixel: без сглаживания, без
+// смешивания альфы (пиксель заменяется), выход за границы отсекается.
 
+// draw_line - линия Брезенхэма от (x0,y0) до (x1,y1) включительно.
 pub fn (mut c Canvas) draw_line(x0 int, y0 int, x1 int, y1 int, col Color) {
 	// Bresenham
 	mut x := x0
@@ -319,6 +363,7 @@ pub fn (mut c Canvas) draw_line(x0 int, y0 int, x1 int, y1 int, col Color) {
 	}
 }
 
+// fill_rect - залитый прямоугольник x,y,w,h (w/h <= 0 - ничего).
 pub fn (mut c Canvas) fill_rect(x int, y int, w int, h int, col Color) {
 	for yy in y .. y + h {
 		for xx in x .. x + w {
@@ -327,6 +372,7 @@ pub fn (mut c Canvas) fill_rect(x int, y int, w int, h int, col Color) {
 	}
 }
 
+// draw_rect - контур прямоугольника толщиной 1 px.
 pub fn (mut c Canvas) draw_rect(x int, y int, w int, h int, col Color) {
 	if w <= 0 || h <= 0 {
 		return
@@ -337,6 +383,8 @@ pub fn (mut c Canvas) draw_rect(x int, y int, w int, h int, col Color) {
 	c.draw_line(x + w - 1, y, x + w - 1, y + h - 1, col)
 }
 
+// draw_circle - контур окружности радиуса r алгоритмом средней точки
+// (восемь симметричных октантов за итерацию).
 pub fn (mut c Canvas) draw_circle(cx int, cy int, r int, col Color) {
 	if r < 0 {
 		return
@@ -363,6 +411,7 @@ pub fn (mut c Canvas) draw_circle(cx int, cy int, r int, col Color) {
 	}
 }
 
+// fill_circle - залитый круг: перебор квадрата со стороной 2r+1 и проверка dx^2+dy^2 <= r^2.
 pub fn (mut c Canvas) fill_circle(cx int, cy int, r int, col Color) {
 	if r < 0 {
 		return
@@ -470,6 +519,12 @@ pub fn (mut c Canvas) save_file(path string) bool {
 
 // ─── Texture management ────────────────────────────────
 
+// ensure_texture гарантирует живую потоковую текстуру под текущий рендерер.
+// Если текстура уже есть и её рендерер жив (проверка с поколением - защита от
+// ABA, когда адрес рендерера переиспользован), ничего не делает. Иначе
+// создаёт новую нужного размера и взводит dirty, чтобы буфер залился заново.
+// Размер текстуры НЕ проверяется: при смене размера буфера вызывающий обязан
+// сам вызвать destroy_texture() (так делает load_from_surface).
 fn (mut c Canvas) ensure_texture(ctx &RenderContext) {
 	// Recreate if missing or the owning renderer changed/died (ABA-guarded).
 	if unsafe { c.texture != nil } && is_renderer_alive_gen(c.tex_renderer, c.tex_renderer_gen) {
@@ -496,6 +551,11 @@ fn (mut c Canvas) ensure_texture(ctx &RenderContext) {
 	c.dirty = true
 }
 
+// destroy_texture освобождает основную и detail-текстуры. SDL_DestroyTexture
+// вызывается только при живом рендерере: у уничтоженного рендерера текстуры уже
+// освобождены, и повторное удаление было бы use-after-free. Зовётся из
+// load_from_surface и слоем C-ABI при уничтожении виджета (в этом модуле
+// других вызовов нет).
 pub fn (mut c Canvas) destroy_texture() {
 	if unsafe { c.texture != nil } {
 		if is_renderer_alive_gen(c.tex_renderer, c.tex_renderer_gen) {
@@ -537,6 +597,7 @@ pub fn (mut c Canvas) clear_detail() {
 	c.detail_dirty = false
 }
 
+// has_detail - задан ли слой детализации.
 pub fn (c &Canvas) has_detail() bool {
 	return c.detail_w > 0
 }
@@ -561,6 +622,7 @@ pub fn (c &Canvas) visible_buf_rect() Rect {
 	return Rect{x0, y0, x1 - x0, y1 - y0}
 }
 
+// destroy_detail_texture - то же, что destroy_texture, но для текстуры слоя детализации.
 fn (mut c Canvas) destroy_detail_texture() {
 	if unsafe { c.detail_tex != nil } {
 		if is_renderer_alive_gen(c.detail_tex_ren, c.detail_tex_gen) {
@@ -576,6 +638,9 @@ fn (mut c Canvas) destroy_detail_texture() {
 
 // draw_detail - the detail tile over the image (after compute_disp), clipped
 // to the viewport. The texture is recreated on size or renderer change.
+// Прямоугольник назначения получается переводом detail_rect из пикселей буфера
+// в экранные координаты (buf_to_screen), поэтому плитка автоматически следует
+// за zoom/pan. SDL_UpdateTexture - только когда detail_dirty (плитка менялась).
 fn (mut c Canvas) draw_detail(mut ctx RenderContext, vp Rect) {
 	if c.detail_w <= 0 {
 		return
@@ -657,6 +722,9 @@ fn (c &Canvas) displayed_size() (f32, f32) {
 	return f32(c.width) * z, f32(c.height) * z
 }
 
+// needs_scrollbars - (нужна горизонтальная, нужна вертикальная) полоса.
+// Полосы бывают только в ручном режиме масштаба (не auto_fit/stretch), когда
+// показанное изображение больше bounds по соответствующей оси.
 fn (c &Canvas) needs_scrollbars() (bool, bool) {
 	if c.stretch || c.auto_fit {
 		return false, false
@@ -665,6 +733,8 @@ fn (c &Canvas) needs_scrollbars() (bool, bool) {
 	return dw > c.bounds.w, dh > c.bounds.h
 }
 
+// viewport - область, где реально видно изображение: bounds минус место под
+// полосы прокрутки (справа/снизу). Клип отрисовки и расчёт прокрутки идут по ней.
 fn (c &Canvas) viewport() Rect {
 	b := c.bounds
 	h_sb, v_sb := c.needs_scrollbars()
@@ -679,12 +749,15 @@ fn (c &Canvas) viewport() Rect {
 	return Rect{b.x, b.y, max_f32(w, 0), max_f32(h, 0)}
 }
 
+// max_scroll - максимальные scroll_x/scroll_y: размер показанного изображения
+// минус размер viewport (не меньше 0).
 fn (c &Canvas) max_scroll() (f32, f32) {
 	dw, dh := c.displayed_size()
 	vp := c.viewport()
 	return max_f32(0, dw - vp.w), max_f32(0, dh - vp.h)
 }
 
+// clamp_scroll зажимает scroll_x/scroll_y в [0, max_scroll].
 fn (mut c Canvas) clamp_scroll() {
 	ms_x, ms_y := c.max_scroll()
 	c.scroll_x = clamp_f32(c.scroll_x, 0, ms_x)
@@ -693,6 +766,8 @@ fn (mut c Canvas) clamp_scroll() {
 
 // image_draw_rect is the destination rect the buffer is rendered into; it is also
 // what map_to_pixel uses, so mouse→pixel mapping stays correct under zoom/pan.
+// Если изображение меньше viewport по оси (или режим fit/stretch) - оно
+// центрируется; иначе левый верхний угол сдвинут на -scroll.
 fn (c &Canvas) image_draw_rect() Rect {
 	dw, dh := c.displayed_size()
 	vp := c.viewport()
@@ -712,6 +787,10 @@ fn (c &Canvas) image_draw_rect() Rect {
 	return Rect{x, y, dw, dh}
 }
 
+// compute_disp запоминает image_draw_rect в disp_x/y/w/h. Эти поля - «снимок
+// последнего кадра»: по ним события переводят координаты мыши в пиксели буфера
+// (map_to_pixel*), а buf_to_screen/screen_scale отдают их инструментам.
+// Пересчитывается в начале каждого draw().
 fn (mut c Canvas) compute_disp() {
 	dr := c.image_draw_rect()
 	c.disp_x = dr.x
@@ -721,6 +800,9 @@ fn (mut c Canvas) compute_disp() {
 }
 
 // Scrollbar geometry (track, thumb).
+// Вертикальная: дорожка у правого края viewport; высота бегунка пропорциональна
+// доле видимого (но не меньше 20 px), позиция - доле прокрутки от максимума.
+// Пустые Rect{}, если прокрутка не нужна.
 fn (c &Canvas) vsb_rects() (Rect, Rect) {
 	_, dh := c.displayed_size()
 	vp := c.viewport()
@@ -736,6 +818,7 @@ fn (c &Canvas) vsb_rects() (Rect, Rect) {
 	return track, thumb
 }
 
+// hsb_rects - то же для горизонтальной полосы (дорожка у нижнего края).
 fn (c &Canvas) hsb_rects() (Rect, Rect) {
 	dw, _ := c.displayed_size()
 	vp := c.viewport()
@@ -753,10 +836,13 @@ fn (c &Canvas) hsb_rects() (Rect, Rect) {
 
 // ─── Zoom / pan API ────────────────────────────────────
 
+// get_zoom - текущий масштаб (экранных px на пиксель буфера); в auto_fit - вычисленный.
 pub fn (c &Canvas) get_zoom() f32 {
 	return c.eff_scale()
 }
 
+// set_zoom выключает auto_fit и ставит масштаб z (зажимается в
+// [cv_min_zoom, cv_max_zoom]); прокрутка корректируется под новый размер.
 pub fn (mut c Canvas) set_zoom(z f32) {
 	c.auto_fit = false
 	c.zoom = clamp_f32(z, cv_min_zoom, cv_max_zoom)
@@ -788,6 +874,7 @@ pub fn (mut c Canvas) fit_to_view() {
 	c.scroll_y = 0
 }
 
+// zoom_in / zoom_out - шаг масштаба в (1 + zoom_speed) раз вокруг центра bounds.
 pub fn (mut c Canvas) zoom_in() {
 	cx := c.bounds.x + c.bounds.w * 0.5
 	cy := c.bounds.y + c.bounds.h * 0.5
@@ -802,6 +889,10 @@ pub fn (mut c Canvas) zoom_out() {
 
 // zoom_at sets a new zoom level while keeping the buffer point under (mx,my) fixed
 // on screen (cursor-anchored zoom). Uses the last drawn disp rect for the old scale.
+// Алгоритм: точка буфера под курсором (img_x, img_y) в пикселях буфера
+// = (mx - disp_x) / старый_масштаб; после смены масштаба хотим, чтобы она
+// осталась в (mx, my), т.е. новый левый верхний угол = m - img * новый_масштаб,
+// откуда scroll = viewport.origin - угол. Затем scroll зажимается.
 fn (mut c Canvas) zoom_at(mx f32, my f32, new_zoom f32) {
 	old_z := if c.disp_w > 0 { c.disp_w / f32(c.width) } else { c.eff_scale() }
 	nz := clamp_f32(new_zoom, cv_min_zoom, cv_max_zoom)
@@ -817,6 +908,10 @@ fn (mut c Canvas) zoom_at(mx f32, my f32, new_zoom f32) {
 	c.clamp_scroll()
 }
 
+// draw: регистрация в фокусе, создание/обновление текстуры (SDL_UpdateTexture
+// только при dirty), расчёт disp-прямоугольника, вывод изображения под клипом
+// viewport, затем detail-слой, полосы прокрутки, on_overlay и кольцо кисти.
+// Если текстуру создать не удалось (нет рендерера) - не рисует ничего.
 pub fn (mut c Canvas) draw(mut ctx RenderContext) {
 	if !c.visible {
 		return
@@ -934,6 +1029,8 @@ fn (c &Canvas) map_to_pixel(mx f32, my f32) (int, int, bool) {
 	return cx, cy, true
 }
 
+// emit вызывает on_draw(x, y) для пикселя под точкой, если она ВНУТРИ показанного
+// изображения (за его краем - ничего: свободная кисть не должна "липнуть" к краю).
 fn (mut c Canvas) emit(mx f32, my f32) {
 	if c.on_draw == unsafe { nil } {
 		return
@@ -956,6 +1053,8 @@ fn (c &Canvas) map_to_pixel_clamped(mx f32, my f32) (int, int) {
 	return clamp_int(px, 0, c.width - 1), clamp_int(py, 0, c.height - 1)
 }
 
+// emit_stroke вызывает on_stroke(phase, x, y) с координатой, зажатой в буфер
+// (в отличие от emit, штрих за краем не пропадает). phase: 0 - нажатие, 1 - движение, 2 - отпускание.
 fn (mut c Canvas) emit_stroke(phase int, mx f32, my f32) {
 	if c.on_stroke == unsafe { nil } {
 		return
@@ -1005,6 +1104,18 @@ fn (mut c Canvas) emit_pointer(kind CanvasEventKind, ev &GuiEvent) {
 	c.dispatch_input(kind, ev, px, py, in_img)
 }
 
+// handle_event - маршрутизация ввода холста; true - событие поглощено.
+// Схема по состояниям (первое подходящее выигрывает):
+//   drawing    - идёт штрих инструмента: поглощает ВСЁ, пока не отпущена та же
+//                кнопка; on_input получает pointer_move/pointer_up, а старые
+//                on_draw/on_stroke - только для левой кнопки;
+//   panning    - перетаскивание панорамы (кнопки из pan_buttons): двигаем scroll
+//                на смещение мыши с момента нажатия;
+//   vsb/hsb_dragging - перетаскивание бегунка полосы: смещение мыши в пикселях
+//                дорожки переводится в прокрутку через ms / drag_range;
+//   иначе      - mouse_move (enter/leave/hover + hover полос), нажатие
+//                (полоса > панорама > инструмент), колесо, клавиши.
+// Клавиши принимаются только при focused и take_keys; Tab отдаётся фокус-менеджеру.
 pub fn (mut c Canvas) handle_event(event &GuiEvent, app &App) bool {
 	if !c.visible || !c.enabled {
 		return false

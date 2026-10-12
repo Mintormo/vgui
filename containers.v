@@ -4,6 +4,16 @@ module vgui
 // Layout containers — HBox, VBox, Stack, Panel,
 // Spacer, ScrollBox, Centered
 // ═══════════════════════════════════════════════════════
+//
+// Файл с базовыми контейнерами. Все они реализуют интерфейс Widget (draw/handle_event) и, где нужно,
+// Arrangeable (arrange): bounds детям раздаются ТОЛЬКО в arrange() (фаза раскладки, раз за кадр
+// перед draw), а не в draw(). Размеры детей контейнер узнаёт через measure_widget()
+// (layout_measure.v); bounds выдаёт set_widget_bounds / arrange_child. HBox и VBox - тонкие
+// обёртки над общим движком BoxLayout. Контейнеры не владеют детьми: remove/clear только
+// отсоединяют указатель (освобождение - дело вызывающего, см. «Удаление детей из контейнеров»
+// в PROJECT.md). События идут детям в обратном порядке (верхние по Z - первыми).
+// Глобальные bounds-«fill» контейнеров: если родитель bounds не задал (w<=0 и h<=0),
+// контейнер растягивается на весь экран окна (is_bounds_unset).
 
 // ─── ChildEntry — widget + layout hints ────────────────
 
@@ -23,6 +33,9 @@ pub enum SizeMode {
 	flex
 }
 
+// ChildEntry - запись о ребёнке контейнера: сам виджет плюс подсказки раскладки (из LayoutParams.to_entry).
+//   flex  - вес при дележе свободного места (используется при mode == .flex)
+//   mode  - как выбирается размер вдоль главной оси (SizeMode)
 pub struct ChildEntry {
 pub mut:
 	widget &Widget
@@ -41,6 +54,7 @@ pub mut:
 
 // ─── Direction enum ────────────────────────────────────
 
+// BoxDir - направление главной оси BoxLayout: HBox раскладывает по горизонтали, VBox по вертикали.
 enum BoxDir {
 	horizontal
 	vertical
@@ -50,6 +64,10 @@ enum BoxDir {
 // BoxLayout — shared engine for HBox and VBox
 // ═══════════════════════════════════════════════════════
 
+// BoxLayout - общий движок раскладки HBox и VBox (в самих HBox/VBox лежит как поле box).
+//   spacing - расстояние между соседними детьми; pad - внутренний отступ со всех сторон
+//   bg / use_panel_bg - свой фон (alpha 0 = без фона) или фон панели темы
+//   clip - обрезать рисование детей по bounds (ScrollBox отключает: disable_child_clip)
 struct BoxLayout {
 mut:
 	bounds       Rect
@@ -70,6 +88,7 @@ mut:
 // одного ребёнка: желаемый размер вдоль главной оси, его
 // границы и вес в дележе остатка.
 fn (b &BoxLayout) child_main_item(c &ChildEntry, ctx &RenderContext, vertical bool) LayoutItem {
+	// Вход distribute_main (layout_measure.v): base - желаемый размер, min/max - границы, flex - вес в дележе остатка.
 	mut it := LayoutItem{
 		max: size_unbounded
 	}
@@ -124,6 +143,8 @@ fn (mut b BoxLayout) layout(ctx &RenderContext) {
 	is_h := b.dir == .horizontal
 	vertical_main := !is_h
 
+	// Шаги: (1) вычесть из главной оси отступы и промежутки -> avail; (2) каждому ребёнку собрать LayoutItem
+	// и поделить avail через distribute_main; (3) расставить детей подряд, поперёк выровнять по align.
 	total_spacing := f32(b.children.len - 1) * b.spacing
 	main_total := if is_h { inner.w } else { inner.h }
 	avail := max_f32(0, main_total - total_spacing)
@@ -144,6 +165,7 @@ fn (mut b BoxLayout) layout(ctx &RenderContext) {
 		// виджетов фиксированного размера поперёк (флажок, бейдж,
 		// метка в ряду): они не растягиваются, а встают по месту -
 		// в ряду по центру высоты, в столбце у левого края.
+		// align - личное выравнивание ребёнка (если задано) или общее выравнивание контейнера.
 		mut align := if c.own_cross { c.cross } else { b.cross_align }
 		mut cross_off := f32(0)
 		mut cross_sz := cross_avail
@@ -259,6 +281,7 @@ fn (mut b BoxLayout) arrange(mut ctx RenderContext) {
 	}
 }
 
+// draw_impl - общая отрисовка HBox/VBox: фон, затем дети внутри клипа (если clip). Ничего не раскладывает - bounds детей уже выданы arrange().
 fn (mut b BoxLayout) draw_impl(mut ctx RenderContext) {
 	if !b.visible {
 		return
@@ -288,6 +311,7 @@ fn (mut b BoxLayout) draw_impl(mut ctx RenderContext) {
 	}
 }
 
+// event_impl - раздаёт событие детям с конца (последний добавленный - сверху); true, если кто-то поглотил.
 fn (mut b BoxLayout) event_impl(event &GuiEvent, app &App) bool {
 	if !b.visible {
 		return false
@@ -338,12 +362,14 @@ fn is_bounds_unset(b Rect) bool {
 // HBox
 // ═══════════════════════════════════════════════════════
 
+// HBox - горизонтальный контейнер: дети слева направо. API: add / remove / clear / set_spacing / set_padding / set_bg / set_cross_align (все делегируют BoxLayout).
 pub struct HBox {
 pub mut:
 	type_tag int = kind_hbox // тег типа, см. widget_tag.v
 	box      BoxLayout
 }
 
+// create_hbox_fill создаёт HBox с неустановленными bounds: пока родитель их не задал, займёт весь экран окна.
 pub fn create_hbox_fill() &HBox {
 	return &HBox{
 		box: BoxLayout{
@@ -372,6 +398,7 @@ pub fn (mut h HBox) set_cross_align(a CrossAlign) {
 	h.box.cross_align = a
 }
 
+// remove отсоединяет ребёнка (по адресу); true, если он был найден. Виджет не освобождается.
 pub fn (mut h HBox) remove(widget &Widget) bool {
 	return h.box.remove_child(voidptr(widget))
 }
@@ -392,10 +419,12 @@ pub fn (mut h HBox) set_bg(c Color) {
 	h.box.bg = c
 }
 
+// set_panel_bg - рисовать фон цветом panel_bg текущей темы (вместо фиксированного set_bg).
 pub fn (mut h HBox) set_panel_bg() {
 	h.box.use_panel_bg = true
 }
 
+// arrange: если bounds никто не задал - берёт весь экран окна, затем раскладывает детей и спускается в их поддеревья.
 pub fn (mut h HBox) arrange(mut ctx RenderContext) {
 	if is_bounds_unset(h.box.bounds) {
 		h.box.bounds = Rect{0, 0, ctx.screen_width, ctx.screen_height}
@@ -407,6 +436,7 @@ pub fn (mut h HBox) draw(mut ctx RenderContext) {
 	h.box.draw_impl(mut ctx)
 }
 
+// handle_event: при window_resize "корневой" контейнер (bounds не задан родителем) подгоняет размер под новое окно, затем раздаёт событие детям.
 pub fn (mut h HBox) handle_event(event &GuiEvent, app &App) bool {
 	if event.typ == .window_resize {
 		if is_bounds_unset(h.box.bounds) {
@@ -421,12 +451,14 @@ pub fn (mut h HBox) handle_event(event &GuiEvent, app &App) bool {
 // VBox
 // ═══════════════════════════════════════════════════════
 
+// VBox - вертикальный контейнер: дети сверху вниз. Устроен так же, как HBox (оба поверх BoxLayout), отличается только главной осью.
 pub struct VBox {
 pub mut:
 	type_tag int = kind_vbox // тег типа, см. widget_tag.v
 	box      BoxLayout
 }
 
+// create_vbox_fill - см. create_hbox_fill: bounds не заданы, пока их не выдаст родитель.
 pub fn create_vbox_fill() &VBox {
 	return &VBox{
 		box: BoxLayout{
@@ -455,6 +487,7 @@ pub fn (mut v VBox) set_cross_align(a CrossAlign) {
 	v.box.cross_align = a
 }
 
+// remove отсоединяет ребёнка по адресу (true, если найден); виджет не освобождается.
 pub fn (mut v VBox) remove(widget &Widget) bool {
 	return v.box.remove_child(voidptr(widget))
 }
@@ -479,6 +512,7 @@ pub fn (mut v VBox) set_panel_bg() {
 	v.box.use_panel_bg = true
 }
 
+// arrange / handle_event - как у HBox (корневой контейнер растягивается на окно).
 pub fn (mut v VBox) arrange(mut ctx RenderContext) {
 	if is_bounds_unset(v.box.bounds) {
 		v.box.bounds = Rect{0, 0, ctx.screen_width, ctx.screen_height}
@@ -504,6 +538,8 @@ pub fn (mut v VBox) handle_event(event &GuiEvent, app &App) bool {
 // Panel — background + border + single child
 // ═══════════════════════════════════════════════════════
 
+// Panel - панель с фоном, рамкой и ОДНИМ ребёнком (set_child), у которого отступ pad от краёв.
+// bg / border с alpha 0 означают «цвет из темы» (panel_bg / border); radius < 0 - радиус темы.
 pub struct Panel {
 pub mut:
 	type_tag int = kind_panel // тег типа, см. widget_tag.v
@@ -516,6 +552,7 @@ pub mut:
 	child    &Widget = unsafe { nil }
 }
 
+// set_child назначает ребёнка (предыдущий просто забывается, не освобождается).
 pub fn (mut p Panel) set_child(w &Widget) {
 	p.child = unsafe { w }
 }
@@ -525,6 +562,7 @@ pub fn (mut p Panel) clear_child() {
 	p.child = unsafe { nil }
 }
 
+// arrange отдаёт ребёнку область панели минус pad.
 pub fn (mut p Panel) arrange(mut ctx RenderContext) {
 	if !p.visible || unsafe { p.child == nil } {
 		return
@@ -571,6 +609,7 @@ pub fn (mut p Panel) handle_event(event &GuiEvent, app &App) bool {
 // Stack — all children on top of each other
 // ═══════════════════════════════════════════════════════
 
+// Stack - дети накладываются друг на друга в общей области bounds (рисуются по порядку добавления, события идут с конца - верхнему слою первому).
 pub struct Stack {
 pub mut:
 	type_tag int = kind_stack // тег типа, см. widget_tag.v
@@ -584,6 +623,7 @@ pub fn (mut s Stack) add(w &Widget) {
 	s.children << unsafe { w }
 }
 
+// remove отсоединяет ребёнка по адресу (true, если найден); без освобождения.
 pub fn (mut s Stack) remove(target voidptr) bool {
 	if target == unsafe { nil } {
 		return false
@@ -601,6 +641,7 @@ pub fn (mut s Stack) clear() {
 	s.children.clear()
 }
 
+// arrange: каждому ребёнку - вся область Stack; если bounds не заданы - весь экран.
 pub fn (mut s Stack) arrange(mut ctx RenderContext) {
 	if !s.visible {
 		return
@@ -641,6 +682,7 @@ pub fn (mut s Stack) handle_event(event &GuiEvent, app &App) bool {
 // Spacer
 // ═══════════════════════════════════════════════════════
 
+// Spacer - невидимая распорка: ничего не рисует и не обрабатывает, нужна только раскладке (растягивается политикой expanding).
 pub struct Spacer {
 pub mut:
 	type_tag int = kind_spacer // тег типа, см. widget_tag.v
@@ -667,6 +709,7 @@ pub fn (mut s Spacer) handle_event(event &GuiEvent, app &App) bool {
 // Centered — centers a child widget
 // ═══════════════════════════════════════════════════════
 
+// Centered - центрирует одного ребёнка фиксированного размера child_w x child_h внутри своих bounds.
 pub struct Centered {
 pub mut:
 	type_tag int = kind_centered // тег типа, см. widget_tag.v
@@ -678,6 +721,7 @@ pub mut:
 	child    &Widget = unsafe { nil }
 }
 
+// create_centered - bounds выдаст родитель; create_centered_fill - нулевые bounds, т.е. займёт окно, если родитель их не задаст.
 pub fn create_centered(child_w f32, child_h f32) &Centered {
 	return &Centered{
 		child_w: child_w
@@ -702,6 +746,7 @@ pub fn (mut c Centered) clear_child() {
 	c.child = unsafe { nil }
 }
 
+// arrange: ребёнок получает прямоугольник child_w x child_h по центру bounds (может быть отрицательное смещение, если bounds меньше ребёнка).
 pub fn (mut c Centered) arrange(mut ctx RenderContext) {
 	if !c.visible {
 		return
@@ -749,23 +794,28 @@ pub fn (mut c Centered) handle_event(event &GuiEvent, app &App) bool {
 //
 // Supports both vertical (.vertical) and horizontal (.horizontal) scroll.
 //
-// If content_h/content_w <= 0 (or set to 0), ScrollBox auto-calculates
-// it from the first child widget:
-//   - VBox: sum of all fixed sizes + spacing + padding  (vertical mode)
-//   - HBox: same along horizontal axis                  (horizontal mode)
-//   - Other: fallback to bounds dimension * 3
+// If content_h/content_w <= 0 (or set to 0), ScrollBox takes the natural size of
+// its first child from measure() (update_eff_content_size), but never less than
+// the visible area. (Раньше размер считался вручную по типу ребёнка, теперь -
+// единый measure(), см. «Layout: measure/arrange» в PROJECT.md.)
 // ═══════════════════════════════════════════════════════
 
+// ScrollDir - ось прокрутки ScrollBox.
 pub enum ScrollDir {
 	vertical
 	horizontal
 }
 
+// ScrollBox - прокручиваемая область с полосой прокрутки. Дети раскладываются в "содержимое" (content_rect)
+// размером eff_content_h/w, смещённое на scroll_y/x; рисование обрезается по viewport. Прокрутка: колесо,
+// перетаскивание ползунка, клик по дорожке (страница). Полосу и цвета можно настроить (sb_*, нулевое
+// значение/alpha 0 = взять из темы). eff_content_* - рабочий размер содержимого, обновляется в arrange().
 pub struct ScrollBox {
 pub mut:
 	type_tag int = kind_scroll_box // тег типа, см. widget_tag.v
 	// Колесо мыши: false - виджет его не берёт (прокрутка уходит
 	// контейнеру, например панели в ScrollBox)
+	// wheel        bool = true
 	wheel        bool = true
 	bounds       Rect
 	dir          ScrollDir = .vertical
@@ -801,6 +851,7 @@ pub fn (mut s ScrollBox) add(w &Widget) {
 	s.children << unsafe { w }
 }
 
+// remove отсоединяет ребёнка по адресу (true, если найден); без освобождения.
 pub fn (mut s ScrollBox) remove(target voidptr) bool {
 	if target == unsafe { nil } {
 		return false
@@ -882,6 +933,7 @@ fn (s &ScrollBox) eff_sb_thumb_drag(ctx &RenderContext) Color {
 	}
 }
 
+// has_scrollbar - полоса нужна, только если содержимое выше (шире) видимой области за вычетом pad.
 fn (s &ScrollBox) has_scrollbar() bool {
 	if s.dir == .vertical {
 		return s.eff_content_h > s.bounds.h - s.pad * 2
@@ -890,6 +942,7 @@ fn (s &ScrollBox) has_scrollbar() bool {
 	}
 }
 
+// max_scroll - максимум scroll_y (вертикаль) или scroll_x (горизонталь): содержимое минус видимая область, не меньше 0.
 pub fn (s &ScrollBox) max_scroll() f32 {
 	if s.dir == .vertical {
 		return max_f32(0, s.eff_content_h - (s.bounds.h - s.pad * 2))
@@ -898,6 +951,7 @@ pub fn (s &ScrollBox) max_scroll() f32 {
 	}
 }
 
+// content_rect - прямоугольник полного содержимого (без смещения прокрутки): ширина (высота) уменьшена на толщину полосы, если она показана; длина вдоль оси прокрутки равна eff_content_*.
 fn (s &ScrollBox) content_rect() Rect {
 	sbsz := if s.has_scrollbar() { s.eff_sb_width() } else { f32(0) }
 	if s.dir == .vertical {
@@ -917,6 +971,8 @@ fn (s &ScrollBox) content_rect() Rect {
 	}
 }
 
+// scrollbar_rects - (дорожка, ползунок) для текущей оси; пустые Rect, если полоса не нужна.
+// Длина ползунка пропорциональна видимой доле (но не меньше sb_min_thumb), положение - по доле прокрутки.
 fn (s &ScrollBox) scrollbar_rects() (Rect, Rect) {
 	if s.dir == .vertical {
 		vis_h := s.bounds.h - s.pad * 2
@@ -969,6 +1025,7 @@ fn (s &ScrollBox) scrollbar_rects() (Rect, Rect) {
 	}
 }
 
+// disable_child_clip - выключает собственный клип у дочернего VBox/HBox: обрезкой занимается ScrollBox, а клип бокса мог бы срезать содержимое при сдвиге.
 fn disable_child_clip(mut w Widget) {
 	if mut w is VBox {
 		w.box.clip = false
@@ -987,6 +1044,7 @@ pub fn (mut s ScrollBox) arrange(mut ctx RenderContext) {
 	// Размер содержимого - из measure() ребёнка
 	s.update_eff_content_size(ctx)
 
+	// Размер содержимого мог измениться - возвращаем прокрутку в допустимый диапазон.
 	// Clamp scroll
 	if s.dir == .vertical {
 		s.scroll_y = clamp_f32(s.scroll_y, 0, s.max_scroll())
@@ -1125,6 +1183,7 @@ pub fn (mut s ScrollBox) handle_event(event &GuiEvent, app &App) bool {
 		return true
 	}
 
+	// Для колеса позиция мыши берётся из активного контекста (в самом событии колеса координат мыши нет), иначе - из события.
 	mx := if event.typ == .mouse_wheel {
 		ctx_ptr := app.get_active_ctx()
 		if unsafe { ctx_ptr != nil } {
@@ -1246,6 +1305,7 @@ fn set_widget_bounds(mut w Widget, r Rect) {
 	}
 }
 
+// Фабрики: panel() / stack() - пустые контейнеры; scroll_box(content_h) - вертикальный, scroll_box_h(content_w) - горизонтальный (0 = размер из measure() ребёнка).
 pub fn panel() &Panel {
 	return &Panel{}
 }

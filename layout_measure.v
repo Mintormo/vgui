@@ -1,6 +1,13 @@
 module vgui
 
 // ═══════════════════════════════════════════════════════
+// Общая для всего файла схема: у каждого виджета метод measure(ctx) возвращает SizeHint (layout.v):
+// w/h - желаемый размер, min_*/max_* - жёсткие границы, h_policy/v_policy - как виджет ведёт себя
+// при растяжении (.fixed - не растягивать, .preferred - может, но не просит, .expanding - забирает
+// остаток). Невидимый виджет (visible == false) везде возвращает пустой SizeHint{} - места не занимает.
+// Результат проходит через SizeHint.clamped() внутри measure_widget (layout.v) и кэшируется на проход
+// измерения (measure_cache.v), поэтому методы обязаны быть чистыми. Контейнеры (BoxLayout и др.)
+// вызывают их не напрямую, а через measure_widget().
 // Реализации Measurable для встроенных виджетов
 //
 // Собраны в одном файле намеренно: измерение — это единая
@@ -19,6 +26,10 @@ module vgui
 // label_wrap_pref_w - желаемая ширина метки с переносом (~55 знаков)
 const label_wrap_pref_w = f32(400)
 
+// Label: размер по тексту (с учётом line_gap и pad). Без wrap - ширина строго по тексту.
+// С wrap - высота считается по ширине, которую метка получила на прошлом проходе (bounds.w);
+// это сознательное обращение к прошлому кадру: если ширина после раскладки изменилась,
+// Window.arrange делает ещё один проход.
 pub fn (l &Label) measure(ctx &RenderContext) SizeHint {
 	if !l.visible {
 		return SizeHint{}
@@ -71,6 +82,10 @@ fn button_content_size(ctx &RenderContext, text string, font_style FontStyle, fo
 	return w, h
 }
 
+// Button: содержимое (значок + текст) плюс поля measure_pad_x/measure_pad_y, но не ниже
+// стандартной высоты контрола (ctx.control_h()). Кнопка только со значком (без текста) - квадрат
+// вокруг значка. min_w берёт вертикальное поле, а не горизонтальное - кнопку можно сжать уже
+// желаемой ширины.
 pub fn (b &Button) measure(ctx &RenderContext) SizeHint {
 	if !b.visible {
 		return SizeHint{}
@@ -105,6 +120,7 @@ pub fn (b &Button) measure(ctx &RenderContext) SizeHint {
 	}
 }
 
+// MenuButton: как Button (текст или placeholder, значок), плюс фиксированная зона стрелки справа.
 pub fn (mb &MenuButton) measure(ctx &RenderContext) SizeHint {
 	if !mb.visible {
 		return SizeHint{}
@@ -148,6 +164,7 @@ fn labeled_control_size(ctx &RenderContext, text string, ind_w f32, ind_h f32, g
 	}
 }
 
+// CheckBox/RadioButton/ToggleSwitch: «индикатор + подпись», считает labeled_control_size.
 pub fn (cb &CheckBox) measure(ctx &RenderContext) SizeHint {
 	if !cb.visible {
 		return SizeHint{}
@@ -171,6 +188,9 @@ pub fn (ts &ToggleSwitch) measure(ctx &RenderContext) SizeHint {
 
 // ─── Поля ввода ────────────────────────────────────────
 
+// TextInput: высота - стандартная высота контрола. Если задано chars - ширина под столько символов
+// (фиксированная по «0»); иначе поле не имеет содержательной ширины и просто растягивается
+// (180 желаемых, 60 минимум, .expanding), текст скроллится внутри.
 pub fn (ti &TextInput) measure(ctx &RenderContext) SizeHint {
 	if !ti.visible {
 		return SizeHint{}
@@ -201,6 +221,7 @@ pub fn (ti &TextInput) measure(ctx &RenderContext) SizeHint {
 	}
 }
 
+// Spinbox: ширина под самое длинное значение (по max) с префиксом/суффиксом + две стрелки.
 pub fn (sb &Spinbox) measure(ctx &RenderContext) SizeHint {
 	if !sb.visible {
 		return SizeHint{}
@@ -222,6 +243,7 @@ pub fn (sb &Spinbox) measure(ctx &RenderContext) SizeHint {
 	}
 }
 
+// ComboBox: ширина по самому широкому из пунктов и placeholder + зона стрелки; минимум 80.
 pub fn (cb &ComboBox) measure(ctx &RenderContext) SizeHint {
 	if !cb.visible {
 		return SizeHint{}
@@ -245,6 +267,7 @@ pub fn (cb &ComboBox) measure(ctx &RenderContext) SizeHint {
 
 // ─── Мелкие декоративные виджеты ───────────────────────
 
+// Декоративные виджеты ниже имеют константные размеры: CurveEditor растягивается (200x200 желаемо).
 pub fn (ce &CurveEditor) measure(ctx &RenderContext) SizeHint {
 	if !ce.visible {
 		return SizeHint{}
@@ -259,6 +282,7 @@ pub fn (ce &CurveEditor) measure(ctx &RenderContext) SizeHint {
 	}
 }
 
+// Icon: квадрат size x size, жёстко фиксированный.
 pub fn (ic &Icon) measure(ctx &RenderContext) SizeHint {
 	if !ic.visible {
 		return SizeHint{}
@@ -276,6 +300,7 @@ pub fn (ic &Icon) measure(ctx &RenderContext) SizeHint {
 	}
 }
 
+// Badge: размер задаёт сам виджет (preferred_size), min = max = желаемому, т.е. не растягивается.
 pub fn (b &Badge) measure(ctx &RenderContext) SizeHint {
 	if !b.visible {
 		return SizeHint{}
@@ -293,6 +318,7 @@ pub fn (b &Badge) measure(ctx &RenderContext) SizeHint {
 	}
 }
 
+// Separator: линия толщиной thickness; поперёк оси тянется .expanding. Для .auto направление решает контейнер.
 pub fn (s &Separator) measure(ctx &RenderContext) SizeHint {
 	if !s.visible {
 		return SizeHint{}
@@ -332,6 +358,7 @@ pub fn (s &Separator) measure(ctx &RenderContext) SizeHint {
 	}
 }
 
+// Spinner: круг диаметром size (24 по умолчанию) плюс необязательная подпись справа.
 pub fn (sp &Spinner) measure(ctx &RenderContext) SizeHint {
 	if !sp.visible {
 		return SizeHint{}
@@ -355,6 +382,7 @@ pub fn (sp &Spinner) measure(ctx &RenderContext) SizeHint {
 	}
 }
 
+// ProgressBar: круговой - квадрат по радиусу; линейный - тянется по ширине, высота фиксирована.
 pub fn (pb &ProgressBar) measure(ctx &RenderContext) SizeHint {
 	if !pb.visible {
 		return SizeHint{}
@@ -383,6 +411,7 @@ pub fn (pb &ProgressBar) measure(ctx &RenderContext) SizeHint {
 	}
 }
 
+// Slider: толщина по бегунку или дорожке (что больше, +4); вдоль оси тянется, поперёк фиксирован.
 pub fn (s &Slider) measure(ctx &RenderContext) SizeHint {
 	if !s.visible {
 		return SizeHint{}
@@ -410,6 +439,7 @@ pub fn (s &Slider) measure(ctx &RenderContext) SizeHint {
 	}
 }
 
+// Breadcrumbs: сумма ширин пунктов с отступами и разделителями; min_w ограничен 60 - можно сжать.
 pub fn (bc &Breadcrumbs) measure(ctx &RenderContext) SizeHint {
 	if !bc.visible {
 		return SizeHint{}
@@ -441,6 +471,8 @@ pub fn (bc &Breadcrumbs) measure(ctx &RenderContext) SizeHint {
 // что дал контейнер, и прокручивают внутри. Поэтому hint —
 // это разумный минимум плюс политика expanding.
 
+// scrollable_hint собирает hint для виджетов с внутренней прокруткой: (min_w, min_h) - минимум,
+// (pref_w, pref_h) - желаемый размер, оба направления .expanding.
 fn scrollable_hint(min_w f32, min_h f32, pref_w f32, pref_h f32) SizeHint {
 	return SizeHint{
 		w:        pref_w
@@ -452,17 +484,21 @@ fn scrollable_hint(min_w f32, min_h f32, pref_w f32, pref_h f32) SizeHint {
 	}
 }
 
+// TextArea: минимум 3 строки моноширинного шрифта, желаемо 6.
 pub fn (ta &TextArea) measure(ctx &RenderContext) SizeHint {
 	font := ctx.get_font_immut(.mono, 0)
 	line_h := ctx.font_height_of(font)
 	return scrollable_hint(120, line_h * 3 + ta.pad * 2, 240, line_h * 6 + ta.pad * 2)
 }
 
+// CodeEditor: минимум 4 строки, желаемо 12 (по высоте моно-шрифта).
 pub fn (ce &CodeEditor) measure(ctx &RenderContext) SizeHint {
 	line_h := ctx.mono_font_height()
 	return scrollable_hint(200, line_h * 4, 480, line_h * 12)
 }
 
+// ListBox, TreeView, TableView, MarkdownView, PlotView, PropertyGrid: константные минимум и желаемый размер - содержимое не влияет,
+// большой список всё равно прокручивается.
 pub fn (lb &ListBox) measure(ctx &RenderContext) SizeHint {
 	return scrollable_hint(120, 60, 240, 180)
 }
@@ -487,6 +523,7 @@ pub fn (pg &PropertyGrid) measure(ctx &RenderContext) SizeHint {
 	return scrollable_hint(180, 80, 320, 240)
 }
 
+// ImageView: константный hint, размер картинки на раскладку не влияет (зум/подгонка внутри виджета).
 pub fn (iv &ImageView) measure(ctx &RenderContext) SizeHint {
 	return scrollable_hint(80, 60, 320, 240)
 }
@@ -527,6 +564,7 @@ pub fn (tb &TabBox) measure(ctx &RenderContext) SizeHint {
 			c.v_policy = .expanding
 		}
 	}
+	// Место под полосу заголовков: при горизонтальной полосе она добавляется к высоте, при вертикальной (слева/справа) - к ширине.
 	hdr := tb.tab_cross_size(ctx) + tb.gap
 	if tb.is_horizontal() {
 		c.h += hdr
@@ -538,6 +576,8 @@ pub fn (tb &TabBox) measure(ctx &RenderContext) SizeHint {
 	return c
 }
 
+// Accordion: в режиме fit_content высота равна полной высоте раскрытого содержимого (прокрутку
+// тогда даёт внешний ScrollBox); иначе обычный прокручиваемый hint.
 pub fn (a &Accordion) measure(ctx &RenderContext) SizeHint {
 	if a.fit_content {
 		// Полная высота контента: прокрутку даёт внешний ScrollBox
@@ -555,6 +595,7 @@ pub fn (a &Accordion) measure(ctx &RenderContext) SizeHint {
 
 // ─── Контейнеры ────────────────────────────────────────
 
+// HBox/VBox/WindowTitleDrag: делегируют BoxLayout.content_size (layout.v) - единую логику измерения контейнера.
 pub fn (h &HBox) measure(ctx &RenderContext) SizeHint {
 	return h.box.content_size(ctx)
 }
@@ -567,6 +608,7 @@ pub fn (d &WindowTitleDrag) measure(ctx &RenderContext) SizeHint {
 	return d.box.content_size(ctx)
 }
 
+// Spacer: размера нет, только растяжение в обе стороны - заполняет свободное место.
 pub fn (s &Spacer) measure(ctx &RenderContext) SizeHint {
 	return SizeHint{
 		h_policy: .expanding
@@ -574,6 +616,7 @@ pub fn (s &Spacer) measure(ctx &RenderContext) SizeHint {
 	}
 }
 
+// Panel: размер единственного ребёнка + pad с каждой стороны; пустая панель - только отступы.
 pub fn (p &Panel) measure(ctx &RenderContext) SizeHint {
 	if p.child == unsafe { nil } {
 		return SizeHint{
@@ -594,6 +637,7 @@ pub fn (p &Panel) measure(ctx &RenderContext) SizeHint {
 	}
 }
 
+// Centered: ребёнку задан фиксированный размер child_w x child_h; сам Centered при этом растягивается и центрирует его.
 pub fn (c &Centered) measure(ctx &RenderContext) SizeHint {
 	// Centered задаёт ребёнку фиксированный размер, поэтому
 	// его собственный hint — этот размер и есть.
@@ -607,6 +651,7 @@ pub fn (c &Centered) measure(ctx &RenderContext) SizeHint {
 	}
 }
 
+// Stack: дети накладываются друг на друга, поэтому берём максимум по каждой оси; expanding, если хоть один ребёнок expanding.
 pub fn (s &Stack) measure(ctx &RenderContext) SizeHint {
 	mut r := SizeHint{
 		h_policy: .preferred
@@ -628,9 +673,11 @@ pub fn (s &Stack) measure(ctx &RenderContext) SizeHint {
 	return r
 }
 
+// ScrollBox: см. комментарий внутри - вдоль оси прокрутки растягивается, поперёк подгоняется под содержимое.
 pub fn (s &ScrollBox) measure(ctx &RenderContext) SizeHint {
 	// Прокрутка по своей оси — expanding; поперёк —
 	// размер содержимого, чтобы не появлялась вторая полоса.
+	// cross_* - размер содержимого поперёк оси прокрутки (максимум по детям): по нему ScrollBox просит ширину/высоту, чтобы не появилась вторая полоса.
 	mut cross_pref := f32(0)
 	mut cross_min := f32(0)
 	for child in s.children {
@@ -643,6 +690,7 @@ pub fn (s &ScrollBox) measure(ctx &RenderContext) SizeHint {
 			cross_min = max_f32(cross_min, c.min_h)
 		}
 	}
+	// Константа 16 - ожидаемая толщина полосы прокрутки (дублирует значение отрисовки, не читается из неё).
 	sb := f32(16) // место под полосу прокрутки
 	if s.dir == .vertical {
 		return SizeHint{
@@ -662,6 +710,9 @@ pub fn (s &ScrollBox) measure(ctx &RenderContext) SizeHint {
 	}
 }
 
+// GridLayout: ширина колонки = максимум по ячейкам колонки, высота строки - по ячейкам строки;
+// сумма + промежутки (spacing_x/y) + pad. Ячейки вне сетки игнорируются. Растягивается по оси,
+// если у неё есть дорожка с положительным весом.
 pub fn (g &GridLayout) measure(ctx &RenderContext) SizeHint {
 	if g.cells.len == 0 {
 		return SizeHint{
@@ -740,6 +791,7 @@ pub fn (dz &DropZone) measure(ctx &RenderContext) SizeHint {
 	return scrollable_hint(sz.x + 32, sz.y + 32, max_f32(320, sz.x + 48), max_f32(160, sz.y + 48))
 }
 
+// Splitter, Calendar, ImageBackground: константные scrollable_hint без зависимости от содержимого.
 pub fn (sp &Splitter) measure(ctx &RenderContext) SizeHint {
 	return scrollable_hint(160, 100, 480, 320)
 }
@@ -753,6 +805,7 @@ pub fn (ib &ImageBackground) measure(ctx &RenderContext) SizeHint {
 }
 
 // Кнопки выбора даты и цвета - высотой стандартного контрола
+// DatePicker/ColorPicker: кнопки-поля фиксированной высоты (control_h); ширина по умолчанию 160/120.
 pub fn (dp &DatePicker) measure(ctx &RenderContext) SizeHint {
 	return SizeHint{
 		w:        160

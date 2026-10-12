@@ -12,6 +12,7 @@ import vgui.i18n
 pub const locale_en = 'en'
 pub const locale_ru = 'ru'
 
+// g_i18n_inited - встроенные словари (en/ru) уже загружены в каталог vgui.i18n; i18n_init() выполняется один раз. Только главный поток.
 __global g_i18n_inited = false
 
 // ─── Init (idempotent) ─────────────────────────────────
@@ -29,12 +30,14 @@ pub fn i18n_init() {
 	}
 }
 
+// i18n_init_with_locale - то же, что set_locale (оставлено для обратной совместимости).
 pub fn i18n_init_with_locale(locale string) {
 	set_locale(locale)
 }
 
 // ─── System locale detection ───────────────────────────
 
+// C-структура SDL_Locale (язык и страна) для разбора результата SDL_GetPreferredLocales.
 @[typedef]
 struct C.SDL_Locale {
 	language &char
@@ -75,16 +78,19 @@ pub fn detect_system_locale() string {
 
 // ─── Public API ────────────────────────────────────────
 
+// set_locale явно выбирает язык интерфейса (например 'ru') и инициализирует встроенные строки. После явного выбора язык системы больше не определяется.
 pub fn set_locale(locale string) {
 	i18n.set_locale(locale)
 	i18n_init()
 }
 
+// get_locale - текущий код языка.
 pub fn get_locale() string {
 	i18n_init()
 	return i18n.locale()
 }
 
+// set_fallback_locale - язык, на который падает tr, если на текущем нет перевода ключа.
 pub fn set_fallback_locale(locale string) {
 	i18n_init()
 	i18n.set_fallback(locale)
@@ -102,12 +108,14 @@ pub fn set_translation_loader(f i18n.Loader) {
 	i18n.set_loader(f)
 }
 
+// tr - перевод по ключу ('btn.ok') на текущий язык; нет перевода - запасной язык, затем сам ключ.
 pub fn tr(key string) string {
 	i18n_init()
 	return i18n.tr(key)
 }
 
 // Format with positional args: {0}, {1}, ...
+// trf - tr с подстановкой позиционных аргументов вместо {0}, {1}, ... (например 'Удалить файл «{0}»?').
 pub fn trf(key string, args ...string) string {
 	i18n_init()
 	return i18n.trf(key, ...args)
@@ -136,6 +144,7 @@ pub fn tr_in(locale string, key string) string {
 	return i18n.tr_in(locale, key)
 }
 
+// add_translation / add_translations - добавить свои переводы (приложение может расширять и переопределять встроенные строки vgui).
 pub fn add_translation(key string, locale string, value string) {
 	i18n.add_translation(key, locale, value)
 }
@@ -151,6 +160,9 @@ pub fn add_translations_json(locale string, text string) ! {
 
 // ─── Built-in dictionaries ─────────────────────────────
 
+// i18n_load_builtins - встроенные строки самой vgui на en и ru (ключи по префиксам: btn.* общие кнопки, fd.* файловый
+// диалог, dp.* календарь, cp.* выбор цвета, combo/table/imageview.* заглушки). Вызывается один раз из i18n_init.
+// Не все ключи реально используются кодом: см. отчёт - часть виджетов пока содержит захардкоженные тексты.
 fn i18n_load_builtins() {
 	i18n.add_translations('en', {
 		'btn.ok':                   'OK'

@@ -14,6 +14,9 @@ module vgui
 // convert between raw file bytes and V strings.
 // ═══════════════════════════════════════════════════════
 
+// TextEncoding - поддерживаемые кодировки текстовых файлов (используются редакторами текста при
+// открытии/сохранении файлов). Внутри библиотеки текст всегда UTF-8; кодировка нужна только на границе
+// «байты файла <-> строка V». Однобайтные кодировки описаны таблицами для байтов 0x80..0xFF ниже.
 pub enum TextEncoding {
 	utf8
 	latin1 // ISO 8859-1
@@ -23,6 +26,10 @@ pub enum TextEncoding {
 }
 
 // Parse encoding name string → enum
+// parse_encoding разбирает имя кодировки (регистр, пробелы, '-' и '_' игнорируются: 'Windows-1251',
+// 'win_1251' -> .cp1251). Неизвестное имя и пустая строка дают .utf8 (без ошибки).
+// Замечание: из-за предварительного удаления '-' варианты с дефисом в ветках match ('utf-8',
+// 'iso8859-1', 'koi8-r') недостижимы - срабатывают их бездефисные формы.
 pub fn parse_encoding(name string) TextEncoding {
 	n := name.to_lower().trim_space().replace('-', '').replace('_', '')
 	return match n {
@@ -35,6 +42,7 @@ pub fn parse_encoding(name string) TextEncoding {
 	}
 }
 
+// encoding_name - каноническое имя кодировки (обратное к parse_encoding), например .koi8r -> 'koi8-r'.
 pub fn encoding_name(enc TextEncoding) string {
 	return match enc {
 		.utf8 { 'utf-8' }
@@ -47,6 +55,9 @@ pub fn encoding_name(enc TextEncoding) string {
 
 // ─── Decode: raw bytes → UTF-8 string ──────────────────
 
+// decode_bytes превращает сырые байты файла в UTF-8 строку V. Для .utf8 байты берутся как есть (без
+// проверки на корректность UTF-8), но UTF-8 BOM (EF BB BF) в начале срезается. Для однобайтных
+// кодировок каждому байту сопоставляется символ по таблице. Пустой ввод даёт ''.
 pub fn decode_bytes(data []u8, enc TextEncoding) string {
 	if data.len == 0 {
 		return ''
@@ -62,6 +73,8 @@ pub fn decode_bytes(data []u8, enc TextEncoding) string {
 
 // ─── Encode: UTF-8 string → raw bytes ──────────────────
 
+// encode_string - обратное преобразование: UTF-8 строка -> байты кодировки. Символы, которых нет в
+// кодировке, заменяются на '?' (потеря данных без ошибки). BOM не добавляется. Пустой ввод даёт [].
 pub fn encode_string(text string, enc TextEncoding) []u8 {
 	if text.len == 0 {
 		return []
@@ -77,6 +90,7 @@ pub fn encode_string(text string, enc TextEncoding) []u8 {
 
 // ─── BOM handling ──────────────────────────────────────
 
+// strip_bom срезает UTF-8 BOM (EF BB BF) в начале строки, если он есть.
 fn strip_bom(s string) string {
 	if s.len >= 3 && s[0] == 0xEF && s[1] == 0xBB && s[2] == 0xBF {
 		return s[3..]
@@ -86,6 +100,10 @@ fn strip_bom(s string) string {
 
 // ─── Single-byte codec engine ──────────────────────────
 
+// decode_single_byte - декодер однобайтной кодировки. Байты < 0x80 (ASCII) совпадают во всех
+// поддерживаемых кодировках и копируются как есть; для остальных берётся table[b - 0x80]. Значение
+// 0xFFFD в таблице (байт не определён в кодировке, напр. 0x98 в cp1251) попадает в результат как символ
+// подстановки; индекс за пределами таблицы тоже даёт 0xFFFD.
 fn decode_single_byte(data []u8, table []rune) string {
 	mut result := []rune{cap: data.len}
 	for b in data {
@@ -103,6 +121,7 @@ fn decode_single_byte(data []u8, table []rune) string {
 	return result.string()
 }
 
+// encode_single_byte - обратный к decode_single_byte: ASCII как есть, остальное через карту reverse, неизвестное -> '?'.
 fn encode_single_byte(text string, reverse map[rune]u8) []u8 {
 	runes := text.runes()
 	mut result := []u8{cap: runes.len}
@@ -119,6 +138,9 @@ fn encode_single_byte(text string, reverse map[rune]u8) []u8 {
 
 // ─── Rune → byte reverse maps (built from tables) ─────
 
+// build_reverse строит обратную карту «символ -> байт» из таблицы декодирования. Позиции с 0xFFFD
+// пропускаются (это «дырки», а не настоящий символ). Если символ встречается дважды, побеждает
+// последний индекс.
 fn build_reverse(table []rune) map[rune]u8 {
 	mut m := map[rune]u8{}
 	for i, r in table {
@@ -134,6 +156,7 @@ fn build_reverse(table []rune) map[rune]u8 {
 // ═══════════════════════════════════════════════════════
 
 // Latin1 / ISO 8859-1: 0x80-0xFF maps directly to U+0080-U+00FF
+// Таблицы ниже - константы на всё время работы: *_table (байт 0x80+i -> символ) и *_reverse (символ -> байт), вычисляются при инициализации модуля.
 const latin1_table = build_latin1_table()
 
 fn build_latin1_table() []rune {
@@ -147,6 +170,7 @@ fn build_latin1_table() []rune {
 const latin1_reverse = build_reverse(latin1_table)
 
 // Windows-1251 (Cyrillic)
+// cp1251_table: 128 символов для байтов 0x80..0xFF, комментарии справа отмечают диапазоны по 8 байт; 0xFFFD - неопределённый байт 0x98.
 const cp1251_table = [
 	rune(0x0402),
 	rune(0x0403),
@@ -281,6 +305,7 @@ const cp1251_table = [
 const cp1251_reverse = build_reverse(cp1251_table)
 
 // Windows-1252 (Western European)
+// cp1252_table: 0xFFFD - неопределённые байты 0x81, 0x8D, 0x8F, 0x90, 0x9D. Дальше (0xA0..0xFF) совпадает с Latin-1.
 const cp1252_table = [
 	rune(0x20AC),
 	rune(0xFFFD),
@@ -415,6 +440,7 @@ const cp1252_table = [
 const cp1252_reverse = build_reverse(cp1252_table)
 
 // KOI8-R (Russian Cyrillic)
+// koi8r_table: псевдографика в 0x80..0xBF, кириллица в 0xC0..0xFF в «транслитерационном» порядке (юабцде...), поэтому не по алфавиту.
 const koi8r_table = [
 	rune(0x2500),
 	rune(0x2502),

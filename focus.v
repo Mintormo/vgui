@@ -1,5 +1,6 @@
 module vgui
 
+// FocusEntry - запись фокус-учёта: сырой указатель на виджет, его тип (по нему делается cast в match) и группа Tab-обхода.
 struct FocusEntry {
 mut:
 	ptr   voidptr
@@ -7,6 +8,9 @@ mut:
 	group int
 }
 
+// FocusKind - тип focusable-виджета в FocusManager. Каждому типу СВОЙ элемент: cast указателя «похожим» типом
+// даёт чтение чужих смещений (UB). Новому focusable-виджету нужны ветки во всех match ниже
+// (blur_current, focus_index, is_entry_available) и пара register_*/focus_*.
 pub enum FocusKind {
 	text_input
 	text_area
@@ -26,6 +30,10 @@ pub enum FocusKind {
 	canvas
 }
 
+// FocusManager - учёт фокуса одного окна (RenderContext.focus). Виджеты регистрируют себя сами при рисовании
+// (register_* в draw(): идемпотентно), порядок регистрации = порядок Tab-обхода. Хранит указатели, а не
+// владеет виджетами. current - ИНДЕКС в entries (-1 = фокуса нет), не указатель. Фокус внутри окна один.
+// Фокус-учёт не знает о родителях и контейнерах - только плоский список.
 pub struct FocusManager {
 pub mut:
 	entries []FocusEntry
@@ -39,6 +47,9 @@ pub mut:
 
 // ─── Регистрация (идемпотентная — дубликаты игнорируются) ───
 
+// register_ptr - единая точка регистрации: игнорирует nil и повторы (тот же указатель и тот же kind). Если адрес
+// уже зарегистрирован с другим kind - значит память освобождённого виджета отдана новому (ABA); старая запись
+// снимается и создаётся заново. group - независимые наборы для Tab (например, диалог и основное окно).
 fn (mut fm FocusManager) register_ptr(ptr voidptr, kind FocusKind, group int) {
 	if ptr == unsafe { nil } {
 		return
@@ -98,6 +109,9 @@ pub fn (mut fm FocusManager) unregister(ptr voidptr) {
 	}
 }
 
+// Пары register_<тип>(w, group) / focus_<тип>(w, group) - типизированные обёртки над register_ptr / focus_ptr
+// (ниже), чтобы вызывающий не приводил указатели вручную. register_ - только внести в Tab-цикл,
+// focus_ - внести (если ещё нет) и сразу сделать текущим.
 pub fn (mut fm FocusManager) register_text_input(ti &TextInput, group int) {
 	fm.register_ptr(unsafe { voidptr(ti) }, .text_input, group)
 }
@@ -169,6 +183,7 @@ pub fn (mut fm FocusManager) focus_slider(s &Slider, group int) {
 
 // ─── Фокус с авто-регистрацией ───
 
+// focus_ptr регистрирует виджет (если нужно) и делает его текущим через focus_index.
 fn (mut fm FocusManager) focus_ptr(ptr voidptr, kind FocusKind, group int) {
 	fm.register_ptr(ptr, kind, group)
 	for i, e in fm.entries {
@@ -245,6 +260,10 @@ pub fn (mut fm FocusManager) focus_canvas(cv &Canvas, group int) {
 
 // ─── Снять фокус ───
 
+// blur_current снимает фокус с текущего виджета: сбрасывает его focused и зависшие состояния (перетаскивание,
+// выделение, нажатость, открытые popup у ComboBox/MenuButton), затем current = -1. Для CheckBox,
+// RadioButton и ToggleSwitch сбрасывать нечего (их вид определяется через is_focused), поэтому ветки пустые.
+// Вызывается при смене фокуса, клике мимо и по Esc.
 pub fn (mut fm FocusManager) blur_current() {
 	if fm.current < 0 || fm.current >= fm.entries.len {
 		return
@@ -325,6 +344,9 @@ pub fn (mut fm FocusManager) blur_current() {
 
 // ─── Установить фокус по индексу ───
 
+// focus_index переносит фокус на запись idx: сперва blur_current() (старый виджет получает снятие), затем current = idx
+// и focused = true у нового. Для Button, MenuButton, CheckBox, RadioButton, ToggleSwitch поля focused нет -
+// их фокус определяется сравнением с current (is_focused).
 fn (mut fm FocusManager) focus_index(idx int) {
 	if idx < 0 || idx >= fm.entries.len {
 		return
@@ -387,6 +409,9 @@ fn (mut fm FocusManager) focus_index(idx int) {
 
 // ─── Tab / Shift+Tab ───
 
+// tab - Tab / Shift+Tab (reverse). Обходит только записи ГРУППЫ текущего фокуса (при отсутствии фокуса - группы 0),
+// пропуская невидимые и disabled (is_entry_available). Цикл замкнут; если фокуса нет - берётся первая
+// (последняя при reverse) доступная запись.
 pub fn (mut fm FocusManager) tab(reverse bool) {
 	if fm.entries.len == 0 {
 		return
@@ -433,6 +458,7 @@ pub fn (mut fm FocusManager) tab(reverse bool) {
 
 // ─── Проверки ───
 
+// is_entry_available - виджет участвует в Tab-обходе: visible && enabled. Читает поля через cast по e.kind.
 fn (fm &FocusManager) is_entry_available(e FocusEntry) bool {
 	match e.kind {
 		.text_input {
@@ -529,6 +555,7 @@ pub fn (fm &FocusManager) wants_text() bool {
 	}
 }
 
+// is_focused - этот виджет (по адресу) сейчас в фокусе. Виджеты вызывают его в draw() для синхронизации собственного флага focused.
 pub fn (fm &FocusManager) is_focused(ptr voidptr) bool {
 	if fm.current < 0 || fm.current >= fm.entries.len {
 		return false

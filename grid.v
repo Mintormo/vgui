@@ -5,12 +5,13 @@ module vgui
 // колонок. Каждая ячейка задается явно (row, col) и
 // может занимать несколько строк/колонок (span).
 //
-// Колонки:
+// Колонки (приоритет определения размера - в описании GridLayout ниже):
 //   - col_widths[i] > 0 — фиксированная ширина в px
 //   - col_widths[i] == 0 — flex, делится по col_weights[i]
 // Аналогично для строк.
 // ═══════════════════════════════════════════════════════
 
+// GridCell - ребёнок в сетке: адрес ячейки (row, col от 0) и размах row_span x col_span (>= 1). Один виджет - одна ячейка; перекрытия ячеек не проверяются.
 pub struct GridCell {
 pub mut:
 	widget   &Widget
@@ -20,6 +21,12 @@ pub mut:
 	col_span int = 1
 }
 
+// GridLayout - сетка cols x rows. Ширину каждой колонки (высоту строки) определяет, по приоритету:
+// фиксированное значение col_widths[i] > 0, иначе размер по содержимому (col_auto[i], по умолчанию для всех -
+// самый широкий ребёнок по measure()), иначе доля свободного места по col_weights[i]. Публичных сеттеров
+// для фиксированных размеров нет (col_widths / row_heights меняются только прямой записью в поле).
+// Bounds детям раздаются в arrange() (layout), draw() только рисует. Если bounds не заданы родителем -
+// сетка занимает весь экран окна (is_bounds_unset).
 pub struct GridLayout {
 pub mut:
 	type_tag    int = kind_grid // тег типа, см. widget_tag.v
@@ -44,6 +51,7 @@ pub mut:
 	clip         bool = true
 }
 
+// create_grid создаёт сетку; cols и rows меньше 1 заменяются на 1. Все дорожки изначально авто-размера (по содержимому), без весов.
 pub fn create_grid(cols int, rows int) &GridLayout {
 	c := if cols < 1 { 1 } else { cols }
 	r := if rows < 1 { 1 } else { rows }
@@ -63,6 +71,7 @@ pub fn create_grid(cols int, rows int) &GridLayout {
 	return g
 }
 
+// set_cols / set_rows меняют число дорожек и СБРАСЫВАЮТ размеры, веса и авто-режим этого направления в значения по умолчанию. Уже добавленные ячейки не переносятся; ячейки вне сетки при раскладке пропускаются.
 pub fn (mut g GridLayout) set_cols(cols int) {
 	c := if cols < 1 { 1 } else { cols }
 	g.cols = c
@@ -83,6 +92,7 @@ pub fn (mut g GridLayout) add(widget &Widget, row int, col int) {
 	g.add_span(widget, row, col, 1, 1)
 }
 
+// add_span - ячейка с объединением: span меньше 1 приводится к 1; выход за край сетки обрезается при раскладке.
 pub fn (mut g GridLayout) add_span(widget &Widget, row int, col int, row_span int, col_span int) {
 	rs := if row_span < 1 { 1 } else { row_span }
 	cs := if col_span < 1 { 1 } else { col_span }
@@ -152,6 +162,9 @@ pub fn (mut g GridLayout) set_panel_bg() {
 
 // ── Layout engine ──────────────────────────────────────
 
+// distribute_sizes - размеры count дорожек вдоль оси длиной total: дорожки с fixed[i] > 0 получают это значение,
+// остальное место (минус промежутки) делится между остальными пропорционально weights[i]. Дорожка без
+// размера и без веса получает 0. Если места не хватает (avail < 0) - вес-дорожки схлопываются в 0, фиксированные не сжимаются.
 fn distribute_sizes(total f32, spacing f32, count int, fixed []f32, weights []f32) []f32 {
 	if count <= 0 {
 		return []f32{}
@@ -214,6 +227,9 @@ fn (g &GridLayout) auto_track_sizes(ctx &RenderContext, vertical bool) []f32 {
 	return out
 }
 
+// layout - фаза arrange для ячеек: (1) размеры дорожек (авто -> по measure, остальное по весам),
+// (2) накопленные смещения колонок/строк с учётом spacing, (3) каждой ячейке прямоугольник от левого верхнего
+// угла её первой дорожки с суммой размеров занятых дорожек и промежутков между ними.
 fn (mut g GridLayout) layout(ctx &RenderContext) {
 	if g.cells.len == 0 || g.cols < 1 || g.rows < 1 {
 		return
@@ -264,6 +280,7 @@ fn (mut g GridLayout) layout(ctx &RenderContext) {
 	}
 }
 
+// arrange: bounds по умолчанию - весь экран; раздаёт bounds ячейкам и рекурсивно спускается в их поддеревья.
 pub fn (mut g GridLayout) arrange(mut ctx RenderContext) {
 	if !g.visible {
 		return
@@ -298,6 +315,7 @@ pub fn (mut g GridLayout) draw(mut ctx RenderContext) {
 	}
 }
 
+// handle_event: ячейки получают событие с конца списка (последняя добавленная - сверху); при window_resize корневая сетка подгоняет размер под окно.
 pub fn (mut g GridLayout) handle_event(event &GuiEvent, app &App) bool {
 	if !g.visible {
 		return false

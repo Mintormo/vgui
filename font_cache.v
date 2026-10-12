@@ -15,6 +15,7 @@ module vgui
 // Stored as voidptr to allow mutable access without V ownership issues.
 // ═══════════════════════════════════════════════════════
 
+// g_font_cache: ключ font_cache_key(cfg) -> указатель на общий FontSet (&FontSet, хранится как voidptr). __global не виден из _test.v - тесты ходят через font_cache_* ниже. Только главный поток, без блокировок (инвариант проекта).
 __global g_font_cache = map[string]voidptr{}
 
 // font_data_hash is FNV-1a over the bytes (0 for "no embedded data").
@@ -32,6 +33,9 @@ fn font_data_hash(data []u8) u64 {
 	return h
 }
 
+// font_cache_key - строка-ключ набора шрифтов: пути, размеры и пары «длина:хэш» для встроенных байтов каждого
+// начертания. Пути и размеры сравниваются дословно; хэш может теоретически столкнуться - это проверяет
+// same_font_data при поиске.
 fn font_cache_key(cfg FontConfig) string {
 	dh := font_data_hash(cfg.font_data)
 	bh := font_data_hash(cfg.bold_data)
@@ -42,6 +46,9 @@ fn font_cache_key(cfg FontConfig) string {
 	return '${cfg.regular_path}|${cfg.bold_path}|${cfg.italic_path}|${cfg.bold_italic_path}|${cfg.mono_path}|${cfg.mono_bold_path}|${cfg.size}|${cfg.mono_size}|${cfg.font_data.len}:${dh}|${cfg.bold_data.len}:${bh}|${cfg.italic_data.len}:${ih}|${cfg.bold_italic_data.len}:${bih}|${cfg.mono_data.len}:${mh}|${cfg.mono_bold_data.len}:${mbh}'
 }
 
+// FontConfig - что загружать: пути к TTF (regular/bold/italic/bold_italic и моно-пара) ИЛИ встроенные байты
+// (*_data) - вместо путей. size/mono_size - базовые размеры в логических пикселях. Пустой путь и пустые
+// данные - начертание не задано (разбор значений по умолчанию - в RenderContext.init_fonts).
 @[params]
 pub struct FontConfig {
 pub mut:
@@ -139,6 +146,8 @@ fn release_fonts(fs_ptr voidptr) {
 
 // close_font_set closes every TTF font owned by the set (base styles and the
 // per-size variants opened lazily by RenderContext.get_font).
+// close_font_set закрывает все TTF_Font набора и обнуляет поля, чтобы повторный вызов (например, destroy_font_cache
+// после release_fonts) не закрыл шрифт дважды. size_cache - ленивые варианты по размеру из get_font.
 fn close_font_set(mut fs FontSet) {
 	if unsafe { fs.regular != nil } { C.TTF_CloseFont(fs.regular) }
 	if unsafe { fs.bold != nil } { C.TTF_CloseFont(fs.bold) }

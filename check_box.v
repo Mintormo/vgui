@@ -1,5 +1,21 @@
 module vgui
 
+// ═══════════════════════════════════════════════════════
+// CheckBox - флажок с подписью (kind_check_box).
+//
+// Связи с остальной библиотекой:
+//   - фокус: в draw() регистрируется в ctx.focus (register_checkbox) с
+//     focus_group, поэтому Tab обходит флажки в порядке отрисовки (focus.v);
+//   - события: клик срабатывает по отпусканию кнопки (PROJECT.md, "Клик
+//     срабатывает по отпусканию"), клавиши Space/Enter переключают при фокусе;
+//   - анимации: фокус-кольцо и галочка идут через Anim (anim.v), кадр просится
+//     точечно - mark_anim_rect по bounds, чтобы не перерисовывать всё окно;
+//   - раскладка: bounds выставляет контейнер (Layouted в widget_tree.v).
+// ═══════════════════════════════════════════════════════
+
+// CheckBox - флажок. checked меняет toggle()/set_checked(); on_change зовётся
+// только из toggle() (то есть по действию пользователя), set_checked() колбэк
+// не вызывает.
 @[heap]
 pub struct CheckBox {
 pub mut:
@@ -19,6 +35,7 @@ pub mut:
 	on_change   fn (bool) = unsafe { nil }
 }
 
+// checkbox создаёт флажок с подписью text (изначально снят, включён, виден).
 pub fn checkbox(text string) &CheckBox {
 	return &CheckBox{
 		text: text
@@ -29,10 +46,13 @@ pub fn (cb &CheckBox) is_checked() bool {
 	return cb.checked
 }
 
+// set_checked выставляет состояние программно: on_change НЕ вызывается,
+// кадр не инвалидируется (в своём цикле звать Window.invalidate*).
 pub fn (mut cb CheckBox) set_checked(v bool) {
 	cb.checked = v
 }
 
+// toggle инвертирует флажок и вызывает on_change(новое_значение), если он задан.
 pub fn (mut cb CheckBox) toggle() {
 	cb.checked = !cb.checked
 	if cb.on_change != unsafe { nil } {
@@ -40,11 +60,16 @@ pub fn (mut cb CheckBox) toggle() {
 	}
 }
 
+// box_rect - квадрат самого флажка: прижат к левому краю bounds (отступ 2 px)
+// и центрирован по вертикали; подпись рисуется правее него.
 fn (cb &CheckBox) box_rect() Rect {
 	cy := cb.bounds.y + (cb.bounds.h - cb.box_size) * 0.5
 	return Rect{cb.bounds.x + 2, cy, cb.box_size, cb.box_size}
 }
 
+// draw рисует флажок: регистрация в фокус-учёте, шаг анимаций фокуса и
+// галочки, фон (с подмешиванием hover-цвета), рамка, фокус-кольцо, галочка
+// из двух линий (размер пропорционален check_anim.value - "вырастает"), текст.
 pub fn (mut cb CheckBox) draw(mut ctx RenderContext) {
 	if !cb.visible {
 		return
@@ -74,6 +99,8 @@ pub fn (mut cb CheckBox) draw(mut ctx RenderContext) {
 	br := cb.box_rect()
 	rad := max_f32(ctx.theme.border_radius * 0.5, 3)
 
+	// Порог 0.5 по check_anim.value: цвет фона/рамки переключается на "включён"
+	// на середине анимации галочки, а не мгновенно при смене checked.
 	bg := if !cb.enabled {
 		ctx.theme.button_disabled_bg
 	} else if cb.check_anim.value > 0.5 {
@@ -122,6 +149,10 @@ pub fn (mut cb CheckBox) draw(mut ctx RenderContext) {
 	}
 }
 
+// handle_event обрабатывает мышь и клавиатуру. Возвращает true, если событие
+// поглощено. mouse_move только обновляет hovered (и отменяет нажатие при уходе
+// курсора); mouse_down фокусирует и взводит pressed; mouse_up над виджетом
+// переключает; Tab двигает фокус; Space/Enter переключают, если флажок в фокусе.
 pub fn (mut cb CheckBox) handle_event(event &GuiEvent, app &App) bool {
 	if !cb.visible || !cb.enabled {
 		return false

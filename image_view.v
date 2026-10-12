@@ -1,6 +1,19 @@
 module vgui
 
 // ═══════════════════════════════════════════════════════
+// ImageView - виджет показа растровой картинки из файла (путь в path).
+// Файл содержит: перечисление режимов ImageMode, структуру ImageView (состояние зума/прокрутки/
+// перетаскивания и кэш SDL-текстуры), конструкторы, публичный API зума, геометрию (вьюпорт,
+// полосы прокрутки, прямоугольник вывода), draw() и handle_event().
+//
+// Связи с остальной библиотекой:
+//   * раскладка: measure() - в layout_measure.v (константный scrollable_hint), bounds раздаёт
+//     контейнер; Layouted - widget_tree.v;
+//   * загрузка: файл читается лениво при первой отрисовке (ensure_texture_loaded) через IMG_Load
+//     и превращается в SDL-текстуру текущего renderer'а; время жизни текстуры привязано к
+//     renderer'у (PROJECT.md, «Время жизни SDL-текстур»);
+//   * фокуса и оверлеев нет; события клавиатуры принимаются только при наведении мыши.
+// Описание режимов и жестов (ниже, на английском - оставлено как есть):
 // ImageView — image display widget
 //
 // Display modes:
@@ -10,6 +23,8 @@ module vgui
 //   .native  — original size with scrollbars
 //   .zoom    — user-controlled zoom + pan + scrollbars
 //
+// (Замечание: загрузка идёт через C.IMG_Load, как и в canvas.v; название «SDL2_image» ниже,
+// возможно, устарело - проект на SDL3.)
 // Supported formats (via SDL2_image):
 //   PNG, JPG/JPEG, BMP, TIF/TIFF, WEBP, GIF (first frame), SVG (static)
 //
@@ -24,6 +39,7 @@ module vgui
 //   - Scrollbar drag
 // ═══════════════════════════════════════════════════════
 
+// Режим подгонки картинки под bounds (описание режимов - в шапке файла).
 pub enum ImageMode {
 	fit
 	fill
@@ -32,10 +48,15 @@ pub enum ImageMode {
 	zoom
 }
 
+// Толщина полос прокрутки, минимальный и максимальный зум (1.0 = 100%).
 const iv_sb_w = f32(12)
 const iv_min_zoom = f32(0.05)
 const iv_max_zoom = f32(20.0)
 
+// ImageView: поля состояния сгруппированы - вид (path/mode/цвета), зум и прокрутка, перетаскивание
+// (pan_* - панорамирование средней/правой кнопкой, vsb_*/hsb_* - перетаскивание бегунков полос),
+// кэш текстуры (texture/tex_*), скорости (scroll_speed - px на шаг прокрутки, zoom_speed - доля
+// приращения зума на шаг колеса). scroll_x/scroll_y - смещение в пикселях УЖЕ отмасштабированной картинки.
 @[heap]
 pub struct ImageView {
 pub mut:
@@ -94,6 +115,7 @@ pub mut:
 
 // ─── Constructors ──────────────────────────────────────
 
+// Конструкторы: пустой виджет, виджет с файлом (режим .fit) и с файлом и режимом.
 pub fn image_view() &ImageView {
 	return &ImageView{}
 }
@@ -113,6 +135,8 @@ pub fn image_view_with_mode(path string, mode ImageMode) &ImageView {
 
 // ─── Public API ────────────────────────────────────────
 
+// set_path меняет файл; при смене сбрасывает зум и прокрутку. Саму текстуру подменит
+// ensure_texture_loaded при следующей отрисовке (сравнивает path с tex_path).
 pub fn (mut iv ImageView) set_path(path string) {
 	if iv.path != path {
 		iv.path = path
@@ -122,6 +146,7 @@ pub fn (mut iv ImageView) set_path(path string) {
 	}
 }
 
+// set_mode переключает режим и сбрасывает прокрутку; зум сохраняется только для .zoom/.native.
 pub fn (mut iv ImageView) set_mode(mode ImageMode) {
 	iv.mode = mode
 	iv.scroll_x = 0
@@ -135,10 +160,13 @@ pub fn (iv &ImageView) get_zoom() f32 {
 	return iv.zoom
 }
 
+// set_zoom задаёт зум (1.0 = 100%), зажатый в [iv_min_zoom, iv_max_zoom]. Режим не меняет:
+// видим результат только в режиме .zoom. Кадр не инвалидирует - в своём цикле зовите Window.invalidate*.
 pub fn (mut iv ImageView) set_zoom(z f32) {
 	iv.zoom = clamp_f32(z, iv_min_zoom, iv_max_zoom)
 }
 
+// zoom_in/zoom_out - шаг зума на zoom_speed (мультипликативный, чтобы шаги были симметричны).
 pub fn (mut iv ImageView) zoom_in() {
 	iv.set_zoom(iv.zoom * (1.0 + iv.zoom_speed))
 }
@@ -147,18 +175,26 @@ pub fn (mut iv ImageView) zoom_out() {
 	iv.set_zoom(iv.zoom / (1.0 + iv.zoom_speed))
 }
 
+// reset_zoom - 100% и прокрутка в начало.
 pub fn (mut iv ImageView) reset_zoom() {
 	iv.zoom = 1.0
 	iv.scroll_x = 0
 	iv.scroll_y = 0
 }
 
+// image_size - размер исходной картинки в пикселях; (0, 0), пока текстура не загружена или файл не открылся.
 pub fn (iv &ImageView) image_size() (int, int) {
 	return iv.tex_w, iv.tex_h
 }
 
 // ─── Texture management ────────────────────────────────
 
+// ensure_texture_loaded лениво загружает файл в текстуру текущего renderer'а.
+// Ничего не делает, если путь пуст или текстура уже загружена для этого пути. При смене пути
+// старая текстура уничтожается - но только если её renderer ещё жив (иначе SDL уже освободил её
+// вместе с renderer'ом, и повторный SDL_DestroyTexture - двойное освобождение).
+// Ошибка загрузки (IMG_Load/CreateTexture вернули nil) не выбрасывается: tex_path запоминается,
+// чтобы не пытаться читать битый файл каждый кадр, а draw() покажет «Failed to load».
 fn (mut iv ImageView) ensure_texture_loaded(ctx &RenderContext) {
 	if iv.path.len == 0 {
 		return
@@ -179,6 +215,8 @@ fn (mut iv ImageView) ensure_texture_loaded(ctx &RenderContext) {
 	iv.tex_w = 0
 	iv.tex_h = 0
 
+	// // Surface (память CPU) нужен только чтобы создать текстуру; сразу освобождаем.
+	// // Размер берём у текстуры (float в SDL3), а не у surface.
 	surface := C.IMG_Load(iv.path.str)
 	if unsafe { surface == nil } {
 		iv.tex_path = iv.path
@@ -201,10 +239,12 @@ fn (mut iv ImageView) ensure_texture_loaded(ctx &RenderContext) {
 
 	iv.texture = texture
 	iv.tex_renderer = ctx.renderer
+	// Запоминаем (renderer, поколение): одного указателя мало, новый renderer может получить адрес умершего (ABA).
 	iv.tex_renderer_gen = renderer_generation(ctx.renderer)
 	iv.tex_path = iv.path
 }
 
+// destroy_texture освобождает текстуру (идемпотентно); зовётся при уничтожении виджета/окна. Ниже - почему проверяется жизнь renderer'а.
 pub fn (mut iv ImageView) destroy_texture() {
 	if unsafe { iv.texture != nil } {
 		// Only free if the owning renderer is still alive. If the window/renderer
@@ -224,16 +264,21 @@ pub fn (mut iv ImageView) destroy_texture() {
 
 // ─── Geometry ──────────────────────────────────────────
 
+// has_texture - есть ли пригодная к рисованию текстура (не nil и ненулевой размер).
 fn (iv &ImageView) has_texture() bool {
 	return unsafe { iv.texture != nil } && iv.tex_w > 0 && iv.tex_h > 0
 }
 
 // Inner rect (bounds minus padding)
+// Внутренний прямоугольник: bounds без pad.
 fn (iv &ImageView) inner_rect() Rect {
 	return iv.bounds.shrunk(iv.pad)
 }
 
 // Effective zoom taking mode into account
+// effective_zoom - реальный масштаб при текущем режиме: .fit - по меньшей стороне (вписать),
+// .fill - по большей (закрыть всё, лишнее обрезается), .native - 1.0, .zoom - поле zoom.
+// Для .stretch не используется (масштаб по осям разный, см. displayed_size).
 fn (iv &ImageView) effective_zoom() f32 {
 	if !iv.has_texture() {
 		return 1.0
@@ -263,6 +308,7 @@ fn (iv &ImageView) effective_zoom() f32 {
 }
 
 // Displayed image size (scaled)
+// displayed_size - размер картинки на экране после масштабирования (для .stretch - ровно inner).
 fn (iv &ImageView) displayed_size() (f32, f32) {
 	if !iv.has_texture() {
 		return 0, 0
@@ -275,6 +321,9 @@ fn (iv &ImageView) displayed_size() (f32, f32) {
 	return f32(iv.tex_w) * z, f32(iv.tex_h) * z
 }
 
+// needs_scrollbars - (горизонтальная, вертикальная): полосы нужны только в .native/.zoom и когда
+// картинка больше внутренней области. Проверка идёт по inner, а не по viewport, поэтому появление
+// одной полосы не убирает другую (viewport сам уменьшается на толщину видимой полосы).
 fn (iv &ImageView) needs_scrollbars() (bool, bool) {
 	if !iv.has_texture() {
 		return false, false
@@ -289,6 +338,7 @@ fn (iv &ImageView) needs_scrollbars() (bool, bool) {
 	return h_sb, v_sb
 }
 
+// viewport - область, где реально рисуется картинка: inner минус место под видимые полосы прокрутки.
 fn (iv &ImageView) viewport() Rect {
 	inner := iv.inner_rect()
 	h_sb, v_sb := iv.needs_scrollbars()
@@ -303,6 +353,7 @@ fn (iv &ImageView) viewport() Rect {
 	return Rect{inner.x, inner.y, max_f32(w, 0), max_f32(h, 0)}
 }
 
+// max_scroll - максимальные scroll_x/scroll_y: на сколько картинка шире/выше вьюпорта (не меньше 0).
 fn (iv &ImageView) max_scroll() (f32, f32) {
 	dw, dh := iv.displayed_size()
 	vp := iv.viewport()
@@ -310,6 +361,8 @@ fn (iv &ImageView) max_scroll() (f32, f32) {
 }
 
 // Scrollbar geometry
+// Геометрия полос: (дорожка, бегунок). Если полоса не нужна - два пустых Rect.
+// Длина бегунка пропорциональна доле видимой части (но не меньше 20 px), позиция - доле прокрутки.
 fn (iv &ImageView) vsb_rects() (Rect, Rect) {
 	_, dh := iv.displayed_size()
 	vp := iv.viewport()
@@ -360,6 +413,7 @@ fn (iv &ImageView) hsb_rects() (Rect, Rect) {
 	return track, thumb
 }
 
+// clamp_scroll держит прокрутку в допустимых пределах; зовётся после любого изменения зума, режима или размера.
 fn (mut iv ImageView) clamp_scroll() {
 	ms_x, ms_y := iv.max_scroll()
 	iv.scroll_x = clamp_f32(iv.scroll_x, 0, ms_x)
@@ -367,6 +421,9 @@ fn (mut iv ImageView) clamp_scroll() {
 }
 
 // Destination rect for drawing the image
+// image_draw_rect - куда рисовать картинку. Режимы .fit/.fill/.stretch: по центру вьюпорта
+// (у .fill выступающие края обрежет clip). .native/.zoom: прижата к левому верхнему углу
+// со сдвигом на прокрутку, а по оси, где картинка меньше вьюпорта, - центрируется.
 fn (iv &ImageView) image_draw_rect() Rect {
 	dw, dh := iv.displayed_size()
 	vp := iv.viewport()
@@ -395,6 +452,10 @@ fn (iv &ImageView) image_draw_rect() Rect {
 
 // ─── Drawing ───────────────────────────────────────────
 
+// draw: подгружает текстуру при необходимости, фон и рамка (цвета из темы, если свои не заданы),
+// затем либо заглушка («(no image)» / «Failed to load»), либо текстура, обрезанная вьюпортом,
+// и полосы прокрутки. Побочный эффект - clamp_scroll() каждый кадр, чтобы смена размера окна
+// не оставила прокрутку за пределами.
 pub fn (mut iv ImageView) draw(mut ctx RenderContext) {
 	if !iv.visible {
 		return
@@ -484,6 +545,12 @@ pub fn (mut iv ImageView) draw(mut ctx RenderContext) {
 
 // ─── Events ────────────────────────────────────────────
 
+// handle_event: возвращает true, если событие поглощено. Приоритет (важен порядок блоков):
+//   1. идёт панорамирование (panning) - забирает все события до отпускания средней/правой кнопки;
+//   2. идёт перетаскивание вертикального / 3. горизонтального бегунка - то же для левой кнопки;
+//   4. иначе обычная обработка: hover, двойной клик (on_dbl_click), нажатия (бегунки, панорама),
+//      колесо (зум/горизонтальная прокрутка), стрелки и Ctrl+/-/0.
+// Сдвиг бегунка пересчитывается в прокрутку через отношение max_scroll / длина хода бегунка.
 pub fn (mut iv ImageView) handle_event(event &GuiEvent, app &App) bool {
 	if !iv.visible || !iv.enabled {
 		return false

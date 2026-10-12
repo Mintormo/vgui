@@ -38,13 +38,30 @@ module vgui
 //       child:
 //         type: label
 //         text: Hello
+//
+// Устройство:
+//   - Accordion - контейнер без указателя на родителя; секции держит в
+//     sections (виджет секции - &Widget).
+//   - Раскрытие анимируется: у секции Anim `anim` (0 - свёрнута, 1 - развёрнута).
+//     Шаг анимации делается в arrange() (а не в draw()), потому что от высоты
+//     секций зависят bounds детей (PROJECT.md, "Фаза arrange").
+//   - Высота содержимого секции: по умолчанию - "всё свободное место"
+//     (section_child_height), при fit_content - по measure() содержимого
+//     (PROJECT.md, "Accordion: высота секции по содержимому").
+//   - Дочерние виджеты получают bounds ПОЛНОЙ высоты, а видимую часть
+//     обрезает клип в draw() - так раскладка ребёнка не "дёргается" во время
+//     анимации.
 // ═══════════════════════════════════════════════════════
 
+// AccordionMode - режим раскрытия секций.
 pub enum AccordionMode {
 	single   // only one section open at a time
 	multiple // any number of sections can be open
 }
 
+// AccordionSection - одна секция: заголовок + дочерний виджет.
+// Хранится по значению в Accordion.sections (копии при `sec := a.sections[i]`
+// независимы, но widget - общий указатель).
 struct AccordionSection {
 mut:
 	title    string
@@ -60,6 +77,9 @@ mut:
 	content_h f32
 }
 
+// Accordion - контейнер раскрывающихся секций. Цвета с альфой 0 означают
+// "взять из темы" (см. eff_* ниже). scroll_y - собственная прокрутка колесом
+// (не используется при fit_content, там прокручивает внешний ScrollBox).
 @[heap]
 pub struct Accordion {
 pub mut:
@@ -104,16 +124,19 @@ pub mut:
 
 // ─── Constructors ──────────────────────────────────────
 
+// accordion создаёт аккордеон в режиме .single (режим по умолчанию).
 pub fn accordion() &Accordion {
 	return &Accordion{}
 }
 
+// accordion_single - одновременно открыта максимум одна секция.
 pub fn accordion_single() &Accordion {
 	return &Accordion{
 		mode: .single
 	}
 }
 
+// accordion_multi - секции раскрываются независимо.
 pub fn accordion_multi() &Accordion {
 	return &Accordion{
 		mode: .multiple
@@ -122,6 +145,8 @@ pub fn accordion_multi() &Accordion {
 
 // ─── Public API ────────────────────────────────────────
 
+// add_section добавляет свёрнутую секцию. Ссылку на widget аккордеон хранит
+// сам; владелец (Python-слой) обязан держать ребёнка живым.
 pub fn (mut a Accordion) add_section(title string, widget &Widget) {
 	a.sections << AccordionSection{
 		title:  title
@@ -129,6 +154,9 @@ pub fn (mut a Accordion) add_section(title string, widget &Widget) {
 	}
 }
 
+// add_section_expanded добавляет секцию сразу раскрытой; в режиме .single
+// предварительно сворачивает остальные. Anim новой секции стартует с 0,
+// поэтому она "выезжает" анимацией.
 pub fn (mut a Accordion) add_section_expanded(title string, widget &Widget) {
 	// In single mode, collapse others first
 	if a.mode == .single {
@@ -154,6 +182,8 @@ pub fn (a &Accordion) is_expanded(idx int) bool {
 	return false
 }
 
+// set_expanded раскрывает/сворачивает секцию программно (on_change НЕ зовётся).
+// В .single раскрытие секции сворачивает остальные; индекс вне диапазона игнорируется.
 pub fn (mut a Accordion) set_expanded(idx int, val bool) {
 	if idx < 0 || idx >= a.sections.len {
 		return
@@ -167,6 +197,9 @@ pub fn (mut a Accordion) set_expanded(idx int, val bool) {
 	}
 }
 
+// toggle_section переключает секцию как по клику на заголовок и зовёт
+// on_change(idx, expanded). В .single повторный клик по открытой секции
+// сворачивает её (открытых секций может стать 0).
 pub fn (mut a Accordion) toggle_section(idx int) {
 	if idx < 0 || idx >= a.sections.len {
 		return
@@ -187,6 +220,7 @@ pub fn (mut a Accordion) toggle_section(idx int) {
 	}
 }
 
+// expand_all раскрывает все секции (в .single ничего не делает); on_change не зовёт.
 pub fn (mut a Accordion) expand_all() {
 	if a.mode == .single {
 		return
@@ -197,6 +231,7 @@ pub fn (mut a Accordion) expand_all() {
 	}
 }
 
+// collapse_all сворачивает все секции; on_change не зовёт.
 pub fn (mut a Accordion) collapse_all() {
 	for i in 0 .. a.sections.len {
 		a.sections[i].expanded = false
@@ -224,6 +259,9 @@ fn (a &Accordion) total_content_height() f32 {
 	return h
 }
 
+// section_child_height - высота содержимого секции в режиме "всё свободное
+// место": высота bounds минус заголовки, отступы и промежутки. Если остаток
+// меньше 20 px, берётся запасное значение 60 (чтобы секция не схлопнулась).
 fn (a &Accordion) section_child_height() f32 {
 	// Use a fixed portion of available space per section, or the bounds height minus headers
 	total_headers := f32(a.sections.len) * a.header_height + f32(a.sections.len - 1) * a.spacing +
@@ -285,6 +323,9 @@ fn (a &Accordion) max_scroll() f32 {
 	return max_f32(0, a.total_content_height() - a.bounds.h)
 }
 
+// hit_header - индекс секции, чей ЗАГОЛОВОК лежит под точкой (mx, my), или -1.
+// Идёт по секциям сверху вниз, накапливая y так же, как draw() (с учётом
+// анимированной высоты содержимого и scroll_y).
 fn (a &Accordion) hit_header(mx f32, my f32) int {
 	inner := a.bounds.shrunk(a.pad)
 	mut y := inner.y - a.scroll_y
@@ -304,6 +345,7 @@ fn (a &Accordion) hit_header(mx f32, my f32) int {
 
 // ─── Effective colors ──────────────────────────────────
 
+// eff_*: свой цвет виджета (если альфа > 0), иначе цвет из темы.
 fn (a &Accordion) eff_header_bg(ctx &RenderContext) Color {
 	if a.header_bg.a > 0 {
 		return a.header_bg
@@ -394,6 +436,11 @@ pub fn (mut a Accordion) arrange(mut ctx RenderContext) {
 	}
 }
 
+// draw рисует заголовки (фон с hover, нижняя линия, треугольник-стрелка,
+// название) и содержимое раскрытых секций. Содержимое рисуется под клипом
+// content_r, высота которого равна анимированной доле полной высоты ребёнка.
+// Секции целиком выше/ниже видимой области пропускаются. bounds детей здесь
+// НЕ выставляются - это сделал arrange().
 pub fn (mut a Accordion) draw(mut ctx RenderContext) {
 	if !a.visible || a.sections.len == 0 {
 		return
@@ -510,6 +557,10 @@ pub fn (mut a Accordion) draw(mut ctx RenderContext) {
 
 // ─── Events ────────────────────────────────────────────
 
+// handle_event: hover по заголовкам, клик по заголовку (toggle_section),
+// колесо (собственная прокрутка, если wheel). События, не поглощённые самим
+// аккордеоном, отдаются детям раскрытых секций (anim > 0.5, т.е. уже
+// практически развёрнутых). Порядок: сначала собственная обработка, потом дети.
 pub fn (mut a Accordion) handle_event(event &GuiEvent, app &App) bool {
 	if !a.visible || !a.enabled || a.sections.len == 0 {
 		return false

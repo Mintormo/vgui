@@ -82,11 +82,14 @@ pub fn (mut ctx RenderContext) draw_icon_glyph(codepoint u32, bounds Rect, size 
 	if unsafe { font == nil } {
 		return
 	}
+	// Шаги: (1) получить шрифт нужного физического размера; (2) найти в text_cache текстуру глифа или отрендерить её
+	// через TTF_RenderText_Blended; (3) разместить по центру bounds с привязкой к физическим пикселям.
 	text := rune(codepoint).str()
 
 	key := text_cache_key(text, size, icon_style_tag, c)
 	ctx.cache_tick++
 
+	// Ключ кэша содержит хэш, поэтому запись проверяется по полному совпадению text/размер/стиль/цвет - при коллизии текстура пересоздаётся (инвариант кэша текста).
 	cached := ctx.text_cache[key] or {
 		TextCacheEntry{
 			texture: unsafe { nil }
@@ -157,6 +160,7 @@ pub fn (mut ctx RenderContext) draw_icon_glyph(codepoint u32, bounds Rect, size 
 		}
 	}
 
+	// Позиция округляется до целого ФИЗИЧЕСКОГО пикселя (s - физических на логический): иначе при дробном ui_scale глиф расплывается/мерцает (см. привязку текста к физическим пикселям).
 	s := ctx.dpi_scale * ctx.ui_scale
 	inv_s := if s > 0 { f32(1.0) / s } else { f32(1.0) }
 	dw := if s > 1.0 { f32(tw) / s } else { f32(tw) }

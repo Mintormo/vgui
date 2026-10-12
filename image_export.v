@@ -7,6 +7,7 @@ import os
 // SDL3: SDL_RenderReadPixels returns a surface directly.
 // ═══════════════════════════════════════════════════════
 
+// ImageFormat - формат сохраняемого файла; выбирается по расширению пути (image_format_from_path). tiff объявлен, но сохранение в него не поддерживается (всегда ошибка).
 pub enum ImageFormat {
 	png
 	jpg
@@ -15,6 +16,7 @@ pub enum ImageFormat {
 	webp
 }
 
+// image_format_from_path - формат по расширению (.jpg/.jpeg, .tif/.tiff, ... без учёта регистра); неизвестное расширение даёт png (запись пойдёт PNG-данными под чужим именем).
 pub fn image_format_from_path(path string) ImageFormat {
 	ext := os.file_ext(path).to_lower()
 	return match ext {
@@ -29,6 +31,11 @@ pub fn image_format_from_path(path string) ImageFormat {
 
 // Save a rectangular region of the window's renderer to a file.
 // The rectangle is in LOGICAL coordinates (same as widget bounds).
+// Параметры: region - в ЛОГИЧЕСКИХ координатах; quality 1..100 для jpg/webp (<= 0 -> 90, > 100 -> 100). Возвращает false при любой
+// ошибке (нет рендерера, пустая или целиком вне окна область, сбой SDL/кодека, tiff).
+// Алгоритм: логические координаты переводятся в физические пиксели (умножение на dpi_scale * ui_scale), область
+// обрезается по размеру окна, затем SDL_RenderReadPixels читает пиксели из текущего кадра рендерера. Захватывается то,
+// что уже нарисовано: для свежего кадра сначала вызовите render() (как PlotView.save_to_image).
 pub fn (mut w Window) save_region_to_image(path string, region Rect, quality int) bool {
 	if unsafe { w.renderer == nil } {
 		return false
@@ -47,6 +54,7 @@ pub fn (mut w Window) save_region_to_image(path string, region Rect, quality int
 		return false
 	}
 
+	// Размер окна для обрезки области берётся из SDL_GetWindowSize (так в коде; см. замечание в отчёте про HiDPI, где физические и оконные пиксели могут различаться).
 	mut win_w := 0
 	mut win_h := 0
 	C.SDL_GetWindowSize(w.sdl_window, &win_w, &win_h)
@@ -119,11 +127,13 @@ pub fn (mut w Window) save_region_to_image(path string, region Rect, quality int
 	return result == 0
 }
 
+// save_window_to_image - сохранить всё окно (логический размер screen_width x screen_height).
 pub fn (mut w Window) save_window_to_image(path string, quality int) bool {
 	region := Rect{0, 0, w.ctx.screen_width, w.ctx.screen_height}
 	return w.save_region_to_image(path, region, quality)
 }
 
+// save_to_image - сохраняет область графика: сперва перерисовывает окно (render(), чтобы кадр был актуален), затем снимает bounds виджета. window - окно, в котором лежит график.
 pub fn (p &PlotView) save_to_image(window &Window, path string, quality int) bool {
 	mut w := unsafe { window }
 	w.render()

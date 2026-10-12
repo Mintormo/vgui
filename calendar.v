@@ -4,13 +4,34 @@ import time
 
 // ═══════════════════════════════════════════════════════════
 // Calendar — full-page calendar widget with month/year views
+//
+// Календарь целиком рисуется самим виджетом (без дочерних виджетов): шапка
+// с кнопками "<" / ">" и заголовком, ниже сетка дней месяца (month) либо
+// 12 мини-календарей (year). Клик по заголовку в месячном виде переключает
+// на годовой (drill_up); выбор дня - клик в любом из видов -> on_select.
+//
+// Связи:
+//   - Календарные вычисления (число дней в месяце, день недели) берутся из
+//     date_picker.v (dp_days_in_month, dp_day_of_week). Сам DatePicker рисует
+//     свою сетку, виджет Calendar он не использует.
+//   - Названия месяцев и дней недели - глобальные массивы cal_*; их можно
+//     заменить через cal_set_* (перевод интерфейса, i18n.v / C-ABI).
+//   - Фокус: в focus.v есть register_calendar/focus_calendar, но сам calendar.v
+//     их не вызывает (draw не регистрирует виджет), поле focused здесь только
+//     читается при рисовании рамки. Клавиатуру виджет не обрабатывает. Анимаций нет.
+//   - Неделя начинается с понедельника: колонка = (день_недели + 6) % 7, где
+//     dp_day_of_week даёт 0 = воскресенье.
 // ═══════════════════════════════════════════════════════════
 
+// CalendarView - какой экран показан: сетка дней месяца или обзор года.
 pub enum CalendarView {
 	month
 	year
 }
 
+// Calendar - виджет календаря. year/month - отображаемый период (month 1..12);
+// sel_* - выбранная дата (sel_day = 0 - ничего не выбрано); hov_* - день под
+// курсором (hov_day = 0 - нет), hov_prev/next/title - кнопки шапки под курсором.
 @[heap]
 pub struct Calendar {
 pub mut:
@@ -43,6 +64,8 @@ pub mut:
 // ─── Localisation ─────────────────────────────────────────
 
 // These are module-level vars so the C-ABI bridge (vgui-capi) can overwrite them.
+// cal_set_*: подмена названий (короткие/полные месяцы, дни недели с понедельника)
+// для локализации; действует на все календари процесса.
 pub fn cal_set_month_names_short(names [12]string) {
 	for i in 0 .. 12 { cal_month_names_short[i] = names[i] }
 }
@@ -63,6 +86,8 @@ __global cal_month_names_full = ['January', 'February', 'March', 'April', 'May',
 
 __global cal_day_name_list = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']!
 
+// cal_month_name_short / _full - название месяца m (1..12); для m вне
+// диапазона - пустая строка.
 fn cal_month_name_short(m int) string {
 	if m < 1 || m > 12 { return '' }
 	return cal_month_names_short[m - 1]
@@ -73,12 +98,15 @@ fn cal_month_name_full(m int) string {
 	return cal_month_names_full[m - 1]
 }
 
+// cal_today - сегодняшняя дата (год, месяц, день) по локальным часам.
 fn cal_today() (int, int, int) {
 	now := time.now()
 	return now.year, int(now.month), now.day
 }
 
 // Add n days to (y,m,d)
+// Сейчас нигде не вызывается (мёртвый код). Сдвиг даты на n дней (n может быть отрицательным) пошагово по месяцам, с
+// переходом через границы месяцев и годов. Нормализует rd в 1..dim(rm).
 fn cal_add_days(y int, m int, d int, n int) (int, int, int) {
 	mut ry := y
 	mut rm := m
@@ -107,11 +135,13 @@ fn cal_add_days(y int, m int, d int, n int) (int, int, int) {
 	return ry, rm, rd
 }
 
+// Высота шапки и ширина/высота квадратных кнопок "<" ">" (логические px).
 const cal_hdr_h = f32(40)
 const cal_btn_w = f32(28)
 
 // ─── Constructor ──────────────────────────────────────────
 
+// calendar_new создаёт календарь, показывающий текущий месяц; выбора нет.
 pub fn calendar_new() &Calendar {
 	y, m, _ := cal_today()
 	return &Calendar{
@@ -122,10 +152,13 @@ pub fn calendar_new() &Calendar {
 
 // ─── Public API ───────────────────────────────────────────
 
+// set_view переключает месячный/годовой вид программно (on_view_change не зовётся).
 pub fn (mut c Calendar) set_view(v CalendarView) {
 	c.view = v
 }
 
+// set_date показывает месяц m года y и выбирает день d (проверок диапазона нет;
+// on_select не вызывается).
 pub fn (mut c Calendar) set_date(y int, m int, d int) {
 	c.year = y
 	c.month = m
@@ -136,6 +169,8 @@ pub fn (mut c Calendar) set_date(y int, m int, d int) {
 
 // ─── Drawing ──────────────────────────────────────────────
 
+// draw рисует рамку/фон и делегирует содержимое draw_month или draw_year.
+// Рамка подсвечивается input_focus, если focused (в этом файле поле не ставится).
 pub fn (mut c Calendar) draw(mut ctx RenderContext) {
 	if !c.visible { return }
 	if !ctx.is_in_clip(c.bounds) { return }
@@ -153,6 +188,10 @@ pub fn (mut c Calendar) draw(mut ctx RenderContext) {
 
 // ─── Header (prev / title / next) ─────────────────────────
 
+// draw_header рисует шапку: кнопки "<" и ">" по краям и по центру жирный
+// title (акцентным цветом при наведении, если по нему можно "подняться" выше).
+// Геометрия кнопок должна совпадать с prev_rect/next_rect (ниже), по которым
+// идёт hit-test.
 fn (mut c Calendar) draw_header(mut ctx RenderContext, title string, can_drill_up bool) {
 	font_b := ctx.get_font(.bold, 0)
 	font := ctx.get_font(.regular, 0)
@@ -186,6 +225,8 @@ fn (mut c Calendar) draw_header(mut ctx RenderContext, title string, can_drill_u
 // ─── Month view ───────────────────────────────────────────
 
 // Returns how many grid rows the month needs (5 or 6)
+// first_dow - колонка 1-го числа (0 = понедельник); последний день занимает
+// слот first_dow + days - 1; если он >= 35, нужна шестая строка (6 строк * 7).
 fn cal_month_rows(year int, month int) int {
 	first_dow := (dp_day_of_week(year, month, 1) + 6) % 7 // 0=Mon
 	days := dp_days_in_month(year, month)
@@ -193,6 +234,10 @@ fn cal_month_rows(year int, month int) int {
 	return if last_slot >= 35 { 6 } else { 5 }
 }
 
+// draw_month: заголовок "Месяц Год", строка дней недели (выходные - цветом
+// error_color), затем сетка дней. Ячейка дня: выбранный - залит акцентом,
+// сегодняшний - рамка акцентом и жирный текст, под курсором - hover-заливка.
+// Высота строк сетки делится поровну на 5 или 6 строк (cal_month_rows).
 fn (mut c Calendar) draw_month(mut ctx RenderContext) {
 	c.draw_header(mut ctx, '${cal_month_name_full(c.month)} ${c.year}', true)
 
@@ -261,6 +306,10 @@ fn (mut c Calendar) draw_month(mut ctx RenderContext) {
 
 // ─── Year view ────────────────────────────────────────────
 
+// draw_year: сетка 4x3 мини-месяцев. В каждой клетке название месяца и
+// мини-сетка дней (выбранный день - круг акцента, сегодня - полупрозрачный круг,
+// hover - круг button_hover). Текущий месяц выделен подложкой. Геометрия мини-сетки
+// (grid_top, mini_cell_*) обязана совпадать с hit_year_day().
 fn (mut c Calendar) draw_year(mut ctx RenderContext) {
 	c.draw_header(mut ctx, '${c.year}', false)
 
@@ -347,6 +396,8 @@ fn (mut c Calendar) draw_year(mut ctx RenderContext) {
 }
 
 // ─── Hit testing helpers ──────────────────────────────────
+// Прямоугольники кнопок шапки и заголовка; повторяют геометрию draw_header.
+// title_rect - всё между кнопками.
 
 fn (c &Calendar) prev_rect() Rect {
 	return Rect{c.bounds.x + 4, c.bounds.y + (cal_hdr_h - cal_btn_w) * 0.5, cal_btn_w, cal_btn_w}
@@ -362,6 +413,9 @@ fn (c &Calendar) title_rect() Rect {
 
 // ─── Navigation ───────────────────────────────────────────
 
+// navigate_prev / navigate_next: предыдущий/следующий месяц (с переходом через
+// границу года) в месячном виде и предыдущий/следующий год - в годовом.
+// Выбранная дата не меняется, on_select не вызывается.
 fn (mut c Calendar) navigate_prev() {
 	match c.view {
 		.month {
@@ -388,6 +442,8 @@ fn (mut c Calendar) navigate_next() {
 	}
 }
 
+// drill_up - переход месяц -> год по клику на заголовок. В годовом виде вид не
+// меняется, но on_view_change всё равно вызывается (как есть в коде).
 fn (mut c Calendar) drill_up() {
 	match c.view {
 		.month { c.view = .year }
@@ -400,6 +456,10 @@ fn (mut c Calendar) drill_up() {
 
 // ─── Month-view hit test ──────────────────────────────────
 
+// hit_month_day - (год, месяц, день) ячейки под точкой в месячном виде или
+// (0, 0, 0). Высота строки дней недели здесь ПРИБЛИЗИТЕЛЬНА (14 + 8), тогда как
+// draw_month берёт реальную высоту шрифта: при другом размере шрифта границы
+// ячеек для клика могут слегка не совпадать с нарисованными.
 fn (c &Calendar) hit_month_day(mx f32, my f32) (int, int, int) {
 	body := Rect{c.bounds.x, c.bounds.y + cal_hdr_h, c.bounds.w, c.bounds.h - cal_hdr_h}
 	cell_w := body.w / 7
@@ -460,6 +520,8 @@ fn (c &Calendar) hit_year_day(mx f32, my f32, font_h f32) (int, int) {
 
 // ─── Events ───────────────────────────────────────────────
 
+// handle_event обрабатывает только mouse_move (hover) и mouse_down (кнопки
+// шапки, заголовок, выбор дня). Клавиатура не поддерживается.
 pub fn (mut c Calendar) handle_event(event &GuiEvent, app &App) bool {
 	if !c.visible || !c.enabled { return false }
 	match event.typ {
@@ -469,6 +531,9 @@ pub fn (mut c Calendar) handle_event(event &GuiEvent, app &App) bool {
 	}
 }
 
+// on_mouse_move обновляет hov_*. Возвращает true (событие поглощено), если
+// курсор над календарём. Перерисовку сам не просит - кадр инвалидирует окно
+// на mouse_move (Window.invalidate_hover_change).
 fn (mut c Calendar) on_mouse_move(ev &GuiEvent) bool {
 	mx := ev.mouse_x
 	my := ev.mouse_y
@@ -508,6 +573,9 @@ fn (mut c Calendar) on_mouse_move(ev &GuiEvent) bool {
 	return true
 }
 
+// on_mouse_down: кнопки шапки -> навигация, заголовок -> drill_up, иначе клик
+// по дню выбирает дату и вызывает on_select(год, месяц, день). Любой клик внутри
+// bounds поглощается, даже мимо дней.
 fn (mut c Calendar) on_mouse_down(ev &GuiEvent) bool {
 	mx := ev.mouse_x
 	my := ev.mouse_y

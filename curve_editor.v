@@ -27,6 +27,7 @@ import math
 //   ce.on_release = fn [mut ce] () { lut := ce.lut(256) ... }
 // ═══════════════════════════════════════════════════════
 
+// CurvePoint - опорная точка кривой в нормализованных координатах: x и y в диапазоне 0..1 (y растёт вверх).
 pub struct CurvePoint {
 pub mut:
 	x f32
@@ -40,9 +41,15 @@ pub mut:
 	color  Color
 }
 
+// ce_max_points - максимум опорных точек (включая две крайние); insert_point отказывает при превышении.
 const ce_max_points = 16
 const ce_min_gap = f32(0.01) // минимальный зазор по x между соседними точками
 
+// CurveEditor - виджет-редактор кривой. points всегда отсортирован по x, содержит >= 2 точки, первая имеет
+// x = 0, последняя x = 1 (поддерживается normalize_curve_points / move_point / insert_point).
+// Рисование идёт в plot_rect() - bounds минус отступ под радиус точки, чтобы крайние точки не обрезались.
+// hovered_pt / drag_pt - индекс точки под курсором / перетаскиваемой (-1 нет). Кадр сеттеры не
+// инвалидируют: после изменения points из кода вызывайте Window.invalidate*.
 @[heap]
 pub struct CurveEditor {
 pub mut:
@@ -101,6 +108,7 @@ pub fn (ce &CurveEditor) lut(n int) []f32 {
 	return curve_lut(ce.points, n)
 }
 
+// add_ghost добавляет фоновую кривую (точки нормализуются как в set_points); сама кривая не редактируется, диагональ не рисуется.
 pub fn (mut ce CurveEditor) add_ghost(pts []CurvePoint, color Color) {
 	ce.ghosts << CurveGhost{normalize_curve_points(pts), color}
 }
@@ -139,6 +147,7 @@ fn normalize_curve_points(pts []CurvePoint) []CurvePoint {
 	return p
 }
 
+// curve_is_identity - все точки лежат на диагонали y = x (с допуском 1e-4); тогда сплайн тоже диагональ.
 pub fn curve_is_identity(pts []CurvePoint) bool {
 	for q in pts {
 		if math.abs(q.x - q.y) > 1e-4 {
@@ -182,6 +191,9 @@ fn curve_tangents(p []CurvePoint) []f32 {
 	return m
 }
 
+// hermite - значение кубического сплайна Эрмита в x по точкам p и касательным m (из curve_tangents).
+// Вне [p[0].x, p[n-1].x] возвращает значение крайней точки. Сегмент ищется линейным поиском.
+// На сегменте с параметром t = (x - xi)/h: стандартный базис Эрмита h00, h10, h01, h11.
 fn hermite(p []CurvePoint, m []f32, x f32) f32 {
 	n := p.len
 	if x <= p[0].x {
@@ -236,10 +248,12 @@ pub fn curve_lut(pts []CurvePoint, n int) []f32 {
 
 // ─── Геометрия ─────────────────────────────────────────
 
+// plot_rect - область графика: bounds, сжатые на радиус точки + 2 px (запас под обводку активной точки).
 fn (ce &CurveEditor) plot_rect() Rect {
 	return ce.bounds.shrunk(ce.point_radius + 2)
 }
 
+// to_screen / from_screen - перевод между координатами кривой (0..1, y вверх) и экраном внутри прямоугольника r (ось Y экрана направлена вниз - отсюда 1 - y). from_screen зажимает результат в 0..1.
 fn (ce &CurveEditor) to_screen(r Rect, x f32, y f32) (f32, f32) {
 	return r.x + x * r.w, r.y + (1 - y) * r.h
 }
@@ -303,6 +317,7 @@ fn (mut ce CurveEditor) insert_point(x f32, y f32) int {
 	return idx
 }
 
+// fire_change / fire_release - вызвать колбэки, если заданы (on_change - на каждом движении, on_release - по окончании правки).
 fn (ce &CurveEditor) fire_change() {
 	if ce.on_change != unsafe { nil } {
 		ce.on_change()
@@ -317,6 +332,7 @@ fn (ce &CurveEditor) fire_release() {
 
 // ─── Drawing ───────────────────────────────────────────
 
+// draw_curve рисует кривую ломаной из ~r.w/2 отрезков (минимум 16) поверх значений сплайна; thick - толщина линии в пикселях.
 fn (ce &CurveEditor) draw_curve(mut ctx RenderContext, r Rect, pts []CurvePoint, col Color, thick u8) {
 	if pts.len < 2 {
 		return
@@ -333,6 +349,9 @@ fn (ce &CurveEditor) draw_curve(mut ctx RenderContext, r Rect, pts []CurvePoint,
 	}
 }
 
+// draw рисует по слоям: фон, гистограмма, сетка (grid_divs делений) с диагональю и рамкой, призрачные
+// кривые (кроме тождественных), основная кривая (цвет акцента темы, если curve_color.a == 0) и точки.
+// Всё внутри clip по bounds.
 pub fn (mut ce CurveEditor) draw(mut ctx RenderContext) {
 	if !ce.visible || !ctx.is_in_clip(ce.bounds) {
 		return
@@ -404,6 +423,10 @@ pub fn (mut ce CurveEditor) draw(mut ctx RenderContext) {
 
 // ─── Events ────────────────────────────────────────────
 
+// handle_event - мышиное управление (клавиатуры и фокуса у виджета нет): наведение подсвечивает точку;
+// ЛКМ берёт точку или создаёт новую и начинает перетаскивание (живой on_change); отпускание завершает
+// правку (on_release); ПКМ по внутренней точке удаляет её; двойной клик сбрасывает в диагональ.
+// Возвращает true, если событие поглощено. Пока идёт перетаскивание, move поглощается даже вне bounds.
 pub fn (mut ce CurveEditor) handle_event(event &GuiEvent, app &App) bool {
 	if !ce.visible || !ce.enabled {
 		return false

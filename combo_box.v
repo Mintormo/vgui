@@ -7,11 +7,18 @@ module vgui
 // containers). Backward-compatible with the old text API.
 // ═══════════════════════════════════════════════════════
 
+// DropDir - в какую сторону раскрывается список: вниз (по умолчанию) или вверх, если снизу нет места
+// (выбирается при открытии в calc_drop_direction).
 enum DropDir {
 	down
 	up
 }
 
+// ComboItem - один элемент выпадающего списка: либо просто текст, либо произвольный виджет-ячейка
+// (в этом случае text всё равно хранится - он показывается в закрытом комбобоксе и отдаётся в on_change).
+//   widget    - если не nil, рисуется вместо текста; ComboBox не владеет им (время жизни - у вызывающего)
+//   height    - высота строки; 0 = ComboBox.item_height
+//   user_data - произвольный указатель пользователя (set_item_data/get_item_data)
 pub struct ComboItem {
 pub mut:
 	text      string
@@ -20,6 +27,12 @@ pub mut:
 	user_data voidptr = unsafe { nil }
 }
 
+// ComboBox - выпадающий список. Закрытый вид - поле с выбранным текстом и стрелкой; по клику/Enter/Space
+// открывается popup, который рисуется как ОВЕРЛЕЙ окна (ctx.set_overlay с владельцем &cb), поэтому
+// перекрывает соседние виджеты и перехватывает события раньше остальных (см. open_dropdown).
+// Данные хранятся в entries; items - устаревшее зеркало только текстов (для обратной совместимости).
+// selected = -1 - ничего не выбрано (рисуется placeholder). on_change вызывается при каждой смене
+// selected, в том числе стрелками на закрытом списке (fire_change).
 @[heap]
 pub struct ComboBox {
 pub mut:
@@ -27,24 +40,30 @@ pub mut:
 	bounds   Rect
 	entries  []ComboItem
 	// Legacy mirror — kept in sync with entries for back-compat
-	items        []string
-	selected     int = -1
-	open         bool
-	visible      bool = true
-	enabled      bool = true
-	focused      bool
-	hovered      bool
-	hover_index  int  = -1
-	focus_anim   Anim = anim_smooth(anim_tau_focus)
-	focus_group  int
-	item_height  f32 = 26
-	max_visible  int = 8
-	scroll_y     f32
+	// Устаревшее зеркало текстов entries; обновляют add_entry/set_items/clear. Изменять напрямую нельзя - разойдётся с entries.
+	items       []string
+	selected    int = -1
+	open        bool
+	visible     bool = true
+	enabled     bool = true
+	focused     bool
+	hovered     bool
+	hover_index int = -1
+	// Плавная подсветка рамки/кольцо фокуса, 0..1 (см. Anim).
+	focus_anim  Anim = anim_smooth(anim_tau_focus)
+	focus_group int
+	item_height f32 = 26
+	// Сколько строк видно в popup без прокрутки (по первым max_visible строкам считается высота popup).
+	max_visible int = 8
+	scroll_y    f32
+	// Пикселей прокрутки за один «щелчок» колеса.
 	scroll_speed f32              = 26
 	pad          f32              = 6
 	placeholder  string           = '— выберите —'
 	on_change    fn (int, string) = unsafe { nil }
 	// Internal: dropdown direction & scrollbar drag
+	// Внутреннее состояние popup: направление раскрытия и перетаскивание ползунка полосы прокрутки
+	// (sb_drag_start_* - позиция мыши и scroll_y в момент нажатия).
 	drop_dir             DropDir = .down
 	sb_dragging          bool
 	sb_hovered           bool
@@ -60,6 +79,7 @@ pub fn combo_box() &ComboBox {
 
 // ─── Item management (new widget-capable API) ──────────
 
+// add_entry добавляет элемент и синхронно обновляет зеркало items. Остальные add_* сводятся к нему.
 pub fn (mut cb ComboBox) add_entry(entry ComboItem) {
 	cb.entries << entry
 	cb.items << entry.text
@@ -69,14 +89,17 @@ pub fn (mut cb ComboBox) add_text_item(text string) {
 	cb.add_entry(ComboItem{ text: text })
 }
 
+// add_widget_item - элемент-виджет: в popup рисуется widget (ему раздаются bounds ячейки), text - подпись для закрытого вида.
 pub fn (mut cb ComboBox) add_widget_item(text string, widget &Widget) {
 	cb.add_entry(ComboItem{ text: text, widget: unsafe { widget } })
 }
 
+// add_widget_item_sized - то же с собственной высотой строки height.
 pub fn (mut cb ComboBox) add_widget_item_sized(text string, widget &Widget, height f32) {
 	cb.add_entry(ComboItem{ text: text, widget: unsafe { widget }, height: height })
 }
 
+// set_item_widget / set_item_height / set_item_data меняют элемент по индексу; неверный индекс молча игнорируется.
 pub fn (mut cb ComboBox) set_item_widget(idx int, widget &Widget) {
 	if idx >= 0 && idx < cb.entries.len {
 		cb.entries[idx].widget = unsafe { widget }
@@ -95,6 +118,7 @@ pub fn (mut cb ComboBox) set_item_data(idx int, data voidptr) {
 	}
 }
 
+// get_item_data возвращает user_data элемента или nil при неверном индексе.
 pub fn (cb &ComboBox) get_item_data(idx int) voidptr {
 	if idx >= 0 && idx < cb.entries.len {
 		return cb.entries[idx].user_data
@@ -102,6 +126,7 @@ pub fn (cb &ComboBox) get_item_data(idx int) voidptr {
 	return unsafe { nil }
 }
 
+// get_entry возвращает копию элемента; для неверного индекса - пустой ComboItem.
 pub fn (cb &ComboBox) get_entry(idx int) ComboItem {
 	if idx >= 0 && idx < cb.entries.len {
 		return cb.entries[idx]
@@ -111,6 +136,7 @@ pub fn (cb &ComboBox) get_entry(idx int) ComboItem {
 
 // ─── Legacy text API (preserved) ───────────────────────
 
+// set_items заменяет весь список текстами, сбрасывает выбор (-1) и прокрутку. on_change не вызывается.
 pub fn (mut cb ComboBox) set_items(items []string) {
 	cb.entries.clear()
 	cb.items.clear()
@@ -131,12 +157,14 @@ pub fn (mut cb ComboBox) add_items(items []string) {
 	}
 }
 
+// set_selected выбирает элемент программно (on_change не вызывается); неверный индекс игнорируется.
 pub fn (mut cb ComboBox) set_selected(idx int) {
 	if idx >= 0 && idx < cb.entries.len {
 		cb.selected = idx
 	}
 }
 
+// set_selected_text выбирает первый элемент с точно таким текстом; если не найден - выбор не меняется.
 pub fn (mut cb ComboBox) set_selected_text(text string) {
 	for i, e in cb.entries {
 		if e.text == text {
@@ -153,6 +181,8 @@ pub fn (cb &ComboBox) get_selected_text() string {
 	return ''
 }
 
+// clear очищает список, выбор и прокрутку и помечает список закрытым. Оверлей при этом не снимается;
+// если popup был открыт, он погаснет сам (draw/ev оверлея проверяют cb.open).
 pub fn (mut cb ComboBox) clear() {
 	cb.entries.clear()
 	cb.items.clear()
@@ -163,6 +193,7 @@ pub fn (mut cb ComboBox) clear() {
 
 // ─── Geometry helpers ──────────────────────────────────
 
+// eff_item_h - эффективная высота строки: собственная height элемента или общая item_height.
 fn (cb &ComboBox) eff_item_h(idx int) f32 {
 	if idx >= 0 && idx < cb.entries.len && cb.entries[idx].height > 0 {
 		return cb.entries[idx].height
@@ -178,6 +209,7 @@ fn (cb &ComboBox) content_height() f32 {
 	return h
 }
 
+// item_offset - сдвиг верха строки idx от начала содержимого (сумма высот предыдущих строк).
 fn (cb &ComboBox) item_offset(idx int) f32 {
 	mut y := f32(0)
 	for i in 0 .. idx {
@@ -186,6 +218,7 @@ fn (cb &ComboBox) item_offset(idx int) f32 {
 	return y
 }
 
+// dropdown_height - высота popup: сумма высот первых max_visible строк плюс отступы pad сверху и снизу.
 fn (cb &ComboBox) dropdown_height() f32 {
 	if cb.entries.len == 0 {
 		return cb.pad * 2
@@ -199,6 +232,7 @@ fn (cb &ComboBox) dropdown_height() f32 {
 	return h + cb.pad * 2
 }
 
+// dropdown_rect - прямоугольник popup под (или над) полем с зазором 2 px; ширина равна ширине поля.
 fn (cb &ComboBox) dropdown_rect() Rect {
 	dh := cb.dropdown_height()
 	match cb.drop_dir {
@@ -211,12 +245,15 @@ fn (cb &ComboBox) dropdown_rect() Rect {
 	}
 }
 
+// max_scroll - максимальный scroll_y: высота всего содержимого минус видимая высота (не меньше 0).
 fn (cb &ComboBox) max_scroll() f32 {
 	dr := cb.dropdown_rect()
 	inner_h := dr.h - cb.pad * 2
 	return max_f32(0, cb.content_height() - inner_h)
 }
 
+// hit_dropdown_item - индекс строки под экранной координатой Y мыши или -1 (над списком/ниже последней).
+// rel_y переводит Y в систему координат содержимого с учётом отступа и прокрутки.
 fn (cb &ComboBox) hit_dropdown_item(my f32) int {
 	dr := cb.dropdown_rect()
 	rel_y := my - dr.y - cb.pad + cb.scroll_y
@@ -240,6 +277,9 @@ fn (cb &ComboBox) has_dropdown_scrollbar() bool {
 	return cb.content_height() > inner_h
 }
 
+// scrollbar_rects - прямоугольники дорожки и ползунка полосы прокрутки popup (пара пустых Rect, если всё
+// помещается). Высота ползунка пропорциональна доле видимого, но не меньше 20 px; положение - по
+// отношению scroll_y / max_scroll.
 fn (cb &ComboBox) scrollbar_rects() (Rect, Rect) {
 	dr := cb.dropdown_rect()
 	inner := dr.shrunk(cb.pad)
@@ -273,6 +313,7 @@ fn (cb &ComboBox) scrollbar_rects() (Rect, Rect) {
 	return track, thumb
 }
 
+// ensure_visible_in_dropdown подкручивает popup так, чтобы выбранная строка была видна целиком.
 fn (mut cb ComboBox) ensure_visible_in_dropdown() {
 	if cb.selected < 0 || cb.entries.len == 0 {
 		return
@@ -290,12 +331,14 @@ fn (mut cb ComboBox) ensure_visible_in_dropdown() {
 	cb.scroll_y = clamp_f32(cb.scroll_y, 0, cb.max_scroll())
 }
 
+// fire_change вызывает on_change(индекс, текст) для текущего выбора, если колбэк задан и выбор корректен.
 fn (mut cb ComboBox) fire_change() {
 	if cb.on_change != unsafe { nil } && cb.selected >= 0 && cb.selected < cb.entries.len {
 		cb.on_change(cb.selected, cb.entries[cb.selected].text)
 	}
 }
 
+// close_dropdown закрывает popup: сбрасывает состояние полосы прокрутки и снимает оверлей (владелец - адрес виджета).
 fn (mut cb ComboBox) close_dropdown(mut ctx RenderContext) {
 	cb.open = false
 	cb.sb_dragging = false
@@ -303,6 +346,8 @@ fn (mut cb ComboBox) close_dropdown(mut ctx RenderContext) {
 	ctx.clear_overlay(voidptr(&cb))
 }
 
+// calc_drop_direction выбирает направление раскрытия: вниз, если popup помещается под полем; иначе вверх,
+// если помещается над; иначе туда, где места больше (popup тогда обрежется краем окна).
 fn (mut cb ComboBox) calc_drop_direction(ctx &RenderContext) {
 	dh := cb.dropdown_height()
 	space_below := ctx.screen_height - (cb.bounds.y + cb.bounds.h + 2)
@@ -348,6 +393,10 @@ fn (mut cb ComboBox) dispatch_to_item_widgets(event &GuiEvent, app &App) bool {
 	return false
 }
 
+// open_dropdown открывает popup и регистрирует оверлей окна: три замыкания draw / ev / close,
+// захватывающие cb. Пока оверлей установлен, события окна сначала получает ev; он должен вернуть
+// true, чтобы «съесть» событие. Положение popup пересчитывается на каждом кадре из bounds поля,
+// так что оно следует за виджетом.
 fn (mut cb ComboBox) open_dropdown(mut ctx RenderContext) {
 	cb.open = true
 	cb.sb_dragging = false
@@ -355,6 +404,7 @@ fn (mut cb ComboBox) open_dropdown(mut ctx RenderContext) {
 	cb.calc_drop_direction(ctx)
 	cb.ensure_visible_in_dropdown()
 
+	// Отрисовка popup: тень, фон, рамка, затем строки внутри clip-области; строки вне видимой части пропускаются (continue/break). Виджет-ячейке на каждый кадр выдаются bounds строки.
 	// ─── Overlay draw ─────────────────────────────────
 	draw := fn [mut cb] (mut ctx RenderContext) {
 		if !cb.open || cb.entries.len == 0 {
@@ -434,12 +484,17 @@ fn (mut cb ComboBox) open_dropdown(mut ctx RenderContext) {
 		}
 	}
 
+	// Обработчик событий popup. Порядок: (1) идущее перетаскивание ползунка поглощает всё; (2) move/up/wheel
+	// сперва пробуются на виджетах-ячейках; (3) по типу события: наведение, клик (ползунок / страницы по
+	// дорожке / ячейка / выбор строки; клик вне popup закрывает его и поглощается), колесо (возвращает
+	// false на границе - событие уйдёт дальше), клавиши (работают только при focused).
 	// ─── Overlay event handler ────────────────────────
 	ev := fn [mut cb] (event &GuiEvent, app &App) bool {
 		if !cb.open {
 			return false
 		}
 
+		// Перетаскивание ползунка: смещение мыши dy переводится в прокрутку через масштаб max_scroll / (длина дорожки - высота ползунка).
 		// ── Scrollbar drag in progress ──
 		if cb.sb_dragging {
 			match event.typ {
@@ -504,6 +559,7 @@ fn (mut cb ComboBox) open_dropdown(mut ctx RenderContext) {
 			.mouse_down {
 				if event.mouse_btn == .left {
 					if dr.contains(event.mouse_x, event.mouse_y) {
+						// Клик по ползунку начинает перетаскивание; по дорожке выше/ниже ползунка - прокрутка на страницу.
 						// Scrollbar thumb drag
 						if cb.has_dropdown_scrollbar() {
 							track, thumb := cb.scrollbar_rects()
@@ -529,6 +585,7 @@ fn (mut cb ComboBox) open_dropdown(mut ctx RenderContext) {
 							return true
 						}
 
+						// Выбор строки: фиксируем selected, уведомляем и закрываем popup (даже при idx < 0, т.е. клик в отступ).
 						idx := cb.hit_dropdown_item(event.mouse_y)
 						if idx >= 0 {
 							cb.selected = idx
@@ -551,6 +608,7 @@ fn (mut cb ComboBox) open_dropdown(mut ctx RenderContext) {
 				}
 			}
 			.mouse_wheel {
+				// Колесо: координаты берём из активного контекста (там актуальная позиция мыши), событие - запасной вариант.
 				ctx_ptr := app.get_active_ctx()
 				mut mx := event.mouse_x
 				mut my := event.mouse_y
@@ -572,6 +630,7 @@ fn (mut cb ComboBox) open_dropdown(mut ctx RenderContext) {
 					return false
 				}
 
+				// Клавиши в открытом popup: Home/End/PgUp/PgDn/стрелки сразу меняют selected и вызывают on_change (без отдельного «подтверждения»); стрелки циклические. Enter/Space/Esc закрывают, Tab закрывает и не поглощается (фокус уйдёт дальше).
 				if is_home_key(event.keycode, event.scancode) {
 					if cb.entries.len > 0 {
 						cb.selected = 0
@@ -673,6 +732,10 @@ fn (mut cb ComboBox) open_dropdown(mut ctx RenderContext) {
 
 // ───────────── Drawing ─────────────────────────────────
 
+// draw рисует закрытое поле: регистрирует себя в фокус-учёте (если enabled), синхронизирует
+// cb.focused с ctx.focus (потеря фокуса закрывает popup), анимирует рамку и рисует выбранный текст
+// (или placeholder) с обрезкой по полю и стрелку-треугольник (вниз/вверх по open). Сам popup
+// рисуется оверлеем, а не здесь.
 pub fn (mut cb ComboBox) draw(mut ctx RenderContext) {
 	if !cb.visible {
 		return
@@ -753,6 +816,9 @@ pub fn (mut cb ComboBox) draw(mut ctx RenderContext) {
 
 // ───────────── Events ──────────────────────────────────
 
+// handle_event обрабатывает события ЗАКРЫТОГО списка (пока popup открыт, события перехватывает оверлей).
+// ЛКМ по полю: фокус и открытие/закрытие. С клавиатуры при фокусе: Enter/Space открывают, стрелки и
+// Home/End меняют выбор без открытия, Tab/Esc двигают/снимают фокус. Возвращает true, если событие обработано.
 pub fn (mut cb ComboBox) handle_event(event &GuiEvent, app &App) bool {
 	if !cb.visible || !cb.enabled {
 		return false
