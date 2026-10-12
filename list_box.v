@@ -702,7 +702,7 @@ fn (lb &ListBox) max_scroll_x() f32 {
 	return max_f32(0, lb.content_width() - vp.w)
 }
 
-// has_scrollbar/has_hsb - нужны ли полосы. Вертикальная проверяется по высоте без полосы горизонтальной, поэтому в редком случае, когда появление одной полосы вызывает другую, возможно расхождение на пару px. (Обе ветки has_hsb сейчас идентичны.)
+// has_scrollbar/has_hsb - нужны ли полосы. Вертикальная проверяется по высоте без полосы горизонтальной, поэтому в редком случае, когда появление одной полосы вызывает другую, возможно расхождение на пару px.
 fn (lb &ListBox) has_scrollbar() bool {
 	if lb.horizontal {
 		return false
@@ -712,12 +712,7 @@ fn (lb &ListBox) has_scrollbar() bool {
 }
 
 fn (lb &ListBox) has_hsb() bool {
-	if lb.horizontal {
-		w := lb.bounds.w - lb.pad * 2
-		return lb.content_width() > w
-	}
-	w := lb.bounds.w - lb.pad * 2
-	return lb.content_width() > w
+	return lb.content_width() > lb.bounds.w - lb.pad * 2
 }
 
 // ── Effective scrollbar params ──

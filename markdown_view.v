@@ -62,14 +62,13 @@ enum MdSpanKind {
 
 // Inline-спан: text - содержимое (для code/strikethrough/bold... без разметки); url/alt - для link и image.
 // Для image: image_scale - доля доступной ширины (0 = авто, 0.5 = 50%); image_img_align - выравнивание самой
-// картинки, image_align - подписи (alt). Поле checked сейчас нигде не заполняется (чекбоксы хранятся в MdBlock).
+// картинки, image_align - подписи (alt). Чекбоксы списков хранятся в MdBlock (is_checkbox/is_checked).
 struct MdSpan {
 mut:
 	kind            MdSpanKind
 	text            string
 	url             string
 	alt             string
-	checked         bool
 	image_scale     f32     // 0 = auto, 0.5 = 50%, 1.0 = 100%
 	image_align     MdAlign // caption alignment
 	image_img_align MdAlign // image itself alignment (left/center/right)
@@ -320,9 +319,6 @@ pub mut:
 }
 
 // ─── Constructors ──────────────────────────────────────
-
-// Объявление C.system - в этом файле не используется (возможно, остаток прежнего кода).
-fn C.system(cmd &char) int
 
 // open_system_browser открывает URL во внешней программе по умолчанию (SDL_OpenURL).
 pub fn open_system_browser(url string) {
@@ -1843,9 +1839,7 @@ fn (mut md MarkdownView) layout(ctx &RenderContext, max_w f32) {
 				y += img_h + md_paragraph_gap
 			}
 			.table {
-				table_y := y
-				ncols := if block.table_header.len > 0 { block.table_header.len } else { 1 }
-				col_w := avail_w / f32(ncols)
+				// Ширину колонок считает draw_table_line; здесь - только высоты строк.
 				font_b := ctx.get_font_immut(.bold, md.font_size)
 				fh_b := ctx.font_height_of(font_b)
 
@@ -1872,9 +1866,6 @@ fn (mut md MarkdownView) layout(ctx &RenderContext, max_w f32) {
 					y += row_h
 				}
 				y += md_paragraph_gap
-				// table_y и col_w вычислены, но не используются (заглушки от предупреждений компилятора; ширину колонок реально считает draw_table_line).
-				_ = table_y
-				_ = col_w
 			}
 		}
 	}
@@ -2355,15 +2346,6 @@ pub fn (mut md MarkdownView) draw(mut ctx RenderContext) {
 				w: vp.w - md.pad * 2
 				h: ln.height + md_code_block_pad
 			}
-		}
-	}
-
-	// block_line_start заполняется, но дальше в draw() не читается (остаток прежней реализации таблиц; таблицы ищут начало блока в draw_table_line).
-	// Collect line indices per block for table rendering
-	mut block_line_start := map[int]int{}
-	for li, ln in md.lines {
-		if ln.block_idx >= 0 && ln.block_idx !in block_line_start {
-			block_line_start[ln.block_idx] = li
 		}
 	}
 

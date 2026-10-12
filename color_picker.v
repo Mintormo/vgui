@@ -1,4 +1,3 @@
-// Файл: ./color_picker.v
 module vgui
 
 import math

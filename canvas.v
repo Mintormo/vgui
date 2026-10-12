@@ -530,14 +530,11 @@ fn (mut c Canvas) ensure_texture(ctx &RenderContext) {
 	if unsafe { c.texture != nil } && is_renderer_alive_gen(c.tex_renderer, c.tex_renderer_gen) {
 		return
 	}
-	if unsafe { c.texture != nil } {
-		if is_renderer_alive_gen(c.tex_renderer, c.tex_renderer_gen) {
-			C.SDL_DestroyTexture(c.texture)
-		}
-		c.texture = unsafe { nil }
-		c.tex_renderer = unsafe { nil }
-		c.tex_renderer_gen = 0
-	}
+	// Сюда доходим, только если рендерер текстуры мёртв или сменился: SDL уже освободил
+	// её вместе с ним, остаётся забыть дескрипторы (не освобождать повторно).
+	c.texture = unsafe { nil }
+	c.tex_renderer = unsafe { nil }
+	c.tex_renderer_gen = 0
 	tex := C.SDL_CreateTexture(ctx.renderer, sdl_pixelformat_abgr8888, sdl_textureaccess_streaming,
 		c.width, c.height)
 	if unsafe { tex == nil } {

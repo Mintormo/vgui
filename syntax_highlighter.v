@@ -31,8 +31,11 @@ pub interface SyntaxHighlighter {
 // Универсальный подсветчик по спискам слов. keywords/types/builtins - списки слов трёх
 // категорий (всё остальное - default_color); *_color - палитра по умолчанию в стиле тёмной темы
 // line_comment - начало однострочного комментария (пустая
-// строка - нет комментариев). Поля block_start/block_end объявлены, но tokenize() их не
-// использует: блочные комментарии не подсвечиваются (подсветка без состояния между строками).
+// строка - нет комментариев). block_start/block_end - границы блочного комментария (пустые -
+// блочных нет). Блочный комментарий тянется через строки, поэтому учитывает его
+// tokenize_state (состояние «внутри комментария» на входе и выходе строки); CodeEditor
+// протягивает это состояние по строкам сам. Интерфейсный tokenize(line) считает, что строка
+// начинается вне комментария.
 pub struct KeywordHighlighter {
 pub mut:
 	keywords      []string
@@ -93,6 +96,9 @@ pub fn python_highlighter() &KeywordHighlighter {
 		builtins:     ['print', 'len', 'range', 'input', 'open', 'enumerate', 'zip', 'map', 'filter',
 			'sorted', 'reversed', 'isinstance', 'hasattr', 'getattr', 'setattr', 'super', 'property']
 		line_comment: '#'
+		// В Python блочных комментариев нет (а '/*' - не начало комментария).
+		block_start:  ''
+		block_end:    ''
 		string_color: Color{152, 195, 121, 255}
 	}
 }
@@ -134,12 +140,59 @@ fn kh_utf8_seq_len(ch u8) int {
 // классифицируется как keyword/type/builtin или обычное; (5) всё остальное (пробелы, знаки)
 // - один символ UTF-8 цветом по умолчанию.
 pub fn (h &KeywordHighlighter) tokenize(line string) []SyntaxToken {
+	tokens, _ := h.tokenize_state(line, false)
+	return tokens
+}
+
+// tokenize_state - tokenize с учётом блочного комментария: in_block - строка начинается
+// внутри него. Возвращает токены и признак «строка закончилась внутри комментария»
+// (передаётся следующей строке).
+pub fn (h &KeywordHighlighter) tokenize_state(line string, in_block bool) ([]SyntaxToken, bool) {
 	mut tokens := []SyntaxToken{cap: 16}
 	bytes := line.bytes()
 	n := bytes.len
 	mut i := 0
+	has_block := h.block_start.len > 0 && h.block_end.len > 0
+
+	// Продолжение блочного комментария с прошлой строки.
+	if in_block && has_block {
+		end := line.index(h.block_end) or {
+			if n > 0 {
+				tokens << SyntaxToken{
+					text:  line
+					color: h.comment_color
+				}
+			}
+			return tokens, true
+		}
+		i = end + h.block_end.len
+		tokens << SyntaxToken{
+			text:  line[..i]
+			color: h.comment_color
+		}
+	}
 
 	for i < n {
+		// Block comment: до block_end на этой строке или до конца строки (тогда
+		// комментарий продолжается на следующей).
+		if has_block && i + h.block_start.len <= n
+			&& line[i..i + h.block_start.len] == h.block_start {
+			rest := line[i + h.block_start.len..]
+			if pos := rest.index(h.block_end) {
+				j := i + h.block_start.len + pos + h.block_end.len
+				tokens << SyntaxToken{
+					text:  line[i..j]
+					color: h.comment_color
+				}
+				i = j
+				continue
+			}
+			tokens << SyntaxToken{
+				text:  line[i..]
+				color: h.comment_color
+			}
+			return tokens, true
+		}
 		// Line comment
 		if h.line_comment.len > 0 && i + h.line_comment.len <= n {
 			if line[i..i + h.line_comment.len] == h.line_comment {
@@ -147,7 +200,7 @@ pub fn (h &KeywordHighlighter) tokenize(line string) []SyntaxToken {
 					text:  line[i..]
 					color: h.comment_color
 				}
-				return tokens
+				return tokens, false
 			}
 		}
 
@@ -249,5 +302,5 @@ pub fn (h &KeywordHighlighter) tokenize(line string) []SyntaxToken {
 		i = end
 	}
 
-	return tokens
+	return tokens, false
 }

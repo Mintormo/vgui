@@ -401,8 +401,9 @@ pub mut:
 // ─── SDL3 Constants ───
 
 // Константы SDL3: флаги инициализации и окон (u64 - в SDL3 флаги окна 64-битные), режимы
-// смешивания, типы событий, модификаторы. Значения совпадают с C-заголовками SDL3. В SDL3
-// у окон нет отдельного "fullscreen_desktop": sdl_window_fullscreen_desktop равен fullscreen.
+// смешивания, типы событий, модификаторы. Значения совпадают с C-заголовками SDL3. Отдельного
+// флага "fullscreen_desktop" в SDL3 нет (полноэкранный режим без смены видеорежима - это
+// sdl_window_fullscreen без SDL_SetWindowFullscreenMode), поэтому и константы такой нет.
 pub const sdl_init_video = u32(0x00000020)
 pub const sdl_init_audio = u32(0x00000010)
 pub const sdl_init_events = u32(0x00004000)
@@ -415,7 +416,6 @@ pub const sdl_window_fullscreen = u64(0x0000000000000001)
 pub const sdl_window_borderless = u64(0x0000000000000010)
 pub const sdl_window_hidden = u64(0x0000000000000008)
 pub const sdl_window_high_pixel_density = u64(0x0000000000002000)
-pub const sdl_window_fullscreen_desktop = u64(0x0000000000000001)
 
 pub const sdl_renderer_presentvsync = u32(0x00000004)
 

@@ -1,5 +1,8 @@
 module vgui
 
+import encoding.utf8
+import strings
+
 // ═══════════════════════════════════════════════════════
 // Text encoding conversion utilities
 //
@@ -28,16 +31,15 @@ pub enum TextEncoding {
 // Parse encoding name string → enum
 // parse_encoding разбирает имя кодировки (регистр, пробелы, '-' и '_' игнорируются: 'Windows-1251',
 // 'win_1251' -> .cp1251). Неизвестное имя и пустая строка дают .utf8 (без ошибки).
-// Замечание: из-за предварительного удаления '-' варианты с дефисом в ветках match ('utf-8',
-// 'iso8859-1', 'koi8-r') недостижимы - срабатывают их бездефисные формы.
 pub fn parse_encoding(name string) TextEncoding {
+	// Дефисы и подчёркивания убраны заранее, поэтому в ветках - только слитные формы.
 	n := name.to_lower().trim_space().replace('-', '').replace('_', '')
 	return match n {
-		'utf8', 'utf-8', '' { .utf8 }
-		'latin1', 'iso88591', 'iso8859-1' { .latin1 }
+		'utf8', '' { .utf8 }
+		'latin1', 'iso88591' { .latin1 }
 		'cp1251', 'windows1251', 'win1251' { .cp1251 }
 		'cp1252', 'windows1252', 'win1252' { .cp1252 }
-		'koi8r', 'koi8-r' { .koi8r }
+		'koi8r' { .koi8r }
 		else { .utf8 }
 	}
 }
@@ -55,15 +57,16 @@ pub fn encoding_name(enc TextEncoding) string {
 
 // ─── Decode: raw bytes → UTF-8 string ──────────────────
 
-// decode_bytes превращает сырые байты файла в UTF-8 строку V. Для .utf8 байты берутся как есть (без
-// проверки на корректность UTF-8), но UTF-8 BOM (EF BB BF) в начале срезается. Для однобайтных
+// decode_bytes превращает сырые байты файла в UTF-8 строку V. Для .utf8 BOM (EF BB BF) в начале
+// срезается, а битые последовательности заменяются на U+FFFD (utf8_sanitize): раньше они
+// попадали в строку как есть, и разбор на руны и отрисовка получали невалидный UTF-8. Для однобайтных
 // кодировок каждому байту сопоставляется символ по таблице. Пустой ввод даёт ''.
 pub fn decode_bytes(data []u8, enc TextEncoding) string {
 	if data.len == 0 {
 		return ''
 	}
 	match enc {
-		.utf8 { return strip_bom(data.bytestr()) }
+		.utf8 { return utf8_sanitize(strip_bom(data.bytestr())) }
 		.latin1 { return decode_single_byte(data, latin1_table) }
 		.cp1251 { return decode_single_byte(data, cp1251_table) }
 		.cp1252 { return decode_single_byte(data, cp1252_table) }
@@ -74,7 +77,8 @@ pub fn decode_bytes(data []u8, enc TextEncoding) string {
 // ─── Encode: UTF-8 string → raw bytes ──────────────────
 
 // encode_string - обратное преобразование: UTF-8 строка -> байты кодировки. Символы, которых нет в
-// кодировке, заменяются на '?' (потеря данных без ошибки). BOM не добавляется. Пустой ввод даёт [].
+// кодировке, заменяются на '?' - преобразование с потерями; когда потеря недопустима (сохранение
+// файла), используйте encode_string_strict. BOM не добавляется. Пустой ввод даёт [].
 pub fn encode_string(text string, enc TextEncoding) []u8 {
 	if text.len == 0 {
 		return []
@@ -86,6 +90,82 @@ pub fn encode_string(text string, enc TextEncoding) []u8 {
 		.cp1252 { return encode_single_byte(text, cp1252_reverse) }
 		.koi8r { return encode_single_byte(text, koi8r_reverse) }
 	}
+}
+
+// encode_string_strict - как encode_string, но без потерь: none, если хоть один символ
+// непредставим в кодировке (например, кириллица в latin1).
+pub fn encode_string_strict(text string, enc TextEncoding) ?[]u8 {
+	reverse := match enc {
+		.utf8 { return text.bytes() }
+		.latin1 { latin1_reverse }
+		.cp1251 { cp1251_reverse }
+		.cp1252 { cp1252_reverse }
+		.koi8r { koi8r_reverse }
+	}
+	mut result := []u8{cap: text.len}
+	for r in text.runes() {
+		if r < 0x80 {
+			result << u8(r)
+		} else {
+			result << reverse[r] or { return none }
+		}
+	}
+	return result
+}
+
+// utf8_sanitize заменяет каждую битую последовательность UTF-8 на U+FFFD. Корректная строка
+// (обычный случай) возвращается как есть после быстрой проверки.
+fn utf8_sanitize(s string) string {
+	if utf8.validate_str(s) {
+		return s
+	}
+	mut out := strings.new_builder(s.len + 16)
+	mut i := 0
+	for i < s.len {
+		n := utf8_valid_seq_len(s, i)
+		if n > 0 {
+			out.write_string(s[i..i + n])
+			i += n
+		} else {
+			out.write_string('\uFFFD')
+			i++
+		}
+	}
+	return out.str()
+}
+
+// utf8_valid_seq_len - длина корректной UTF-8 последовательности, начинающейся в s[i], или 0:
+// неверный ведущий байт, обрыв, неверный байт продолжения, избыточная (overlong) запись,
+// суррогаты и значения больше U+10FFFF.
+fn utf8_valid_seq_len(s string, i int) int {
+	b0 := s[i]
+	if b0 < 0x80 {
+		return 1
+	}
+	n, min_cp := if b0 & 0xE0 == 0xC0 {
+		2, u32(0x80)
+	} else if b0 & 0xF0 == 0xE0 {
+		3, u32(0x800)
+	} else if b0 & 0xF8 == 0xF0 {
+		4, u32(0x10000)
+	} else {
+		0, u32(0)
+	}
+	if n == 0 || i + n > s.len {
+		return 0
+	}
+	mut cp := u32(b0) & (u32(0x7F) >> n)
+	for k in 1 .. n {
+		c := s[i + k]
+		if c & 0xC0 != 0x80 {
+			return 0
+		}
+		cp = (cp << 6) | u32(c & 0x3F)
+	}
+	if cp < min_cp || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF) {
+		return 0
+	}
+	return n
 }
 
 // ─── BOM handling ──────────────────────────────────────

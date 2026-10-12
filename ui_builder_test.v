@@ -68,3 +68,23 @@ fn test_checkbox_and_accordion_handlers_are_bound() {
 	acc.toggle_section(0) // как клик по заголовку
 	assert log.events == ['sub true', 'section 0 true']
 }
+
+// Мини-YAML (аудит 2026-10, 5.12): экранирование в кавычках, ключи и скаляры с
+// двоеточием в кавычках, повтор ключа - последнее значение, пробелы в списке через запятую.
+fn test_mini_yaml_quotes_and_duplicates() {
+	root := yaml_parse('a: "say \\"hi\\"\\n"
+b: \'it\'\'s\'
+"c:d": 1
+e: 1
+e: 2
+items: x, y ,z
+list:
+  - "12:30"
+')
+	assert root.get_str('a') == 'say "hi"\n'
+	assert root.get_str('b') == "it's"
+	assert root.get_str('c:d') == '1'
+	assert root.get_str('e') == '2'
+	assert yn_items(&root, 'items') == ['x', 'y', 'z']
+	assert root.get('list').list[0].val == '12:30'
+}

@@ -1,4 +1,3 @@
-// Файл: ./code_editor.v
 module vgui
 
 import os
@@ -117,6 +116,12 @@ pub mut:
 	width_cache_font voidptr
 	width_cache_tab  int
 	width_cache      f32
+	// Состояние «строка начинается внутри блочного комментария» для KeywordHighlighter
+	// (block_states): считается до нужной строки и сбрасывается сменой ревизии текста
+	// или подсветчика.
+	block_states     []bool
+	block_states_rev u64 = max_u64
+	block_states_hl  voidptr
 	// Колесо мыши: false - виджет его не берёт (прокрутка уходит
 	// контейнеру, например панели в ScrollBox)
 	wheel                 bool = true
@@ -248,6 +253,37 @@ pub fn (e &CodeEditor) get_line(idx int) string {
 		return if e.lines[idx].len > 0 { e.lines[idx].string() } else { '' }
 	}
 	return ''
+}
+
+// line_tokens - токены подсветки строки idx (text - её текст). У KeywordHighlighter
+// учитывается блочный комментарий, начатый на прежних строках (block_states); другие
+// подсветчики разбирают строку независимо (интерфейс SyntaxHighlighter без состояния).
+fn (e &CodeEditor) line_tokens(idx int, text string) []SyntaxToken {
+	hl := unsafe { *e.highlighter }
+	if hl is KeywordHighlighter {
+		tokens, _ := hl.tokenize_state(text, e.block_state_at(hl, idx))
+		return tokens
+	}
+	return e.highlighter.tokenize(text)
+}
+
+// block_state_at - начинается ли строка idx внутри блочного комментария. Состояния
+// строк считаются по порядку от начала и кэшируются до сброса (правка текста, другой
+// подсветчик); кэш дорастает до самой дальней запрошенной строки. Служебное состояние -
+// пишется через неизменяемый получатель.
+fn (e &CodeEditor) block_state_at(hl &KeywordHighlighter, idx int) bool {
+	mut cache := unsafe { &CodeEditor(e) }
+	if e.block_states_rev != e.text_rev || e.block_states_hl != voidptr(hl) {
+		cache.block_states = [false]
+		cache.block_states_rev = e.text_rev
+		cache.block_states_hl = voidptr(hl)
+	}
+	for cache.block_states.len <= idx && cache.block_states.len <= e.lines.len {
+		li := cache.block_states.len - 1
+		_, after := hl.tokenize_state(e.lines[li].string(), cache.block_states[li])
+		cache.block_states << after
+	}
+	return if idx < cache.block_states.len { cache.block_states[idx] } else { false }
 }
 
 // set_highlighter подключает подсветку синтаксиса (nil отключает). Редактор
@@ -842,7 +878,7 @@ fn (e &CodeEditor) draw_minimap(mut ctx RenderContext) {
 		bar_h := max_f32(mm_lh - 0.5, 1)
 
 		if has_hl {
-			tokens := e.highlighter.tokenize(text)
+			tokens := e.line_tokens(i, text)
 			mut ox := mr.x + 2
 			for tok in tokens {
 				tw := f32(tok.text.runes().len) * char_w
@@ -1053,7 +1089,7 @@ pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
 			ty := ly + (lh - fh) * 0.5
 			tx := cr.x - e.scroll_x
 			if has_hl {
-				tokens := e.highlighter.tokenize(text)
+				tokens := e.line_tokens(i, text)
 				mut offset_x := tx
 				for tok in tokens {
 					tok_text := ce_expand_tabs(tok.text, e.tab_size)
@@ -2109,7 +2145,9 @@ pub fn (e &CodeEditor) save_file(path string) bool {
 }
 
 // save_file_encoded пишет текст в заданной кодировке. line_ending: '\r\n' -
-// CRLF; пустая строка и любое другое значение - LF.
+// CRLF; пустая строка и любое другое значение - LF. false - ошибка записи или текст
+// содержит символы, которых нет в кодировке: файл тогда не пишется вовсе (раньше они
+// молча становились '?', и сохранение портило текст).
 pub fn (e &CodeEditor) save_file_encoded(path string, encoding string, line_ending string) bool {
 	mut text := e.get_text()
 	le := if line_ending.len > 0 { line_ending } else { '\n' }
@@ -2117,7 +2155,7 @@ pub fn (e &CodeEditor) save_file_encoded(path string, encoding string, line_endi
 		text = text.replace('\n', '\r\n')
 	}
 	enc := parse_encoding(encoding)
-	data := encode_string(text, enc)
+	data := encode_string_strict(text, enc) or { return false }
 	os.write_file_array(path, data) or { return false }
 	return true
 }

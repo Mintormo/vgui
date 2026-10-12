@@ -174,7 +174,7 @@ pub fn (mut c Calendar) set_date(y int, m int, d int) {
 // ─── Drawing ──────────────────────────────────────────────
 
 // draw рисует рамку/фон и делегирует содержимое draw_month или draw_year.
-// Рамка подсвечивается input_focus, если focused (в этом файле поле не ставится).
+// Рамка подсвечивается input_focus, если focused (его ставит фокус-учёт).
 pub fn (mut c Calendar) draw(mut ctx RenderContext) {
 	if !c.visible { return }
 	if !ctx.is_in_clip(c.bounds) { return }

@@ -130,9 +130,6 @@ pub mut:
 	hsb_hovered       bool
 	sb_drag_start     f32
 	sb_drag_start_val f32
-	// Sampling quality (samples per pixel)
-	// samples_per_pixel сейчас нигде не используется: функция сэмплируется по одному отсчёту на пиксель
-	samples_per_pixel int = 32
 	// Scroll/zoom speed
 	scroll_speed f32 = 30.0
 	zoom_speed   f32 = 0.15

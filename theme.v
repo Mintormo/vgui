@@ -1330,9 +1330,8 @@ pub fn win10_dark_theme() Theme {
 // Windows 11 — Mica/Acrylic feel, rounded, lighter
 // ═══════════════════════════════════════════════════════
 
-// Windows 11 (стиль Mica): светлая, мягкие серые поверхности, акцент (0,95,184).
-// В коде border_radius и shadow_offset заданы 0 - то есть углы острые, несмотря на
-// пометку «rounded» в заголовке блока выше.
+// Windows 11 (стиль Mica): светлая, мягкие серые поверхности, акцент (0,95,184), скругление
+// 4 px, как у элементов управления WinUI 3 (раньше 0 - острые углы вопреки «rounded»).
 pub fn win11_theme() Theme {
 	return Theme{
 		bg:                     Color{243, 243, 243, 255}
@@ -1367,7 +1366,7 @@ pub fn win11_theme() Theme {
 		scrollbar_drag:         Color{80, 80, 90, 255}
 		cur_line_bg:            Color{225, 235, 250, 255}
 		shadow_color:           Color{0, 0, 0, 18}
-		border_radius:          0.0
+		border_radius:          4.0
 		shadow_offset:          0.0
 		plot_bg:                Color{253, 253, 253, 255}
 		plot_axis:              Color{28, 28, 28, 255}
@@ -1453,7 +1452,7 @@ pub fn win11_dark_theme() Theme {
 		scrollbar_drag:         Color{150, 155, 168, 255}
 		cur_line_bg:            Color{50, 52, 58, 255}
 		shadow_color:           Color{0, 0, 0, 40}
-		border_radius:          0.0
+		border_radius:          4.0
 		shadow_offset:          0.0
 		plot_bg:                Color{26, 26, 28, 255}
 		plot_axis:              Color{230, 230, 235, 255}
@@ -1589,7 +1588,7 @@ pub fn kde_breeze_dark_theme() Theme {
 		scrollbar_drag:         Color{61, 174, 233, 200}
 		cur_line_bg:            Color{44, 50, 58, 255}
 		shadow_color:           Color{0, 0, 0, 60}
-		border_radius:          0.0
+		border_radius:          6.0
 		shadow_offset:          0.0
 		plot_bg:                Color{31, 34, 37, 255}
 		plot_axis:              Color{239, 240, 241, 255}
@@ -1725,7 +1724,7 @@ pub fn gtk_adwaita_dark_theme() Theme {
 		scrollbar_drag:         Color{120, 174, 237, 200}
 		cur_line_bg:            Color{48, 54, 64, 255}
 		shadow_color:           Color{0, 0, 0, 50}
-		border_radius:          0.0
+		border_radius:          6.0
 		shadow_offset:          0.0
 		plot_bg:                Color{32, 32, 32, 255}
 		plot_axis:              Color{245, 245, 245, 255}

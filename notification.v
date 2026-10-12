@@ -1,4 +1,3 @@
-// Файл: ./notification.v
 module vgui
 
 // ═══════════════════════════════════════════════════════
@@ -266,10 +265,11 @@ fn (n &Notification) icon_rect() Rect {
 	}
 }
 
-// text_rect — область текста: между значком (если есть) и кнопкой × (если есть), с отступами pad.
+// text_rect — область текста: между значком и кнопкой × (если есть), с отступами pad.
 fn (n &Notification) text_rect() Rect {
 	stripe := if n.show_accent_stripe { n.stripe_width } else { f32(0) }
-	icon_w := if n.has_icon() { n.icon_size + n.icon_gap } else { f32(0) }
+	// Значок есть всегда: icon_path или встроенный по kind.
+	icon_w := n.icon_size + n.icon_gap
 	close_w := if n.closable { n.close_size + n.icon_gap } else { f32(0) }
 	return Rect{
 		x: n.bounds.x + stripe + n.pad + icon_w
@@ -277,11 +277,6 @@ fn (n &Notification) text_rect() Rect {
 		w: n.bounds.w - stripe - n.pad * 2 - icon_w - close_w
 		h: n.bounds.h - n.pad * 2
 	}
-}
-
-// has_icon сейчас всегда true (из-за `|| true`): без icon_path рисуется встроенный значок по kind.
-fn (n &Notification) has_icon() bool {
-	return n.icon_path.len > 0 || true
 }
 
 // ─── Animation offsets ─────────────────────────────────
@@ -469,15 +464,13 @@ pub fn (mut n Notification) draw(mut ctx RenderContext) {
 		ctx.pop_clip() // anim_bounds
 	}
 
-	// Icon
-	if n.has_icon() {
-		ir := n.icon_rect()
-		if n.icon_path.len > 0 {
-			tex := ctx.load_icon_texture(n.icon_path)
-			ctx.draw_icon(tex, ir.x, ir.y, ir.w, ir.h)
-		} else {
-			n.draw_builtin_icon(ir, accent, mut ctx)
-		}
+	// Icon: файл icon_path или встроенный значок по kind.
+	ir := n.icon_rect()
+	if n.icon_path.len > 0 {
+		tex := ctx.load_icon_texture(n.icon_path)
+		ctx.draw_icon(tex, ir.x, ir.y, ir.w, ir.h)
+	} else {
+		n.draw_builtin_icon(ir, accent, mut ctx)
 	}
 
 	// Text (title + message)
@@ -756,7 +749,8 @@ fn (nm &NotificationManager) calc_height(n &Notification, mut ctx RenderContext)
 	fh_r := ctx.font_height_of(font_r)
 
 	stripe := if n.show_accent_stripe { n.stripe_width } else { f32(0) }
-	icon_w := if n.has_icon() { n.icon_size + n.icon_gap } else { f32(0) }
+	// Значок есть всегда: icon_path или встроенный по kind.
+	icon_w := n.icon_size + n.icon_gap
 	close_w := if n.closable { n.close_size + n.icon_gap } else { f32(0) }
 	text_w := nm.notif_width - stripe - n.pad * 2 - icon_w - close_w
 

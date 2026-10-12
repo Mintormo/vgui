@@ -281,6 +281,21 @@ fn (n &YNode) is_list() bool {
 	return n.list.len > 0
 }
 
+// put добавляет пару в map-узел. Повторный ключ заменяет прежнее значение (как в YAML -
+// побеждает последнее) с предупреждением в stderr: раньше второе значение молча терялось,
+// потому что get находит первое.
+fn (mut n YNode) put(key string, val YNode) {
+	for i, k in n.map_keys {
+		if k == key {
+			eprintln('vgui ui_builder: ключ "${key}" повторяется - берётся последнее значение')
+			n.map_values[i] = val
+			return
+		}
+	}
+	n.map_keys << key
+	n.map_values << val
+}
+
 // get возвращает значение ключа map-узла или пустой YNode{}, если ключа нет.
 fn (n &YNode) get(key string) YNode {
 	for i, k in n.map_keys {
@@ -336,22 +351,83 @@ fn yaml_count_indent(line string) int {
 	return n
 }
 
-// yaml_strip_quotes обрезает пробелы и одну пару внешних кавычек ('...' или "...").
-// Экранирование внутри кавычек не обрабатывается: \" остаётся как есть.
+// yaml_strip_quotes обрезает пробелы и одну пару внешних кавычек ('...' или "..."). Внутри
+// "..." раскрываются \" \\ \n \t, внутри '...' - удвоенная '' (как в YAML); раньше
+// экранирование оставалось в тексте как есть.
 fn yaml_strip_quotes(s string) string {
 	t := s.trim_space()
 	if t.len >= 2 {
-		if (t[0] == `"` && t[t.len - 1] == `"`) || (t[0] == `'` && t[t.len - 1] == `'`) {
-			return t[1..t.len - 1]
+		if t[0] == `"` && t[t.len - 1] == `"` {
+			return yaml_unescape_double(t[1..t.len - 1])
+		}
+		if t[0] == `'` && t[t.len - 1] == `'` {
+			return t[1..t.len - 1].replace("''", "'")
 		}
 	}
 	return t
 }
 
+// yaml_unescape_double раскрывает экранирование строки в двойных кавычках; неизвестная
+// последовательность \x остаётся как есть.
+fn yaml_unescape_double(s string) string {
+	if !s.contains('\\') {
+		return s
+	}
+	mut out := []u8{cap: s.len}
+	mut i := 0
+	for i < s.len {
+		c := s[i]
+		if c == `\\` && i + 1 < s.len {
+			nc := s[i + 1]
+			match nc {
+				`"` { out << u8(`"`) }
+				`\\` { out << u8(`\\`) }
+				`n` { out << u8(`\n`) }
+				`t` { out << u8(`\t`) }
+				else {
+					out << c
+					out << nc
+				}
+			}
+			i += 2
+			continue
+		}
+		out << c
+		i++
+	}
+	return out.bytestr()
+}
+
+// yaml_quoted_end - индекс закрывающей кавычки строки в кавычках, начинающейся в s[0]
+// (' или "), с учётом экранирования; -1, если s не начинается с кавычки или она не закрыта.
+fn yaml_quoted_end(s string) int {
+	if s.len == 0 || (s[0] != `"` && s[0] != `'`) {
+		return -1
+	}
+	q := s[0]
+	mut i := 1
+	for i < s.len {
+		if q == `"` && s[i] == `\\` {
+			i += 2
+			continue
+		}
+		if s[i] == q {
+			if q == `'` && i + 1 < s.len && s[i + 1] == `'` {
+				i += 2 // '' внутри '...'
+				continue
+			}
+			return i
+		}
+		i++
+	}
+	return -1
+}
+
 // yaml_parse_lines - лексер: режет текст на YLine. Пустые строки и строки,
 // начинающиеся с `#`, выбрасываются; остальное делится на «- » / ключ / значение.
-// Ключом считается всё до ПЕРВОГО двоеточия в строке (`colon > 0`), поэтому
-// значения с двоеточием (`time: 12:30`) работают, а ключи с двоеточием - нет.
+// Ключом считается всё до ПЕРВОГО двоеточия в строке, поэтому значения с двоеточием
+// (`time: 12:30`) работают. Ключ или скаляр с двоеточием внутри пишется в кавычках:
+// `"a:b": 1`, `- "12:30"` - двоеточие внутри кавычек ключ не обрывает.
 // Строка без двоеточия - скаляр (элемент `- value` или продолжение).
 fn yaml_parse_lines(content string) []YLine {
 	raw_lines := content.split('\n')
@@ -375,9 +451,21 @@ fn yaml_parse_lines(content string) []YLine {
 
 		mut key := ''
 		mut value := ''
-		colon := work.index(':') or { -1 }
+		// Строка начинается с кавычек: ключ в кавычках (`"a:b": 1`) или скаляр в кавычках
+		// (`"12:30"`) - двоеточия внутри кавычек не считаются.
+		q_end := yaml_quoted_end(work)
+		colon := if q_end > 0 {
+			after := work[q_end + 1..].trim_space()
+			if after.starts_with(':') {
+				q_end + 1 + (work[q_end + 1..].index(':') or { 0 })
+			} else {
+				-1
+			}
+		} else {
+			work.index(':') or { -1 }
+		}
 		if colon > 0 {
-			key = work[..colon].trim_space()
+			key = yaml_strip_quotes(work[..colon])
 			rest := work[colon + 1..].trim_space()
 			value = yaml_strip_quotes(rest)
 		} else if work.len > 0 {
@@ -459,25 +547,23 @@ fn (mut p YParser) parse_map(min_indent int) YNode {
 		key := line.key
 		p.pos++
 
-		if line.value.len > 0 {
-			// Inline value
-			node.map_keys << key
-			node.map_values << YNode{
-				val: line.value
-			}
-		} else {
-			// Block value on next lines
-			if p.pos < p.lines.len && p.lines[p.pos].indent > line.indent {
-				child := p.parse_value(p.lines[p.pos].indent)
-				node.map_keys << key
-				node.map_values << child
-			} else {
-				node.map_keys << key
-				node.map_values << YNode{}
-			}
-		}
+		node.put(key, p.value_after(line))
 	}
 	return node
+}
+
+// value_after - значение ключа строки line: встроенное (`ключ: значение`), вложенный блок
+// на следующих строках с большим отступом или пустой узел.
+fn (mut p YParser) value_after(line YLine) YNode {
+	if line.value.len > 0 {
+		return YNode{
+			val: line.value
+		}
+	}
+	if p.pos < p.lines.len && p.lines[p.pos].indent > line.indent {
+		return p.parse_value(p.lines[p.pos].indent)
+	}
+	return YNode{}
 }
 
 // parse_list читает элементы списка. Элемент `- key: val` - начало map-элемента:
@@ -503,19 +589,7 @@ fn (mut p YParser) parse_list(min_indent int) YNode {
 		if line.key.len > 0 {
 			// "- key: val" — start of a map item
 			mut item := YNode{}
-			item.map_keys << line.key
-			if line.value.len > 0 {
-				item.map_values << YNode{
-					val: line.value
-				}
-			} else {
-				if p.pos < p.lines.len && p.lines[p.pos].indent > line.indent {
-					child := p.parse_value(p.lines[p.pos].indent)
-					item.map_values << child
-				} else {
-					item.map_values << YNode{}
-				}
-			}
+			item.put(line.key, p.value_after(line))
 
 			// Continue reading map keys at deeper indent
 			for p.pos < p.lines.len {
@@ -527,20 +601,8 @@ fn (mut p YParser) parse_list(min_indent int) YNode {
 					break
 				}
 				if next.key.len > 0 {
-					item.map_keys << next.key
 					p.pos++
-					if next.value.len > 0 {
-						item.map_values << YNode{
-							val: next.value
-						}
-					} else {
-						if p.pos < p.lines.len && p.lines[p.pos].indent > next.indent {
-							child := p.parse_value(p.lines[p.pos].indent)
-							item.map_values << child
-						} else {
-							item.map_values << YNode{}
-						}
-					}
+					item.put(next.key, p.value_after(next))
 				} else {
 					p.pos++
 				}
@@ -657,7 +719,7 @@ fn yn_bool(n &YNode, key string, def bool) bool {
 }
 
 // yn_items читает список строк: YAML-список (`items:` + `- a`) либо
-// строку через запятую (`items: a,b,c`; пробелы вокруг элементов не режутся).
+// строку через запятую (`items: a, b, c`; пробелы вокруг элементов обрезаются).
 fn yn_items(n &YNode, key string) []string {
 	child := n.get(key)
 	if child.is_list() {
@@ -672,7 +734,7 @@ fn yn_items(n &YNode, key string) []string {
 	if s.len == 0 {
 		return []
 	}
-	return s.split(',')
+	return s.split(',').map(it.trim_space())
 }
 
 // vui_parse_*: преобразование строки из YAML в enum. Неизвестное значение

@@ -12,8 +12,7 @@ module vgui
 // масштаб ui_scale накладывается поверх (Window.set_ui_scale, sdl3_window.v); итоговый масштаб
 // рендера = dpi_scale * ui_scale. Шрифты под HiDPI пересоздаёт Window.reload_scaled_fonts.
 
-// Объявление дублирует такое же в sdl3_bindings.v.
-fn C.SDL_SetRenderScale(renderer voidptr, scale_x f32, scale_y f32) bool
+// C.SDL_SetRenderScale объявлена в sdl3_bindings.v.
 
 // Результат detect_dpi: scale - отношение физических пикселей к логическим по ширине;
 // logical_*/physical_* - размеры окна в логических/физических пикселях; dpi - приблизительное

@@ -179,10 +179,3 @@ pub fn abs_int(v int) int {
 pub fn lerp(a f32, b f32, t f32) f32 {
 	return a + (b - a) * t
 }
-
-// anim_running - «ещё не доехало ли значение до цели» с допуском 0.005.
-// Остаток эпохи до общего класса Anim (anim.v): сейчас в библиотеке не
-// вызывается, анимации проверяют завершение через Anim.update()/animating().
-fn anim_running(current f32, target f32) bool {
-	return abs_f32(current - target) > 0.005
-}
