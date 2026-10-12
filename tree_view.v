@@ -62,13 +62,12 @@ pub fn tree_node_icon(text string, icon_path string) &TreeNode {
 	}
 }
 
-// Добавляет дочерний узел в конец и проставляет ему parent. Не проверяет, что
-// child уже не лежит в другом месте дерева и не является предком n (цикл
-// сломает flatten бесконечной рекурсией).
-pub fn (mut n TreeNode) add(child &TreeNode) {
-	mut c := unsafe { child }
-	c.parent = unsafe { n }
-	n.children << unsafe { child }
+// Добавляет дочерний узел в конец и проставляет ему parent. Возвращает false и ничего не
+// меняет, если child - сам n или его предок: цикл в дереве уводил flatten в бесконечную
+// рекурсию. Узел, уже висящий у другого родителя, сначала открепляется от него (см.
+// attach_child).
+pub fn (mut n TreeNode) add(child &TreeNode) bool {
+	return n.attach_child(n.children.len, child)
 }
 
 // Создаёт узел, добавляет и возвращает его - удобно для построения цепочкой.
@@ -84,26 +83,65 @@ pub fn (mut n TreeNode) add_child_icon(text string, icon_path string) &TreeNode 
 	return c
 }
 
-// Удаляет дочерний узел по индексу (вне диапазона - игнорируется). У удалённого
-// узла поле parent НЕ сбрасывается.
+// Удаляет дочерний узел по индексу (вне диапазона - игнорируется). Снятый узел
+// становится отдельным поддеревом: его parent сбрасывается в nil.
 pub fn (mut n TreeNode) remove_at(idx int) {
 	if idx >= 0 && idx < n.children.len {
+		mut c := n.children[idx]
+		c.parent = unsafe { nil }
 		n.children.delete(idx)
 	}
 }
 
 // Вставляет дочерний узел на позицию idx; значения вне диапазона зажимаются
-// (idx <= 0 - в начало, idx >= len - в конец).
-pub fn (mut n TreeNode) insert_at(idx int, child &TreeNode) {
-	mut c := unsafe { child }
-	c.parent = unsafe { n }
-	if idx <= 0 {
-		n.children.insert(0, unsafe { child })
-	} else if idx >= n.children.len {
-		n.children << unsafe { child }
-	} else {
-		n.children.insert(idx, unsafe { child })
+// (idx <= 0 - в начало, idx >= len - в конец). Возвращает false, если child - сам n
+// или его предок (см. add).
+pub fn (mut n TreeNode) insert_at(idx int, child &TreeNode) bool {
+	return n.attach_child(idx, child)
+}
+
+// is_self_or_ancestor_of_node сообщает, лежит ли node на пути от n вверх к корню (включая сам n).
+// Такой узел нельзя сделать ребёнком n - получился бы цикл.
+fn (n &TreeNode) is_self_or_ancestor_of_node(node &TreeNode) bool {
+	mut cur := unsafe { n }
+	for cur != unsafe { nil } {
+		if cur == node {
+			return true
+		}
+		cur = cur.parent
 	}
+	return false
+}
+
+// attach_child - общая часть add/insert_at. Отказывает (false), если child - nil, сам n или
+// его предок. Если у child уже есть родитель, child сначала снимается с него: узел живёт
+// ровно в одном месте дерева (иначе flatten показал бы его дважды, а parent указывал бы
+// только на одного из родителей). Позиция idx берётся после этого снятия и зажимается в
+// 0..len.
+fn (mut n TreeNode) attach_child(idx int, child &TreeNode) bool {
+	if child == unsafe { nil } || n.is_self_or_ancestor_of_node(child) {
+		return false
+	}
+	mut c := unsafe { child }
+	if c.parent != unsafe { nil } {
+		mut old := c.parent
+		for i, sibling in old.children {
+			if sibling == child {
+				old.children.delete(i)
+				break
+			}
+		}
+	}
+	c.parent = unsafe { n }
+	pos := if idx <= 0 {
+		0
+	} else if idx >= n.children.len {
+		n.children.len
+	} else {
+		idx
+	}
+	n.children.insert(pos, unsafe { child })
+	return true
 }
 
 pub fn (n &TreeNode) has_children() bool {

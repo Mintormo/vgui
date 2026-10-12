@@ -949,6 +949,10 @@ pub mut:
 	visible  bool    = true
 	enabled  bool    = true
 	target   &Widget = unsafe { nil }
+	// Цель уничтожена (detach_target): меню больше не открывается правым кликом.
+	// Отдельный флаг, а не просто target = nil: меню без цели открывается по всему
+	// своему bounds, то есть обычно по всему окну.
+	target_lost bool
 	// Called with the click coordinates right before the menu opens on a
 	// right-click. Lets the app prepare state (e.g. select the list row
 	// under the cursor) before any item action runs.
@@ -968,6 +972,22 @@ pub fn (mut cm ContextMenu) add(item &MenuItem) {
 // attach привязывает меню к виджету: правый клик открывает меню только в его bounds.
 pub fn (mut cm ContextMenu) attach(target &Widget) {
 	cm.target = unsafe { target }
+	cm.target_lost = false
+}
+
+// detach_target разрывает связь с уничтоженной целью: ссылка держала бы её память, а
+// правый клик по месту, где она была, открывал бы меню. После этого меню правым
+// кликом не открывается, пока его не привяжут заново (attach); show() работает.
+// Мост зовёт это в vgui_destroy для каждого меню, привязанного к уничтожаемому виджету.
+pub fn (mut cm ContextMenu) detach_target() {
+	cm.target = unsafe { nil }
+	cm.target_lost = true
+}
+
+// is_attached_to сообщает, привязано ли меню к объекту виджета по адресу obj.
+pub fn (cm &ContextMenu) is_attached_to(obj voidptr) bool {
+	return obj != unsafe { nil } && cm.target != unsafe { nil }
+		&& widget_object_addr(cm.target) == obj
 }
 
 // show открывает меню в точке (x, y), сдвигая его так, чтобы оно поместилось в окно. Пустое меню не открывается. Закрывает ранее открытое меню этого владельца.
@@ -1012,6 +1032,9 @@ pub fn (mut cm ContextMenu) draw(mut ctx RenderContext) {
 // не привязанное — попадание по всему cm.bounds осталось намеренным).
 // context_menu_get_target_bounds возвращает область, в которой правый клик открывает меню (подробности — комментарий ниже).
 fn context_menu_get_target_bounds(cm &ContextMenu) Rect {
+	if cm.target_lost {
+		return Rect{}
+	}
 	if unsafe { cm.target == nil } {
 		return cm.bounds
 	}

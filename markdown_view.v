@@ -236,8 +236,9 @@ const md_checkbox_size = f32(13)
 //     текст всегда переносится, поэтому горизонтальная прокрутка нужна лишь им);
 //   scroll_x / scroll_y - прокрутка; vsb_* / hsb_* - состояние полос и их перетаскивания;
 //   editor - вложенный CodeEditor для режима .source;
-//   image_cache - SDL-текстуры картинок по разрешённому пути; image_size_cache - размеры в пикселях (для
-//     точной высоты картинок с масштабом в раскладке);
+//   image_cache - SDL-текстуры картинок по разрешённому пути вместе с рендерером, которому они принадлежат
+//     (см. MdImageTexture); image_size_cache - размеры в пикселях (для точной высоты картинок с масштабом
+//     в раскладке);
 //   links / copy_btns - области под мышь, заполняются в draw(); hovered_* - что под курсором;
 //   anchor_map - slug заголовка -> y (для переходов по #якорям);
 //   base_dir - каталог для относительных путей картинок и ссылок (выставляет load_file);
@@ -265,7 +266,7 @@ pub mut:
 	dirty                 bool = true
 	last_w                f32
 	editor                &CodeEditor = unsafe { nil }
-	image_cache           map[string]voidptr
+	image_cache           map[string]MdImageTexture
 	image_size_cache      map[string][2]int // [w, h] in pixels
 	scroll_y              f32
 	scroll_x              f32
@@ -2677,6 +2678,55 @@ fn (mut md MarkdownView) draw_line_spans(line &MdLine, ly f32, ox f32, mut ctx R
 	}
 }
 
+// MdImageTexture - текстура картинки в кэше вместе с рендерером, которому она принадлежит, и его
+// поколением в реестре живых рендереров. Текстура SDL живёт не дольше своего рендерера: когда окно
+// закрыто или рендерер пересоздан (сброс устройства Direct3D), SDL уже освободил её сам. Пара
+// renderer + gen позволяет это распознать: повторный SDL_DestroyTexture был бы double free, а
+// рисование такой текстурой на новом рендерере - обращение к освобождённой памяти. Поколение
+// отсекает и новый рендерер, случайно оказавшийся по старому адресу (ABA).
+struct MdImageTexture {
+	tex      voidptr
+	renderer voidptr
+	gen      u64
+}
+
+// destroy освобождает текстуру, только если её рендерер ещё жив (иначе SDL уже сделал это сам).
+fn (entry MdImageTexture) destroy() {
+	if unsafe { entry.tex != nil } && is_renderer_alive_gen(entry.renderer, entry.gen) {
+		C.SDL_DestroyTexture(entry.tex)
+	}
+}
+
+// image_texture возвращает текстуру картинки по разрешённому пути для рендерера ctx, загружая её
+// при первом обращении (nil - файл не прочитался). Запись кэша, созданная другим или уже мёртвым
+// рендерером (виджет перенесли в другое окно, рендерер пересоздан), не используется: она
+// освобождается (если её рендерер жив) и картинка загружается заново для текущего.
+fn (mut md MarkdownView) image_texture(path string, ctx &RenderContext) voidptr {
+	if cached := md.image_cache[path] {
+		if cached.renderer == ctx.renderer && is_renderer_alive_gen(cached.renderer, cached.gen) {
+			return cached.tex
+		}
+		cached.destroy()
+		md.image_cache.delete(path)
+	}
+	surface := C.IMG_Load(path.str)
+	if unsafe { surface == nil } {
+		return unsafe { nil }
+	}
+	tex := C.SDL_CreateTextureFromSurface(ctx.renderer, surface)
+	C.SDL_DestroySurface(surface)
+	if unsafe { tex == nil } {
+		return unsafe { nil }
+	}
+	C.SDL_SetTextureBlendMode(tex, sdl_blendmode_blend)
+	md.image_cache[path] = MdImageTexture{
+		tex:      tex
+		renderer: ctx.renderer
+		gen:      renderer_generation(ctx.renderer)
+	}
+	return tex
+}
+
 // draw_inline_image рисует картинку внутри абзаца (![...]() в тексте). Текстура создаётся лениво при первом показе и кэшируется
 // по разрешённому пути (image_cache); размер запоминается в image_size_cache, и если задан масштаб - раскладка помечается
 // dirty, чтобы высота строки стала точной. Нет файла - вместо картинки рисуется «[Image: ...]». Подпись переносится по словам
@@ -2698,18 +2748,7 @@ fn (mut md MarkdownView) draw_inline_image(span MdRenderSpan, ix f32, ly f32, li
 		return
 	}
 
-	mut tex := md.image_cache[path] or { unsafe { nil } }
-	if unsafe { tex == nil } {
-		surface := C.IMG_Load(path.str)
-		if unsafe { surface != nil } {
-			tex = C.SDL_CreateTextureFromSurface(ctx.renderer, surface)
-			C.SDL_DestroySurface(surface)
-			if unsafe { tex != nil } {
-				C.SDL_SetTextureBlendMode(tex, sdl_blendmode_blend)
-				md.image_cache[path] = tex
-			}
-		}
-	}
+	tex := md.image_texture(path, ctx)
 
 	if unsafe { tex == nil } {
 		return
@@ -2894,18 +2933,7 @@ fn (mut md MarkdownView) draw_image_block(block MdBlock, ly f32, ox f32, vp Rect
 		return
 	}
 
-	mut tex := md.image_cache[path] or { unsafe { nil } }
-	if unsafe { tex == nil } {
-		surface := C.IMG_Load(path.str)
-		if unsafe { surface != nil } {
-			tex = C.SDL_CreateTextureFromSurface(ctx.renderer, surface)
-			C.SDL_DestroySurface(surface)
-			if unsafe { tex != nil } {
-				C.SDL_SetTextureBlendMode(tex, sdl_blendmode_blend)
-				md.image_cache[path] = tex
-			}
-		}
-	}
+	tex := md.image_texture(path, ctx)
 
 	if unsafe { tex == nil } {
 		return
@@ -3439,15 +3467,14 @@ pub fn (md &MarkdownView) get_font_size_step() int {
 // Cleanup
 // ═══════════════════════════════════════════════════════
 
-// cleanup освобождает SDL-текстуры картинок и кэши. Замечание: SDL_DestroyTexture вызывается без проверки is_renderer_alive_gen,
-// в отличие от ImageView.destroy_texture (см. PROJECT.md, «Время жизни SDL-текстур») - если renderer окна уже уничтожен, это
-// повторное освобождение; безопасность зависит от порядка teardown вызывающего кода.
+// cleanup освобождает SDL-текстуры картинок и кэши. Безопасна в любой момент teardown: текстура,
+// чей рендерер уже уничтожен (SDL освободил её вместе с ним), повторно не освобождается -
+// см. MdImageTexture и PROJECT.md, «Время жизни SDL-текстур». Повторный вызов ничего не делает.
+// Мост (vgui_destroy) зовёт её при уничтожении виджета.
 pub fn (mut md MarkdownView) cleanup() {
-	for _, tex in md.image_cache {
-		if unsafe { tex != nil } {
-			C.SDL_DestroyTexture(tex)
-		}
+	for _, entry in md.image_cache {
+		entry.destroy()
 	}
-	md.image_cache = map[string]voidptr{}
+	md.image_cache = map[string]MdImageTexture{}
 	md.image_size_cache = map[string][2]int{}
 }

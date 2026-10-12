@@ -59,11 +59,27 @@ pub fn tooltip_delayed(text string, delay_ms u32) &Tooltip {
 	}
 }
 
-// Привязывает подсказку к виджету-цели. Подсказка не владеет целью и не следит за её
-// уничтожением: если цель уничтожена раньше, target станет висячим указателем
-// (владелец должен сам разорвать связь/уничтожить подсказку вместе с целью).
+// Привязывает подсказку к виджету-цели. Подсказка не владеет целью. Когда цель
+// уничтожается, связь нужно разорвать (detach): мост делает это сам в vgui_destroy
+// (через is_attached_to), V-код, уничтожающий цель раньше подсказки, - вручную.
 pub fn (mut t Tooltip) attach(target &Widget) {
 	t.target = unsafe { target }
+}
+
+// detach отвязывает подсказку от цели и прячет её; без цели подсказка не показывается.
+// Ссылка на уничтоженную цель держала бы её память (якорь GC) и показывала бы
+// подсказку над местом, где цели уже нет.
+pub fn (mut t Tooltip) detach() {
+	t.target = unsafe { nil }
+	t.showing = false
+	t.target_hover = false
+	t.hover_start = 0
+}
+
+// is_attached_to сообщает, привязана ли подсказка к объекту виджета по адресу obj
+// (тому самому указателю, что приходит в vgui_destroy).
+pub fn (t &Tooltip) is_attached_to(obj voidptr) bool {
+	return obj != unsafe { nil } && t.target != unsafe { nil } && widget_object_addr(t.target) == obj
 }
 
 pub fn (mut t Tooltip) set_text(text string) {

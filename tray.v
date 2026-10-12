@@ -173,6 +173,31 @@ fn (mut t Tray) add_entry(menu voidptr, label string, flags u32, entry &TrayEntr
 	return te
 }
 
+// set_label меняет подпись пункта. DBus-бэкенд SDL хранит указатель на строку без
+// копии (SetTrayEntryLabel: entry_dbus->item->utf8 = label), поэтому новая подпись
+// сначала копируется в te.label и в SDL уходит указатель этой копии - он живёт, пока
+// жива запись (весь процесс). Пункт без handle (трей недоступен) - только копия.
+pub fn (mut te TrayEntry) set_label(label string) {
+	te.label = label.clone()
+	if te.handle != unsafe { nil } {
+		C.SDL_SetTrayEntryLabel(te.handle, te.label.str)
+	}
+}
+
+// entry_by_handle ищет запись трея по её SDL_TrayEntry* (тот handle, что отдают
+// мосту on_item/on_checkbox). none - чужой или неизвестный handle.
+pub fn (t &Tray) entry_by_handle(handle voidptr) ?&TrayEntry {
+	if handle == unsafe { nil } {
+		return none
+	}
+	for te in t.entries {
+		if te.handle == handle {
+			return te
+		}
+	}
+	return none
+}
+
 // on_item adds a clickable button whose handler is a plain V closure.
 pub fn (mut t Tray) on_item(menu voidptr, label string, handler fn ()) &TrayEntry {
 	te := &TrayEntry{

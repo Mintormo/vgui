@@ -136,119 +136,108 @@ pub mut:
 	hotkeys []HotkeyBinding
 }
 
-// get_<виджет>(id) - типизированный доступ к виджету по id из YAML. Если id
-// нет в YAML, возвращается nil-указатель (проверяйте `unsafe { w != nil }`).
-// ВНИМАНИЕ: проверки типа нет - приведение voidptr к &T слепое (тег типа
-// widget_tag.v здесь не сверяется), поэтому id должен принадлежать виджету
-// именно запрошенного типа, иначе поведение не определено.
+// get_<виджет>(id) - типизированный доступ к виджету по id из YAML. nil-указатель
+// (проверяйте `unsafe { w != nil }`), если id нет в YAML или он принадлежит виджету
+// другого типа: тег типа в первом поле структуры (widget_tag.v) сверяется с
+// запрошенным видом. Раньше приведение voidptr к &T было слепым, и опечатка в id
+// давала неопределённое поведение вместо nil.
+
+// tagged_widget возвращает указатель виджета id, только если его тег типа равен kind;
+// иначе nil.
+fn (t &UiTree) tagged_widget(id string, kind int) voidptr {
+	p := t.widgets[id] or { return unsafe { nil } }
+	if p == unsafe { nil } || !widget_tag_matches(p, kind) {
+		return unsafe { nil }
+	}
+	return p
+}
+
 pub fn (t &UiTree) get_breadcrumbs(id string) &Breadcrumbs {
-	p := t.widgets[id] or { return unsafe { &Breadcrumbs(nil) } }
-	return unsafe { &Breadcrumbs(p) }
+	return unsafe { &Breadcrumbs(t.tagged_widget(id, kind_breadcrumbs)) }
 }
 
 pub fn (t &UiTree) get_button(id string) &Button {
-	p := t.widgets[id] or { return unsafe { &Button(nil) } }
-	return unsafe { &Button(p) }
+	return unsafe { &Button(t.tagged_widget(id, kind_button)) }
 }
 
 pub fn (t &UiTree) get_text_input(id string) &TextInput {
-	p := t.widgets[id] or { return unsafe { &TextInput(nil) } }
-	return unsafe { &TextInput(p) }
+	return unsafe { &TextInput(t.tagged_widget(id, kind_text_input)) }
 }
 
 pub fn (t &UiTree) get_label(id string) &Label {
-	p := t.widgets[id] or { return unsafe { &Label(nil) } }
-	return unsafe { &Label(p) }
+	return unsafe { &Label(t.tagged_widget(id, kind_label)) }
 }
 
 pub fn (t &UiTree) get_checkbox(id string) &CheckBox {
-	p := t.widgets[id] or { return unsafe { &CheckBox(nil) } }
-	return unsafe { &CheckBox(p) }
+	return unsafe { &CheckBox(t.tagged_widget(id, kind_check_box)) }
 }
 
 pub fn (t &UiTree) get_radio_button(id string) &RadioButton {
-	p := t.widgets[id] or { return unsafe { &RadioButton(nil) } }
-	return unsafe { &RadioButton(p) }
+	return unsafe { &RadioButton(t.tagged_widget(id, kind_radio_button)) }
 }
 
 pub fn (t &UiTree) get_toggle_switch(id string) &ToggleSwitch {
-	p := t.widgets[id] or { return unsafe { &ToggleSwitch(nil) } }
-	return unsafe { &ToggleSwitch(p) }
+	return unsafe { &ToggleSwitch(t.tagged_widget(id, kind_toggle_switch)) }
 }
 
 pub fn (t &UiTree) get_combo_box(id string) &ComboBox {
-	p := t.widgets[id] or { return unsafe { &ComboBox(nil) } }
-	return unsafe { &ComboBox(p) }
+	return unsafe { &ComboBox(t.tagged_widget(id, kind_combo_box)) }
 }
 
 pub fn (t &UiTree) get_list_box(id string) &ListBox {
-	p := t.widgets[id] or { return unsafe { &ListBox(nil) } }
-	return unsafe { &ListBox(p) }
+	return unsafe { &ListBox(t.tagged_widget(id, kind_list_box)) }
 }
 
 pub fn (t &UiTree) get_tab_box(id string) &TabBox {
-	p := t.widgets[id] or { return unsafe { &TabBox(nil) } }
-	return unsafe { &TabBox(p) }
+	return unsafe { &TabBox(t.tagged_widget(id, kind_tab_box)) }
 }
 
 pub fn (t &UiTree) get_menu_bar(id string) &MenuBar {
-	p := t.widgets[id] or { return unsafe { &MenuBar(nil) } }
-	return unsafe { &MenuBar(p) }
+	return unsafe { &MenuBar(t.tagged_widget(id, kind_menu_bar)) }
 }
 
 pub fn (t &UiTree) get_menu_item(id string) &MenuItem {
-	p := t.widgets[id] or { return unsafe { &MenuItem(nil) } }
-	return unsafe { &MenuItem(p) }
+	return unsafe { &MenuItem(t.tagged_widget(id, kind_menu_item)) }
 }
 
 pub fn (t &UiTree) get_context_menu(id string) &ContextMenu {
-	p := t.widgets[id] or { return unsafe { &ContextMenu(nil) } }
-	return unsafe { &ContextMenu(p) }
+	return unsafe { &ContextMenu(t.tagged_widget(id, kind_context_menu)) }
 }
 
 pub fn (t &UiTree) get_splitter(id string) &Splitter {
-	p := t.widgets[id] or { return unsafe { &Splitter(nil) } }
-	return unsafe { &Splitter(p) }
+	return unsafe { &Splitter(t.tagged_widget(id, kind_splitter)) }
 }
 
 pub fn (t &UiTree) get_tree_view(id string) &TreeView {
-	p := t.widgets[id] or { return unsafe { &TreeView(nil) } }
-	return unsafe { &TreeView(p) }
+	return unsafe { &TreeView(t.tagged_widget(id, kind_tree_view)) }
 }
 
 pub fn (t &UiTree) get_spinner(id string) &Spinner {
-	p := t.widgets[id] or { return unsafe { &Spinner(nil) } }
-	return unsafe { &Spinner(p) }
+	return unsafe { &Spinner(t.tagged_widget(id, kind_spinner)) }
 }
 
 pub fn (t &UiTree) get_tooltip(id string) &Tooltip {
-	p := t.widgets[id] or { return unsafe { &Tooltip(nil) } }
-	return unsafe { &Tooltip(p) }
+	return unsafe { &Tooltip(t.tagged_widget(id, kind_tooltip)) }
 }
 
 pub fn (t &UiTree) get_code_editor(id string) &CodeEditor {
-	p := t.widgets[id] or { return unsafe { &CodeEditor(nil) } }
-	return unsafe { &CodeEditor(p) }
+	return unsafe { &CodeEditor(t.tagged_widget(id, kind_code_editor)) }
 }
 
 pub fn (t &UiTree) get_slider(id string) &Slider {
-	p := t.widgets[id] or { return unsafe { &Slider(nil) } }
-	return unsafe { &Slider(p) }
+	return unsafe { &Slider(t.tagged_widget(id, kind_slider)) }
 }
 
 pub fn (t &UiTree) get_progress_bar(id string) &ProgressBar {
-	p := t.widgets[id] or { return unsafe { &ProgressBar(nil) } }
-	return unsafe { &ProgressBar(p) }
+	return unsafe { &ProgressBar(t.tagged_widget(id, kind_progress_bar)) }
 }
 
 pub fn (t &UiTree) get_accordion(id string) &Accordion {
-	p := t.widgets[id] or { return unsafe { &Accordion(nil) } }
-	return unsafe { &Accordion(p) }
+	return unsafe { &Accordion(t.tagged_widget(id, kind_accordion)) }
 }
 
 pub fn (t &UiTree) get_image_view(id string) &ImageView {
-	p := t.widgets[id] or { return unsafe { &ImageView(nil) } }
-	return unsafe { &ImageView(p) }
+	return unsafe { &ImageView(t.tagged_widget(id, kind_image_view)) }
 }
 
 // ═══════════════════════════════════════════════════════

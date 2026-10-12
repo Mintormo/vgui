@@ -183,6 +183,7 @@ fn C.SDL_GetTrayMenu(tray voidptr) voidptr
 fn C.SDL_InsertTrayEntryAt(menu voidptr, pos int, label &char, flags u32) voidptr
 fn C.SDL_RemoveTrayEntry(entry voidptr)
 fn C.SDL_SetTrayEntryLabel(entry voidptr, label &char)
+fn C.SDL_GetTrayEntryLabel(entry voidptr) &char
 fn C.SDL_SetTrayEntryChecked(entry voidptr, checked bool)
 fn C.SDL_GetTrayEntryChecked(entry voidptr) bool
 fn C.SDL_SetTrayEntryEnabled(entry voidptr, enabled bool)

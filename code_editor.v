@@ -213,13 +213,18 @@ pub fn (e &CodeEditor) get_text() string {
 // ce_expand_tabs заменяет каждый '\t' на tab_size пробелов (не выравнивание по
 // колонкам табуляции, а простая подстановка). Единственное место, где текст
 // превращается в "экранный": по нему измеряют ширину и рисуют.
-// Внимание: берёт срез строки из 16 пробелов, поэтому tab_size > 16 приведёт к панике.
+// Отрицательный tab_size считается нулём (табы просто исчезают из экранного текста).
 fn ce_expand_tabs(s string, tab_size int) string {
 	if !s.contains('\t') {
 		return s
 	}
-	spaces := '                '[..tab_size]
-	return s.replace('\t', spaces)
+	return s.replace('\t', ce_spaces(tab_size))
+}
+
+// ce_spaces - строка из n пробелов (n <= 0 - пустая строка). Раньше отступ брали
+// срезом готовой строки пробелов, и tab_size длиннее неё ронял программу паникой.
+fn ce_spaces(n int) string {
+	return ' '.repeat(max_int(n, 0))
 }
 
 // get_line_count - число строк (>= 1).
@@ -1958,26 +1963,23 @@ fn (mut e CodeEditor) key_delete(ctrl bool) {
 }
 
 // key_tab вставляет tab_size пробелов (не символ '\t'; существующие табы в
-// тексте остаются). Срез из 4 пробелов: при tab_size > 4 будет паника (на
-// практике tab_size = 4 по умолчанию).
+// тексте остаются).
 fn (mut e CodeEditor) key_tab() {
-	spaces := '    '[..e.tab_size]
-	e.insert_text(spaces)
+	e.insert_text(ce_spaces(e.tab_size))
 }
 
 // key_shift_tab убирает до tab_size ведущих пробелов/табов у ТЕКУЩЕЙ строки
 // (многострочное выделение не обрабатывается - сдвигается только строка курсора).
-// Замечание: снимок для отмены сохраняется до проверки, есть ли что убирать,
-// так что нажатие на строке без отступа добавляет пустой шаг в историю и
-// обрывает ветку redo.
+// Снимок для отмены сохраняется только когда есть что убирать: на строке без
+// отступа пустой шаг в истории оборвал бы ветку redo (см. undo.v).
 fn (mut e CodeEditor) key_shift_tab() {
-	e.save_undo()
 	line := e.lines[e.cur_line]
 	indent := ce_leading_indent(line)
 	remove := min_int(e.tab_size, indent)
 	if remove <= 0 {
 		return
 	}
+	e.save_undo()
 	mut nw := []rune{cap: line.len - remove}
 	for i in remove .. line.len {
 		nw << line[i]
