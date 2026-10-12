@@ -47,18 +47,21 @@ pub enum NotificationAnim {
 @[heap]
 pub struct Notification {
 pub mut:
-	type_tag    int = kind_notification // тег типа, см. widget_tag.v
-	bounds      Rect
-	kind        NotificationKind = .info
-	title       string
-	message     string
-	icon_path   string
-	visible     bool = true
-	enabled     bool = true
-	closable    bool = true
-	hovered     bool
-	close_hover bool
-	close_press bool
+	type_tag int = kind_notification // тег типа, см. widget_tag.v
+	bounds   Rect
+	// Область, перерисованная по анимации в прошлом кадре (anim_area): если менеджер
+	// сдвинул уведомление, старое место тоже нужно стереть.
+	last_anim_area Rect
+	kind           NotificationKind = .info
+	title          string
+	message        string
+	icon_path      string
+	visible        bool = true
+	enabled        bool = true
+	closable       bool = true
+	hovered        bool
+	close_hover    bool
+	close_press    bool
 	// Auto-dismiss
 	// время жизни в мс до автозакрытия; 0 — только вручную. Ошибки (notification_error) живут дольше — 6000
 	duration_ms u32 = 4000
@@ -285,6 +288,12 @@ fn (n &Notification) has_icon() bool {
 
 // anim_offset — смещение (dx, dy) для анимации появления/исчезновения: t = show * dismiss;
 // при t >= 0.999 смещения нет, иначе до 40 px от стороны, указанной anim_kind (для .fade — 0).
+// anim_area - всё, что уведомление может закрасить за кадр анимации: bounds плюс
+// наибольший сдвиг anim_offset (40) и тень темы.
+fn (n &Notification) anim_area(ctx &RenderContext) Rect {
+	return n.bounds.expanded(f32(40) + max_f32(ctx.theme.shadow_offset, 0) + 2)
+}
+
 fn (n &Notification) anim_offset() (f32, f32) {
 	t := n.show_anim.value * n.dismiss_anim.value
 	if t >= 0.999 {
@@ -357,8 +366,9 @@ fn (n &Notification) draw_builtin_icon(r Rect, c Color, mut ctx RenderContext) {
 
 // draw: (1) проверяет таймер автозакрытия, (2) шагает show_anim/dismiss_anim и по
 // окончании закрытия ставит dismissed + on_dismiss, (3) пока идёт анимация или
-// тикает таймер — заказывает следующий кадр (mark_anim на всё окно, не rect;
-// область уведомления сдвигается анимацией), (4) рисует тень, фон, рамку, акцентную полосу, значок,
+// тикает таймер — заказывает следующий кадр только для своей области (anim_area:
+// bounds с запасом на сдвиг анимации и тень) и прошлой области, а не всего окна
+// (правило инвалидации из CLAUDE.md), (4) рисует тень, фон, рамку, акцентную полосу, значок,
 // текст и ×. На время рисования n.bounds подменяется сдвинутым прямоугольником
 // (anim_bounds), чтобы геометрические помощники (icon_rect и др.) учитывали
 // смещение; в конце bounds возвращается.
@@ -394,7 +404,12 @@ pub fn (mut n Notification) draw(mut ctx RenderContext) {
 	// Keep redrawing while: show anim running, dismiss anim running, or auto-dismiss timer active
 	timer_active := !n.dismissing && n.duration_ms > 0
 	if n.show_anim.animating() || n.dismissing || timer_active {
-		ctx.mark_anim('notification')
+		area := n.anim_area(ctx)
+		if n.last_anim_area.w > 0 && n.last_anim_area != area {
+			ctx.mark_anim_rect('notification', n.last_anim_area)
+		}
+		ctx.mark_anim_rect('notification', area)
+		n.last_anim_area = area
 	}
 
 	off_x, off_y := n.anim_offset()

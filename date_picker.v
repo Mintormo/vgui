@@ -140,23 +140,19 @@ fn dp_day_of_week(y int, m int, d int) int {
 	return if dow < 0 { dow + 7 } else { dow }
 }
 
-// dp_month_name - английское название месяца; '?' для неверного номера.
+// dp_month_name - название месяца на языке интерфейса (ключи dp.month.1..12); '?' для
+// неверного номера.
 fn dp_month_name(m int) string {
-	return match m {
-		1 { 'January' }
-		2 { 'February' }
-		3 { 'March' }
-		4 { 'April' }
-		5 { 'May' }
-		6 { 'June' }
-		7 { 'July' }
-		8 { 'August' }
-		9 { 'September' }
-		10 { 'October' }
-		11 { 'November' }
-		12 { 'December' }
-		else { '?' }
+	if m < 1 || m > 12 {
+		return '?'
 	}
+	return tr('dp.month.${m}')
+}
+
+// dp_day_name - сокращённое название дня недели на языке интерфейса; i - колонка сетки
+// (0 = понедельник).
+fn dp_day_name(i int) string {
+	return tr(dp_day_keys[i])
 }
 
 // ─── Drawing ───────────────────────────────────────────
@@ -212,10 +208,10 @@ pub fn (mut dp DatePicker) handle_event(event &GuiEvent, app &App) bool {
 @[params]
 pub struct DateDialogConfig {
 pub mut:
-	title string = 'Select Date'
-	year  int // 0 = today
-	month int // 0 = today
-	day   int // 0 = today
+	title string // '' - перевод ключа dp.title
+	year  int    // 0 = today
+	month int    // 0 = today
+	day   int    // 0 = today
 }
 
 // date_dialog opens a modal calendar dialog and returns the chosen
@@ -228,7 +224,8 @@ pub fn date_dialog(parent &Window, mut app App, cfg DateDialogConfig) (int, int,
 	y := if cfg.year > 0 { cfg.year } else { now.year }
 	m := if cfg.month > 0 { cfg.month } else { now.month }
 	d := if cfg.day > 0 { cfg.day } else { now.day }
-	return dp_run_dialog(parent, mut app, y, m, d, cfg.title)
+	title := if cfg.title.len > 0 { cfg.title } else { tr('dp.title') }
+	return dp_run_dialog(parent, mut app, y, m, d, title)
 }
 
 // ─── Widget dialog ─────────────────────────────────────
@@ -263,7 +260,7 @@ fn dp_open_dialog(mut dp DatePicker, app &App) {
 
 	mut mapp := unsafe { &App(app) }
 	y, m, d, confirmed := dp_run_dialog(parent, mut mapp, dp.year, dp.month, dp.day,
-		'Select Date')
+		tr('dp.title'))
 	if confirmed {
 		dp.year = y
 		dp.month = m
@@ -311,7 +308,7 @@ fn dp_run_dialog(parent &Window, mut app App, year int, month int, day int, titl
 		state: state
 	}
 
-	mut btn_today := button('Today')
+	mut btn_today := button(tr('btn.today'))
 	btn_today.style = .flat
 	btn_today.on_click = fn [mut state] () {
 		now := time.now()
@@ -320,13 +317,13 @@ fn dp_run_dialog(parent &Window, mut app App, year int, month int, day int, titl
 		state.day = now.day
 	}
 
-	mut btn_ok := button('OK')
+	mut btn_ok := button(tr('btn.ok'))
 	btn_ok.style = .accent
 	btn_ok.on_click = fn [mut state] () {
 		state.confirmed = true
 	}
 
-	mut btn_cancel := button('Cancel')
+	mut btn_cancel := button(tr('btn.cancel'))
 	btn_cancel.on_click = fn [mut state] () {
 		state.cancelled = true
 	}
@@ -398,7 +395,9 @@ mut:
 	font_h f32
 }
 
-const dp_day_names = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']
+// Ключи перевода сокращённых дней недели, с понедельника (dp_day_name).
+const dp_day_keys = ['dp.day.mon', 'dp.day.tue', 'dp.day.wed', 'dp.day.thu', 'dp.day.fri', 'dp.day.sat',
+	'dp.day.sun']
 
 // draw рисует календарь: строка «Месяц Год» со стрелками <>, заголовок Пн..Вс и 6 строк по 7 ячеек.
 // Неделя начинается с понедельника: первый день месяца смещён на first_dow = (dow_вс0 + 6) % 7 ячеек.
@@ -445,8 +444,9 @@ fn (mut a DpArea) draw(mut ctx RenderContext) {
 	hdr_y := nav_y + nav_h
 	for i in 0 .. 7 {
 		dx := a.bounds.x + f32(i) * cell_w
-		dw := ctx.measure_text_with_font(dp_day_names[i], font).x
-		ctx.draw_text_with_font(dp_day_names[i], dx + (cell_w - dw) * 0.5, hdr_y,
+		day_name := dp_day_name(i)
+		dw := ctx.measure_text_with_font(day_name, font).x
+		ctx.draw_text_with_font(day_name, dx + (cell_w - dw) * 0.5, hdr_y,
 			ctx.theme.text_secondary, font)
 	}
 

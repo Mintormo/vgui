@@ -147,8 +147,7 @@ fn borderless_update_cursor(w &Window) {
 
 	if zone != bd.last_zone {
 		cursor_id := hittest_zone_to_cursor(zone)
-		cursor := C.SDL_CreateSystemCursor(cursor_id)
-		C.SDL_SetCursor(cursor)
+		set_cursor(cursor_id)
 		bd.last_zone = zone
 	}
 }
@@ -342,8 +341,7 @@ fn borderless_force_arrow(w &Window) {
 	mut bd := unsafe { &BorderlessData(w.hittest_data) }
 	if bd.last_zone != sdl_hittest_normal {
 		bd.last_zone = sdl_hittest_normal
-		cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_arrow)
-		C.SDL_SetCursor(cursor)
+		set_cursor(sdl_system_cursor_arrow)
 	}
 }
 
@@ -369,6 +367,5 @@ pub fn (mut w Window) enable_borderless_resize(border int) {
 pub fn (mut w Window) disable_borderless_hittest() {
 	C.SDL_SetWindowHitTest(w.sdl_window, unsafe { nil }, unsafe { nil })
 	w.hittest_data = unsafe { nil }
-	cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_arrow)
-	C.SDL_SetCursor(cursor)
+	set_cursor(sdl_system_cursor_arrow)
 }

@@ -108,6 +108,15 @@ fn ce_pos_max(a CePos, b CePos) CePos {
 pub struct CodeEditor {
 pub mut:
 	type_tag int = kind_code_editor // тег типа, см. widget_tag.v
+	// text_rev - ревизия текста: растёт при каждой правке (save_undo, fire_change,
+	// set_text). По ней кэшируется ширина самой длинной строки (width_cache_*):
+	// раньше max_content_width мерила все строки каждый кадр и на каждое событие мыши.
+	// Код, правящий lines напрямую, должен звать text_changed().
+	text_rev         u64
+	width_cache_rev  u64 = max_u64
+	width_cache_font voidptr
+	width_cache_tab  int
+	width_cache      f32
 	// Колесо мыши: false - виджет его не берёт (прокрутка уходит
 	// контейнеру, например панели в ScrollBox)
 	wheel                 bool = true
@@ -191,6 +200,7 @@ pub fn (mut e CodeEditor) set_text(text string) {
 	e.scroll_y = 0
 	e.clear_sel()
 	e.history.clear()
+	e.text_changed()
 }
 
 // load_file читает файл как UTF-8 (без разбора BOM; для других кодировок -
@@ -331,6 +341,12 @@ fn (e &CodeEditor) snap() CeUndoEntry {
 // звать только когда правка точно произойдёт (save обрывает ветку redo).
 fn (mut e CodeEditor) save_undo() {
 	e.history.save(e.snap())
+	e.text_changed()
+}
+
+// text_changed отмечает, что текст изменился: сбрасывает кэш ширины строк.
+pub fn (mut e CodeEditor) text_changed() {
+	e.text_rev++
 }
 
 // restore возвращает текст и курсор из снимка, сбрасывает выделение и сообщает
@@ -376,6 +392,7 @@ pub fn (mut e CodeEditor) clear_undo() {
 
 // fire_change / fire_cursor_move - безопасный вызов колбэков (nil пропускается).
 fn (mut e CodeEditor) fire_change() {
+	e.text_changed()
 	if e.on_change != unsafe { nil } {
 		e.on_change()
 	}
@@ -558,8 +575,16 @@ fn (e &CodeEditor) max_scroll_y(ctx &RenderContext) f32 {
 // max_content_width - ширина самой длинной строки (после раскрытия табов) плюс
 // поля. Перебирает ВСЕ строки и измеряет текст - O(размер текста), зовётся
 // на каждый кадр и событие мыши, на больших файлах это заметно.
+// max_content_width - ширина самой длинной строки плюс поля. Кэшируется по ревизии
+// текста, шрифту и размеру таба: пересчёт (измерение всех строк) - только когда что-то
+// из этого изменилось. Кэш - служебное состояние, поэтому пишется через неизменяемый
+// получатель.
 fn (e &CodeEditor) max_content_width(ctx &RenderContext) f32 {
 	font := e.eff_font(ctx)
+	if e.width_cache_rev == e.text_rev && e.width_cache_font == font
+		&& e.width_cache_tab == e.tab_size {
+		return e.width_cache
+	}
 	mut max_w := f32(0)
 	for line in e.lines {
 		text := if line.len > 0 { ce_expand_tabs(line.string(), e.tab_size) } else { '' }
@@ -568,7 +593,12 @@ fn (e &CodeEditor) max_content_width(ctx &RenderContext) f32 {
 			max_w = w
 		}
 	}
-	return max_w + ce_text_pad * 2
+	mut cache := unsafe { &CodeEditor(e) }
+	cache.width_cache = max_w + ce_text_pad * 2
+	cache.width_cache_rev = e.text_rev
+	cache.width_cache_font = font
+	cache.width_cache_tab = e.tab_size
+	return cache.width_cache
 }
 
 fn (e &CodeEditor) max_scroll_x(ctx &RenderContext) f32 {
@@ -626,16 +656,26 @@ fn (e &CodeEditor) hit_pos(mx f32, my f32, ctx &RenderContext) CePos {
 	if ln.len == 0 || rel_x <= 0 {
 		return ce_pos(line, 0)
 	}
-	mut best := 0
-	mut best_d := abs_f32(rel_x)
-	for i in 1 .. ln.len + 1 {
-		w := ctx.measure_text_with_font(ce_expand_tabs(ln[..i].string(), e.tab_size), font).x
-		d := abs_f32(w - rel_x)
-		if d < best_d {
-			best_d = d
-			best = i
+	// Ширина префикса строки растёт с его длиной, поэтому граница ищется двоичным
+	// поиском (O(log n) измерений), а не перебором всех префиксов (было O(n) измерений
+	// по O(n) символов каждое). lo - наименьшая длина префикса шириной >= rel_x.
+	prefix_w := fn [ln, e, ctx, font] (n int) f32 {
+		return ctx.measure_text_with_font(ce_expand_tabs(ln[..n].string(), e.tab_size), font).x
+	}
+	mut lo := 1
+	mut hi := ln.len
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if prefix_w(mid) < rel_x {
+			lo = mid + 1
+		} else {
+			hi = mid
 		}
 	}
+	// Ближайшая к rel_x граница - lo или lo - 1.
+	w_lo := prefix_w(lo)
+	w_prev := if lo > 1 { prefix_w(lo - 1) } else { f32(0) }
+	best := if abs_f32(w_lo - rel_x) < abs_f32(rel_x - w_prev) { lo } else { lo - 1 }
 	return ce_pos(line, best)
 }
 

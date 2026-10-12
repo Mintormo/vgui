@@ -105,6 +105,7 @@ fn C.SDL_ShowCursor() bool
 fn C.SDL_HideCursor() bool
 fn C.SDL_CreateSystemCursor(id int) voidptr
 fn C.SDL_SetCursor(cursor voidptr) bool
+fn C.SDL_GetCursor() voidptr
 fn C.SDL_DestroyCursor(cursor voidptr)
 
 // Hit-test callback for borderless resize

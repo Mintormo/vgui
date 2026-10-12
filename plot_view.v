@@ -1138,8 +1138,7 @@ pub fn (mut p PlotView) handle_event(event &GuiEvent, app &App) bool {
 			.mouse_up {
 				if event.mouse_btn == .left {
 					p.panning = false
-					cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_arrow)
-					C.SDL_SetCursor(cursor)
+					set_cursor(sdl_system_cursor_arrow)
 				}
 				return true
 			}
@@ -1294,8 +1293,7 @@ pub fn (mut p PlotView) handle_event(event &GuiEvent, app &App) bool {
 				p.pan_start_my = event.mouse_y
 				p.pan_start_vx = p.view_x
 				p.pan_start_vy = p.view_y
-				cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_sizeall)
-				C.SDL_SetCursor(cursor)
+				set_cursor(sdl_system_cursor_sizeall)
 				return true
 			}
 		}

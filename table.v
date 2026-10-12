@@ -1427,8 +1427,7 @@ pub fn (mut t TableView) handle_event(event &GuiEvent, app &App) bool {
 				if event.mouse_btn == .left {
 					t.col_resizing = false
 					t.resize_col = -1
-					cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_arrow)
-					C.SDL_SetCursor(cursor)
+					set_cursor(sdl_system_cursor_arrow)
 				}
 				return true
 			}
@@ -1453,8 +1452,7 @@ pub fn (mut t TableView) handle_event(event &GuiEvent, app &App) bool {
 				if event.mouse_btn == .left {
 					t.row_resizing = false
 					t.resize_row = -1
-					cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_arrow)
-					C.SDL_SetCursor(cursor)
+					set_cursor(sdl_system_cursor_arrow)
 				}
 				return true
 			}
@@ -1479,14 +1477,11 @@ pub fn (mut t TableView) handle_event(event &GuiEvent, app &App) bool {
 				col_border := t.hit_col_border(event.mouse_x, event.mouse_y)
 				row_border := t.hit_row_border(event.mouse_x, event.mouse_y)
 				if col_border >= 0 {
-					cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_sizewe)
-					C.SDL_SetCursor(cursor)
+					set_cursor(sdl_system_cursor_sizewe)
 				} else if row_border >= 0 {
-					cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_sizens)
-					C.SDL_SetCursor(cursor)
+					set_cursor(sdl_system_cursor_sizens)
 				} else {
-					cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_arrow)
-					C.SDL_SetCursor(cursor)
+					set_cursor(sdl_system_cursor_arrow)
 				}
 
 				if t.has_vsb() {

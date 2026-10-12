@@ -57,9 +57,9 @@ pub mut:
 	max_visible int = 8
 	scroll_y    f32
 	// Пикселей прокрутки за один «щелчок» колеса.
-	scroll_speed f32              = 26
-	pad          f32              = 6
-	placeholder  string           = '— выберите —'
+	scroll_speed f32 = 26
+	pad          f32 = 6
+	placeholder  string // '' - перевод ключа combo.placeholder (eff_placeholder)
 	on_change    fn (int, string) = unsafe { nil }
 	// Internal: dropdown direction & scrollbar drag
 	// Внутреннее состояние popup: направление раскрытия и перетаскивание ползунка полосы прокрутки
@@ -69,6 +69,12 @@ pub mut:
 	sb_hovered           bool
 	sb_drag_start_y      f32
 	sb_drag_start_scroll f32
+}
+
+// eff_placeholder - подсказка пустого выбора: заданная placeholder или перевод
+// combo.placeholder на язык интерфейса (раньше по умолчанию стояла русская строка).
+pub fn (cb &ComboBox) eff_placeholder() string {
+	return if cb.placeholder.len > 0 { cb.placeholder } else { tr('combo.placeholder') }
 }
 
 // ─── Constructors ──────────────────────────────────────
@@ -788,7 +794,7 @@ pub fn (mut cb ComboBox) draw(mut ctx RenderContext) {
 		ctx.draw_text_with_font(cb.entries[cb.selected].text, cb.bounds.x + cb.pad, ty,
 			ctx.theme.eff_cb_text(), font)
 	} else {
-		ctx.draw_text_with_font(cb.placeholder, cb.bounds.x + cb.pad, ty, ctx.theme.text_secondary,
+		ctx.draw_text_with_font(cb.eff_placeholder(), cb.bounds.x + cb.pad, ty, ctx.theme.text_secondary,
 			font)
 	}
 

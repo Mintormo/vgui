@@ -13,8 +13,8 @@ fn test_collapsed_view_keeps_root_and_hover() {
 	mut win := create_window(title: 'bc', width: 400, height: 100)!
 	app.add_window(win)
 
-	mut bc := breadcrumbs_with_items(['Root', 'aaaaaaaaaa', 'bbbbbbbbbb', 'cccccccccc',
-		'dddddddddd', 'Last'])
+	mut bc := breadcrumbs_with_items(['Root', 'aaaaaaaaaa', 'bbbbbbbbbb', 'cccccccccc', 'dddddddddd',
+		'Last'])
 	font := win.ctx.get_font_immut(bc.font_style, bc.font_size)
 	root_w := win.ctx.measure_text_with_font('Root', font).x
 	last_w := win.ctx.measure_text_with_font('Last', font).x

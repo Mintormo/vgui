@@ -186,6 +186,18 @@ const tv_max_edit_undo = 50
 pub struct TreeView {
 pub mut:
 	type_tag int = kind_tree_view // тег типа, см. widget_tag.v
+	// Кэш плоского списка и размера содержимого (build_flat/content_size зовутся из
+	// draw, hit-test, has_vsb, max_scroll_* - раньше каждый раз заново, с измерением
+	// текста всех видимых узлов). Ключ - отпечаток видимой части дерева (tree_fingerprint),
+	// для размера ещё шрифт и геометрия строки. Служебное состояние.
+	flat_cache      []FlatNode
+	flat_cache_fp   u64
+	flat_cache_ok   bool
+	size_cache_w    f32
+	size_cache_h    f32
+	size_cache_key  u64
+	size_cache_font voidptr
+	size_cache_ok   bool
 	// Колесо мыши: false - виджет его не берёт (прокрутка уходит
 	// контейнеру, например панели в ScrollBox)
 	wheel       bool = true
@@ -398,14 +410,51 @@ struct FlatNode {
 }
 
 // Разворачивает дерево в плоский список видимых узлов (обход в глубину; свёрнутые
-// ветки пропускаются). Вызывается на каждый draw/hit-test/клавишу - O(число
-// видимых узлов).
+// ветки пропускаются). Результат кэшируется по отпечатку видимой части дерева:
+// повторные вызовы без изменений дерева - только лёгкий обход для отпечатка.
 fn (tv &TreeView) build_flat() []FlatNode {
+	fp := tv.tree_fingerprint()
+	if tv.flat_cache_ok && tv.flat_cache_fp == fp {
+		return tv.flat_cache
+	}
 	mut result := []FlatNode{cap: 64}
 	for r in tv.roots {
 		tv_flatten(r, 0, mut result)
 	}
+	mut cache := unsafe { &TreeView(tv) }
+	cache.flat_cache = result
+	cache.flat_cache_fp = fp
+	cache.flat_cache_ok = true
 	return result
+}
+
+// tree_fingerprint - хэш видимой части дерева: порядок и адреса видимых узлов, флаг
+// раскрытия, текст и наличие иконки. Узлы не знают своего TreeView и не могут сбросить
+// кэш сами, поэтому изменение дерева распознаётся по отпечатку. Обход без выделения
+// памяти и без измерения текста.
+fn (tv &TreeView) tree_fingerprint() u64 {
+	mut h := u64(14695981039346656037)
+	for r in tv.roots {
+		h = tv_fingerprint_node(r, h)
+	}
+	return h ^ u64(tv.roots.len)
+}
+
+fn tv_fingerprint_node(node &TreeNode, seed u64) u64 {
+	mut h := seed
+	h = (h ^ u64(usize(voidptr(node)))) * 1099511628211
+	h = (h ^ node.text.hash()) * 1099511628211
+	h = (h ^ u64(node.children.len) ^ (if node.expanded { u64(1) << 63 } else { 0 }) ^ (if node.icon_path.len > 0 {
+		u64(1) << 62
+	} else {
+		0
+	})) * 1099511628211
+	if node.expanded {
+		for ch in node.children {
+			h = tv_fingerprint_node(ch, h)
+		}
+	}
+	return h
 }
 
 fn tv_flatten(node &TreeNode, depth int, mut out []FlatNode) {
@@ -435,8 +484,13 @@ fn tv_flatten_with_last(node &TreeNode, depth int, parent_last []bool, mut out [
 // зовут и has_vsb/max_scroll_*.
 fn (tv &TreeView) content_size(ctx &RenderContext) (f32, f32) {
 	flat := tv.build_flat()
-	h := f32(flat.len) * tv.item_height
 	font := ctx.get_font_immut(.regular, 0)
+	// Ключ размера: отпечаток дерева (уже посчитан build_flat) и геометрия строки.
+	key := tv.flat_cache_fp ^ u64(tv.item_height * 64) ^ (u64(tv.indent * 64) << 16) ^ (u64(tv.pad * 64) << 32) ^ (u64(tv.icon_size * 64 + tv.icon_gap) << 48)
+	if tv.size_cache_ok && tv.size_cache_key == key && tv.size_cache_font == font {
+		return tv.size_cache_w, tv.size_cache_h
+	}
+	h := f32(flat.len) * tv.item_height
 	mut max_w := f32(0)
 	for fn_ in flat {
 		x := tv.pad + f32(fn_.depth) * tv.indent + tv.indent
@@ -450,6 +504,12 @@ fn (tv &TreeView) content_size(ctx &RenderContext) (f32, f32) {
 			max_w = w
 		}
 	}
+	mut cache := unsafe { &TreeView(tv) }
+	cache.size_cache_w = max_w
+	cache.size_cache_h = h
+	cache.size_cache_key = key
+	cache.size_cache_font = font
+	cache.size_cache_ok = true
 	return max_w, h
 }
 

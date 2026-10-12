@@ -1283,7 +1283,7 @@ pub fn (mut lb ListBox) draw(mut ctx RenderContext) {
 //   2. иначе по типу события: mouse_move (hover, курсор, hover_index), mouse_down (границы,
 //      полосы, сортировка, виджеты в ячейках, выбор строки), mouse_up, двойной клик, колесо,
 //      клавиатура (только при focused).
-// Курсор мыши (SDL_CreateSystemCursor) переставляется прямо здесь.
+// Курсор мыши переставляется прямо здесь (кэширующий set_cursor).
 pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 	if !lb.visible || !lb.enabled {
 		return false
@@ -1304,8 +1304,7 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 				if event.mouse_btn == .left {
 					lb.col_resizing = false
 					lb.resize_col = -1
-					cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_arrow)
-					C.SDL_SetCursor(cursor)
+					set_cursor(sdl_system_cursor_arrow)
 				}
 				return true
 			}
@@ -1404,8 +1403,7 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 					col_border := lb.hit_col_border(event.mouse_x, event.mouse_y)
 					if col_border >= 0 {
 						lb.resize_hover_col = col_border
-						cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_sizewe)
-						C.SDL_SetCursor(cursor)
+						set_cursor(sdl_system_cursor_sizewe)
 					} else {
 						// Restore cursor if we were hovering a border before
 						// (only if not over scrollbar)
@@ -1413,8 +1411,7 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 							// Header sort button hover
 							lb.sort_hover_col = lb.hit_sort_col(event.mouse_x, event.mouse_y)
 						}
-						cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_arrow)
-						C.SDL_SetCursor(cursor)
+						set_cursor(sdl_system_cursor_arrow)
 					}
 				}
 

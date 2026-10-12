@@ -249,7 +249,7 @@ pub fn (cb &ComboBox) measure(ctx &RenderContext) SizeHint {
 		return SizeHint{}
 	}
 	font := ctx.get_font_immut(.regular, 0)
-	mut widest := ctx.measure_text_with_font(cb.placeholder, font).x
+	mut widest := ctx.measure_text_with_font(cb.eff_placeholder(), font).x
 	for item in cb.items {
 		widest = max_f32(widest, ctx.measure_text_with_font(item, font).x)
 	}

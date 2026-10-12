@@ -67,9 +67,12 @@ pub mut:
 	first  &Widget = unsafe { nil }
 	second &Widget = unsafe { nil }
 	// Internal drag state
-	dragging    bool
-	hovered     bool
-	drag_offset f32 // offset from bar center to mouse at drag start
+	dragging bool
+	hovered  bool
+	// Курсор, стоявший до входа на разделитель (SDL_Cursor*): restore_cursor возвращает
+	// именно его. nil - курсор изменения размера сейчас не поставлен.
+	saved_cursor voidptr
+	drag_offset  f32 // offset from bar center to mouse at drag start
 	// Callback
 	on_resize fn (f32) = unsafe { nil } // called with new ratio
 }
@@ -468,19 +471,28 @@ fn (mut s Splitter) update_ratio_from_mouse(mx f32, my f32) {
 	s.ratio = clamp_f32(r, 0.0, 1.0)
 }
 
-// Ставит системный курсор изменения размера (стрелки влево-вправо или вверх-вниз).
-fn (s &Splitter) set_resize_cursor() {
+// Ставит системный курсор изменения размера (стрелки влево-вправо или вверх-вниз),
+// запомнив прежний при первой установке.
+fn (mut s Splitter) set_resize_cursor() {
+	if s.saved_cursor == unsafe { nil } {
+		s.saved_cursor = C.SDL_GetCursor()
+	}
 	cursor_id := match s.dir {
 		.horizontal { sdl_system_cursor_sizewe }
 		.vertical { sdl_system_cursor_sizens }
 	}
 
-	cursor := C.SDL_CreateSystemCursor(cursor_id)
-	C.SDL_SetCursor(cursor)
+	set_cursor(cursor_id)
 }
 
-// Возвращает курсор-стрелку (не прежний, а именно стандартный).
-fn (s &Splitter) restore_cursor() {
-	cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_arrow)
-	C.SDL_SetCursor(cursor)
+// Возвращает курсор, стоявший до set_resize_cursor (раньше всегда ставилась стрелка, и
+// курсор соседнего виджета - например, текстовый - пропадал). Курсоры vgui кэшируются
+// на весь процесс (set_cursor), поэтому сохранённый указатель жив. Не запоминали - стрелка.
+fn (mut s Splitter) restore_cursor() {
+	if s.saved_cursor != unsafe { nil } {
+		C.SDL_SetCursor(s.saved_cursor)
+		s.saved_cursor = unsafe { nil }
+	} else {
+		set_cursor(sdl_system_cursor_arrow)
+	}
 }

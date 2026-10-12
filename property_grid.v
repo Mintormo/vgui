@@ -1289,10 +1289,10 @@ pub fn (mut pg PropertyGrid) draw(mut ctx RenderContext) {
 		ty := hr.y + (hr.h - fh) * 0.5
 		sx := pg.split_x()
 		ctx.push_clip(Rect{hr.x, hr.y, sx - hr.x, hr.h})
-		ctx.draw_text_with_font('Property', hr.x + pg_pad_h, ty, pg.eff_header_text(ctx), font_b)
+		ctx.draw_text_with_font(tr('pg.property'), hr.x + pg_pad_h, ty, pg.eff_header_text(ctx), font_b)
 		ctx.pop_clip()
 		ctx.push_clip(Rect{sx, hr.y, hr.x + hr.w - sx, hr.h})
-		ctx.draw_text_with_font('Value', sx + pg_pad_h, ty, pg.eff_header_text(ctx), font_b)
+		ctx.draw_text_with_font(tr('pg.value'), sx + pg_pad_h, ty, pg.eff_header_text(ctx), font_b)
 		ctx.pop_clip()
 	}
 
@@ -1530,8 +1530,7 @@ pub fn (mut pg PropertyGrid) handle_event(event &GuiEvent, app &App) bool {
 			.mouse_up {
 				if event.mouse_btn == .left {
 					pg.splitter_dragging = false
-					cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_arrow)
-					C.SDL_SetCursor(cursor)
+					set_cursor(sdl_system_cursor_arrow)
 				}
 				return true
 			}
@@ -1684,11 +1683,9 @@ pub fn (mut pg PropertyGrid) handle_event(event &GuiEvent, app &App) bool {
 			// Splitter hover → cursor
 			pg.splitter_hovered = pg.splitter_rect().contains(mx, my)
 			if pg.splitter_hovered {
-				cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_sizewe)
-				C.SDL_SetCursor(cursor)
+				set_cursor(sdl_system_cursor_sizewe)
 			} else {
-				cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_arrow)
-				C.SDL_SetCursor(cursor)
+				set_cursor(sdl_system_cursor_arrow)
 			}
 
 			// Row hover

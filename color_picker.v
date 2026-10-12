@@ -247,9 +247,9 @@ pub fn (mut cp ColorPicker) handle_event(event &GuiEvent, app &App) bool {
 @[params]
 pub struct ColorDialogConfig {
 pub mut:
-	title      string = 'Color Picker'
-	color      Color  = Color{255, 0, 0, 255}
-	show_alpha bool   = true
+	title      string // '' - перевод ключа cp.title
+	color      Color = Color{255, 0, 0, 255}
+	show_alpha bool  = true
 }
 
 // color_dialog opens a modal color picker dialog and returns the chosen
@@ -257,7 +257,8 @@ pub mut:
 // closes the window). It is fully standalone — invoke it from any callback
 // (e.g. a button's on_click), it is not tied to a ColorPicker widget.
 pub fn color_dialog(parent &Window, mut app App, cfg ColorDialogConfig) (Color, bool) {
-	return cp_run_dialog(parent, mut app, cfg.color, cfg.show_alpha, cfg.title)
+	title := if cfg.title.len > 0 { cfg.title } else { tr('cp.title') }
+	return cp_run_dialog(parent, mut app, cfg.color, cfg.show_alpha, title)
 }
 
 // ─── Widget dialog ─────────────────────────────────────
@@ -294,7 +295,7 @@ fn cp_open_dialog(mut cp ColorPicker, app &App) {
 	}
 
 	mut mapp := unsafe { &App(app) }
-	chosen, confirmed := cp_run_dialog(parent, mut mapp, cp.color, cp.show_alpha, 'Color Picker')
+	chosen, confirmed := cp_run_dialog(parent, mut mapp, cp.color, cp.show_alpha, tr('cp.title'))
 	if confirmed {
 		cp.color = chosen
 		if cp.on_change != unsafe { nil } {
@@ -476,13 +477,13 @@ fn cp_run_dialog(parent &Window, mut app App, initial Color, show_alpha bool, ti
 	}
 
 	// ── Buttons ──
-	mut btn_ok := button('OK')
+	mut btn_ok := button(tr('btn.ok'))
 	btn_ok.style = .accent
 	btn_ok.on_click = fn [mut state] () {
 		state.confirmed = true
 	}
 
-	mut btn_cancel := button('Cancel')
+	mut btn_cancel := button(tr('btn.cancel'))
 	btn_cancel.on_click = fn [mut state] () {
 		state.cancelled = true
 	}
@@ -492,13 +493,13 @@ fn cp_run_dialog(parent &Window, mut app App, initial Color, show_alpha bool, ti
 	right_col.set_spacing(4)
 	right_col.set_padding(0)
 
-	right_col.add(make_title_row('HSV'))
+	right_col.add(make_title_row(tr('cp.hsv')))
 	right_col.add(make_field_row('H:', inp_h))
 	right_col.add(make_field_row('S:', inp_s))
 	right_col.add(make_field_row('V:', inp_v))
 	right_col.add(hseparator())
 
-	right_col.add(make_title_row(if state.show_alpha { 'RGB(A)' } else { 'RGB' }))
+	right_col.add(make_title_row(if state.show_alpha { tr('cp.rgba') } else { 'RGB' }))
 	right_col.add(make_field_row('R:', inp_r))
 	right_col.add(make_field_row('G:', inp_g))
 	right_col.add(make_field_row('B:', inp_b))
@@ -948,9 +949,9 @@ fn (mut p CpPreview) draw(mut ctx RenderContext) {
 	ctx.push_clip(p.bounds)
 	font := ctx.get_font(.regular, 0)
 	fh := ctx.font_height_of(font)
-	ctx.draw_text_with_font('Old', p.bounds.x + 4, p.bounds.y + (p.bounds.h - fh) * 0.5,
+	ctx.draw_text_with_font(tr('cp.old'), p.bounds.x + 4, p.bounds.y + (p.bounds.h - fh) * 0.5,
 		ctx.theme.text_secondary, font)
-	ctx.draw_text_with_font('New', p.bounds.x + half_w + 4, p.bounds.y + (p.bounds.h - fh) * 0.5,
+	ctx.draw_text_with_font(tr('cp.new'), p.bounds.x + half_w + 4, p.bounds.y + (p.bounds.h - fh) * 0.5,
 		ctx.theme.text_secondary, font)
 	ctx.pop_clip()
 }

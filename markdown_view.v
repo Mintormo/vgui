@@ -3117,11 +3117,9 @@ pub fn (mut md MarkdownView) handle_event(event &GuiEvent, app &App) bool {
 					}
 				}
 				if md.hovered_link_idx >= 0 || md.hovered_copy_idx >= 0 {
-					cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_hand)
-					C.SDL_SetCursor(cursor)
+					set_cursor(sdl_system_cursor_hand)
 				} else {
-					cursor := C.SDL_CreateSystemCursor(sdl_system_cursor_arrow)
-					C.SDL_SetCursor(cursor)
+					set_cursor(sdl_system_cursor_arrow)
 				}
 
 				if md.has_vsb() {

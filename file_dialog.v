@@ -23,7 +23,7 @@ pub enum FileDialogMode {
 
 // FileDialogConfig - параметры file_dialog() и его вариантов (@[params]: поля можно передавать
 // именованными аргументами).
-//   title        - зарезервировано; заголовок сейчас берётся из i18n по режиму (fd_build), поле не используется
+//   title        - заголовок окна; '' - перевод по режиму (fd.title.open/save/folder)
 //   start_dir    - каталог, в котором раскрыто дерево; если пуст/не существует - os.getwd()
 //   default_name - имя файла по умолчанию для .save: подставляется, когда выбран каталог
 //   mode         - см. FileDialogMode
@@ -59,6 +59,7 @@ mut:
 	confirmed    bool
 	show_hidden  bool
 	mode         FileDialogMode
+	title        string // заголовок из FileDialogConfig ('' - по режиму)
 	default_name string
 	start_dir    string
 	// путь выделенного узла; сохраняется между перестроениями дерева
@@ -161,25 +162,43 @@ fn fd_sort_names(mut names []string, sort_mode FdSortMode) {
 	}
 }
 
-// fd_sort_files_by_size - сортировка вставками по размеру файла (стабильная). Размер запрашивается у ФС
-// на каждое сравнение (O(n^2) обращений к диску) - для больших каталогов медленно, но каталоги в
-// диалоге невелики. Не меняет порядок равных по размеру файлов.
+// fd_sort_files_by_size - стабильная сортировка по размеру файла; равные по размеру
+// сохраняют прежний (именной) порядок. Размер каждого файла читается у ФС один раз:
+// раньше сортировка вставками спрашивала его на каждое сравнение (O(n^2) обращений к
+// диску), и каталог в несколько тысяч файлов заметно подвисал.
 fn fd_sort_files_by_size(mut files []string, dir_path string, descending bool) {
-	for i in 1 .. files.len {
-		key := files[i]
-		key_size := fd_file_size(os.join_path(dir_path, key))
-		mut j := i - 1
-		for j >= 0 {
-			j_size := fd_file_size(os.join_path(dir_path, files[j]))
-			should_swap := if descending { j_size < key_size } else { j_size > key_size }
-			if !should_swap {
-				break
-			}
-			files[j + 1] = files[j]
-			j--
+	mut entries := []FdSizedName{cap: files.len}
+	for i, name in files {
+		entries << FdSizedName{
+			name:  name
+			size:  fd_file_size(os.join_path(dir_path, name))
+			index: i
 		}
-		files[j + 1] = key
 	}
+	entries.sort_with_compare(fn [descending] (a &FdSizedName, b &FdSizedName) int {
+		if a.size != b.size {
+			less := a.size < b.size
+			return if less != descending { -1 } else { 1 }
+		}
+		// Равные размеры - по прежнему положению: сортировка стабильна.
+		return if a.index < b.index {
+			-1
+		} else if a.index > b.index {
+			1
+		} else {
+			0
+		}
+	})
+	for i, e in entries {
+		files[i] = e.name
+	}
+}
+
+// FdSizedName - имя файла с его размером и прежним положением (для стабильности).
+struct FdSizedName {
+	name  string
+	size  i64
+	index int
 }
 
 fn fd_file_size(path string) i64 {
@@ -476,20 +495,21 @@ fn fd_selected_parent_dir(state &FdState) string {
 
 // ─── Create new folder ─────────────────────────────────
 
-// fd_create_folder создаёт каталог 'New Folder' (при коллизии 'New Folder 2', 3...) в
-// fd_selected_parent_dir, выделяет его и перестраивает дерево. Ошибка mkdir молча игнорируется.
-// Название не локализовано (литерал).
+// fd_create_folder создаёт каталог с переведённым именем fd.new_folder_name («Новая папка»;
+// при коллизии - «Новая папка 2», 3...) в fd_selected_parent_dir, выделяет его и
+// перестраивает дерево. Ошибка mkdir молча игнорируется.
 fn fd_create_folder(mut state FdState) {
 	parent := fd_selected_parent_dir(state)
 	if parent.len == 0 {
 		return
 	}
-	mut name := 'New Folder'
+	base_name := tr('fd.new_folder_name')
+	mut name := base_name
 	mut full := os.join_path(parent, name)
 	mut counter := 1
 	for os.exists(full) {
 		counter++
-		name = 'New Folder ${counter}'
+		name = '${base_name} ${counter}'
 		full = os.join_path(parent, name)
 	}
 	os.mkdir(full) or { return }
@@ -649,7 +669,7 @@ fn fd_cancel_rename(mut state FdState) {
 // пользователь не нажмёт кнопку или не закроет окно; колбэки кнопок ставят флаги в state.
 // Временный диалог всегда снимается с app (remove_dialog) и освобождается (win.cleanup()) - иначе
 // утекут SDL-окно и рендерер. После удаления выделяется родитель, дерево перестраивается.
-// Ошибки rm/rmdir_all игнорируются. Тексты диалога не локализованы.
+// Ошибки rm/rmdir_all игнорируются. Тексты - из перевода (fd.confirm_delete_*).
 fn fd_delete_selected(mut state FdState, parent_win &Window, mut app App) {
 	if state.selected_path.len == 0 {
 		return
@@ -663,15 +683,15 @@ fn fd_delete_selected(mut state FdState, parent_win &Window, mut app App) {
 	}
 
 	is_dir := os.is_dir(state.selected_path)
-	item_type := if is_dir { 'folder' } else { 'file' }
-	msg := 'Delete ${item_type} "${base}"?'
+	msg := trf(if is_dir { 'fd.confirm_delete_folder' } else { 'fd.confirm_delete_file' },
+		base)
 
 	state.delete_path = state.selected_path
 	state.delete_pending = true
 	state.delete_confirmed = false
 
 	mut confirm_dlg := create_dialog(DialogConfig{
-		title:     'Confirm Delete'
+		title:     tr('fd.confirm_delete_title')
 		parent:    unsafe { parent_win }
 		theme:     parent_win.ctx.theme
 		font_path: parent_win.config.font_path
@@ -687,9 +707,9 @@ fn fd_delete_selected(mut state FdState, parent_win &Window, mut app App) {
 	lbl.align = .center
 	lbl.valign = .middle
 
-	mut btn_yes := button('Delete')
+	mut btn_yes := button(tr('btn.delete'))
 	btn_yes.style = .danger
-	mut btn_no := button('Cancel')
+	mut btn_no := button(tr('btn.cancel'))
 
 	btn_yes.on_click = fn [mut state] () {
 		state.delete_confirmed = true
@@ -784,7 +804,9 @@ fn fd_delete_no_confirm(mut state FdState) {
 // Все колбэки захватывают state по ссылке и меняют только его - реальные изменения ФС/дерева
 // делают fd_* функции.
 fn fd_build(mut state FdState, parent &Window, mut app App) &Dialog {
-	title := if state.mode == .open {
+	title := if state.title.len > 0 {
+		state.title
+	} else if state.mode == .open {
 		tr('fd.title.open')
 	} else if state.mode == .save {
 		tr('fd.title.save')
@@ -867,8 +889,8 @@ fn fd_build(mut state FdState, parent &Window, mut app App) &Dialog {
 	mi_delete_noconfirm.shortcut = 'Shift+Del'
 
 	mut sort_sub := menu_submenu(tr('fd.ctx.sort'))
-	mut mi_sort_name_asc := menu_action('Name A→Z')
-	mut mi_sort_name_desc := menu_action('Name Z→A')
+	mut mi_sort_name_asc := menu_action(tr('fd.sort.name_asc'))
+	mut mi_sort_name_desc := menu_action(tr('fd.sort.name_desc'))
 	mut mi_sort_ext := menu_action(tr('fd.sort.type'))
 	mut mi_sort_size_asc := menu_action(tr('fd.sort.size_asc'))
 	mut mi_sort_size_desc := menu_action(tr('fd.sort.size_desc'))
@@ -1095,6 +1117,7 @@ fn fd_run(parent &Window, mut app App, cfg FileDialogConfig) string {
 
 	mut state := &FdState{
 		mode:          cfg.mode
+		title:         cfg.title
 		default_name:  cfg.default_name
 		start_dir:     start
 		selected_path: start
