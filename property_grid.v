@@ -717,7 +717,7 @@ fn (mut pg PropertyGrid) open_date_dialog(prop &Property, app &App) {
 	dp_open_dialog(mut dp, app)
 }
 
-// open_file_dialog: диалог выбора файла (собственный, не нативный) со стартовой папкой из значения; непустой результат записывается и вызывает on_change.
+// open_file_dialog: нативный диалог выбора файла со стартовой папкой из значения; непустой результат записывается и вызывает on_change.
 fn (mut pg PropertyGrid) open_file_dialog(prop &Property, app &App) {
 	if unsafe { app == nil } {
 		return
@@ -748,9 +748,8 @@ fn (mut pg PropertyGrid) open_file_dialog(prop &Property, app &App) {
 	}
 
 	mut mapp := unsafe { &App(app) }
-	result := open_file_dialog(parent, mut mapp, FileDialogConfig{
+	result := native_open_file_dialog(parent, mut mapp, NativeFileDialogConfig{
 		start_dir: p.str_val
-		mode:      .open
 	})
 	if result.len > 0 {
 		p.str_val = result
@@ -791,9 +790,8 @@ fn (mut pg PropertyGrid) open_folder_dialog(prop &Property, app &App) {
 	}
 
 	mut mapp := unsafe { &App(app) }
-	result := select_folder_dialog(parent, mut mapp, FileDialogConfig{
+	result := native_select_folder_dialog(parent, mut mapp, NativeFileDialogConfig{
 		start_dir: p.str_val
-		mode:      .folder
 	})
 	if result.len > 0 {
 		p.str_val = result

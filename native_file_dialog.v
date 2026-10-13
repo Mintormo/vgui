@@ -7,10 +7,21 @@ import os
 //
 // SDL's dialog API is asynchronous — it spawns the OS dialog and calls the
 // supplied C callback later, from the event loop, when the user finishes.
-// To keep vgui's public API synchronous (matching the custom file_dialog),
-// we register a pending request keyed by a monotonic id, hand that id to SDL
-// as `userdata`, and then pump the app event loop until the callback marks
-// the request done. Same shape as fd_run's wait loop.
+// To keep vgui's public API synchronous, we register a pending request keyed
+// by a monotonic id, hand that id to SDL as `userdata`, and then pump the app
+// event loop until the callback marks the request done.
+//
+// Это единственные файловые диалоги vgui: собственный виджетный диалог
+// (file_dialog.v) удалён 13.10.2026 - нативный выглядит привычно для ОС и не
+// требует поддержки.
+
+// FileDialogMode - что выбирает диалог: .open - существующий файл, .save - путь
+// для сохранения (файл может не существовать), .folder - каталог.
+pub enum FileDialogMode {
+	open
+	save
+	folder
+}
 
 // ─── Pending-request registry ──────────────────────────
 

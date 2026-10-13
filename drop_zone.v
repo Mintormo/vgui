@@ -13,8 +13,7 @@ module vgui
 // drop_complete / drop_begin reset that state.
 //
 // Optionally the zone is *clickable*: when `click_to_browse` is set, a left
-// click opens a file-open dialog (custom by default, native when
-// `browse_native`) and feeds the chosen path(s) into `on_drop_file` — the same
+// click opens the native OS file-open dialog and feeds the chosen path(s) into `on_drop_file` — the same
 // callback a real drop uses. So the zone becomes a dual-input target: drag a
 // file in, or click to pick one.
 // ═══════════════════════════════════════════════════════
@@ -37,8 +36,7 @@ pub mut:
 	hovering     bool // drag currently over the zone
 	// Click-to-browse: a left click opens a file-open dialog.
 	click_to_browse        bool
-	browse_native          bool // native OS dialog vs. vgui's custom one
-	browse_multi           bool // allow selecting several files (native only)
+	browse_multi           bool // allow selecting several files
 	browse_start_dir       string
 	browse_filter_names    []string
 	browse_filter_patterns []string
@@ -206,23 +204,12 @@ fn dz_open_browse(mut d DropZone, app &App) {
 
 	mut mapp := unsafe { &App(app) }
 
-	mut paths := []string{}
-	if d.browse_native {
-		paths = native_open_files_dialog(parent, mut mapp, NativeFileDialogConfig{
-			start_dir:       d.browse_start_dir
-			allow_many:      d.browse_multi
-			filter_names:    d.browse_filter_names
-			filter_patterns: d.browse_filter_patterns
-		})
-	} else {
-		// The custom dialog is single-select only.
-		p := open_file_dialog(parent, mut mapp, FileDialogConfig{
-			start_dir: d.browse_start_dir
-		})
-		if p.len > 0 {
-			paths << p
-		}
-	}
+	paths := native_open_files_dialog(parent, mut mapp, NativeFileDialogConfig{
+		start_dir:       d.browse_start_dir
+		allow_many:      d.browse_multi
+		filter_names:    d.browse_filter_names
+		filter_patterns: d.browse_filter_patterns
+	})
 
 	if d.on_drop_file != unsafe { nil } {
 		for p in paths {

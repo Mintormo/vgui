@@ -36,15 +36,15 @@ module vgui
 @[heap]
 pub struct TreeNode {
 pub mut:
-	type_tag  int = kind_tree_node // тег типа, см. widget_tag.v
+	type_tag int = kind_tree_node // тег типа, см. widget_tag.v
 	text     string
 	icon     ItemIcon // иконка слева от текста (item_icon.v); ItemIcon{} - нет
 	expanded bool = true
-	// tag - произвольная строка приложения; vgui её не читает (файловый диалог
-	// хранит здесь путь узла)
-	tag       string
-	children  []&TreeNode
-	parent    &TreeNode = unsafe { nil }
+	// tag - произвольная строка приложения (например, путь файла узла); vgui её
+	// не читает
+	tag      string
+	children []&TreeNode
+	parent   &TreeNode = unsafe { nil }
 	// Per-node custom colors (a=0 means use default)
 	text_color Color = Color{0, 0, 0, 0}
 	bg_color   Color = Color{0, 0, 0, 0}

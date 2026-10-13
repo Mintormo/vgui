@@ -611,12 +611,24 @@ fn cp_parse_hex(text string) ?Color {
 	if hex.len != 6 && hex.len != 8 {
 		return none
 	}
+	mut v := u32(0)
 	for c in hex {
 		if !c.is_hex_digit() {
 			return none
 		}
+		d := if c <= `9` {
+			c - `0`
+		} else if c <= `F` {
+			c - `A` + 10
+		} else {
+			c - `a` + 10
+		}
+		v = v * 16 + u32(d)
 	}
-	return vui_parse_color(hex)
+	if hex.len == 6 {
+		return Color{u8(v >> 16), u8(v >> 8), u8(v), 255}
+	}
+	return Color{u8(v >> 24), u8(v >> 16), u8(v >> 8), u8(v)}
 }
 
 // update_current пересчитывает current (RGBA) из HSV и alpha.

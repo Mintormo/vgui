@@ -108,7 +108,6 @@ v -enable-globals run examples/01_label.v
 | `40_ui_scale.v` | Масштаб интерфейса — `win.set_ui_scale(factor)` |
 | `41_themes.v` | Встроенные темы — `win.set_theme(...)` |
 | `42_i18n.v` | Интернационализация — `add_translations`, `set_locale`, `tr`, `trf` |
-| `43_ui_builder.v` | Декларативный UI на YAML — `load_ui_from_string`, `UiCallbacks`, `add_ui_tree` |
 | `44_image_background.v` | Фоновая картинка — `ImageBackground`, режимы `BgMode` |
 | `45_canvas.v` | Холст с доступом к пикселям — `Canvas`, `on_input`, инструменты рисования |
 | `46_borderless_window.v` | Окно без рамки — `WindowTitleDrag`, `set_borderless`, перетаскивание/resize |

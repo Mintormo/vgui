@@ -160,8 +160,8 @@ pub fn add_translations_json(locale string, text string) ! {
 
 // ─── Built-in dictionaries ─────────────────────────────
 
-// i18n_load_builtins - встроенные строки самой vgui на en и ru (ключи по префиксам: btn.* общие кнопки, fd.* файловый
-// диалог, dp.* календарь, cp.* выбор цвета, combo/table/imageview.* заглушки). Вызывается один раз из i18n_init.
+// i18n_load_builtins - встроенные строки самой vgui на en и ru (ключи по префиксам: btn.* общие кнопки,
+// dp.* календарь, cp.* выбор цвета, combo/table/imageview.* заглушки). Вызывается один раз из i18n_init.
 // Не все ключи реально используются кодом: см. отчёт - часть виджетов пока содержит захардкоженные тексты.
 fn i18n_load_builtins() {
 	i18n.add_translations('en', {
@@ -178,28 +178,6 @@ fn i18n_load_builtins() {
 		'btn.select':               'Select'
 		'btn.today':                'Today'
 		'btn.new_folder':           'Add folder'
-		'fd.title.open':            'Select file'
-		'fd.title.save':            'Save file'
-		'fd.title.folder':          'Select folder'
-		'fd.ext_placeholder':       'Extension (e.g. *.rs)'
-		'fd.sort.name_asc':         'Name A-Z'
-		'fd.sort.name_desc':        'Name Z-A'
-		'fd.sort.type':             'Type'
-		'fd.sort.size_asc':         'Size ↑'
-		'fd.sort.size_desc':        'Size ↓'
-		'fd.confirm_delete_title':  'Confirm Delete'
-		'fd.confirm_delete_file':   'Delete file "{0}"?'
-		'fd.confirm_delete_folder': 'Delete folder "{0}"?'
-		'fd.new_folder_name':       'New folder'
-		'fd.ctx.new_folder':        'New Folder'
-		'fd.ctx.rename':            'Rename'
-		'fd.ctx.delete':            'Delete'
-		'fd.ctx.delete_force':      'Delete (no confirm)'
-		'fd.ctx.sort':              'Sort by'
-		'fd.ctx.show_hidden':       'Show hidden files'
-		'fd.btn.save':              'Save'
-		'fd.btn.select':            'Select'
-		'fd.btn.cancel':            'Cancel'
 		'dp.title':                 'Select Date'
 		'dp.month.1':               'January'
 		'dp.month.2':               'February'
@@ -246,28 +224,6 @@ fn i18n_load_builtins() {
 		'btn.select':               'Выбрать'
 		'btn.today':                'Сегодня'
 		'btn.new_folder':           'Создать папку'
-		'fd.title.open':            'Выбор файла'
-		'fd.title.save':            'Сохранение файла'
-		'fd.title.folder':          'Выбор папки'
-		'fd.ext_placeholder':       'Расширение (например *.rs)'
-		'fd.sort.name_asc':         'Имя А-Я'
-		'fd.sort.name_desc':        'Имя Я-А'
-		'fd.sort.type':             'Тип'
-		'fd.sort.size_asc':         'Размер ↑'
-		'fd.sort.size_desc':        'Размер ↓'
-		'fd.confirm_delete_title':  'Подтверждение удаления'
-		'fd.confirm_delete_file':   'Удалить файл «{0}»?'
-		'fd.confirm_delete_folder': 'Удалить папку «{0}»?'
-		'fd.new_folder_name':       'Новая папка'
-		'fd.ctx.new_folder':        'Создать папку'
-		'fd.ctx.rename':            'Переименовать'
-		'fd.ctx.delete':            'Удалить'
-		'fd.ctx.delete_force':      'Удалить без подтверждения'
-		'fd.ctx.sort':              'Сортировка'
-		'fd.ctx.show_hidden':       'Показывать скрытые файлы'
-		'fd.btn.save':              'Сохранить'
-		'fd.btn.select':            'Выбрать'
-		'fd.btn.cancel':            'Отмена'
 		'dp.title':                 'Выбор даты'
 		'dp.month.1':               'Январь'
 		'dp.month.2':               'Февраль'

@@ -177,7 +177,7 @@ Qt/GTK/WPF интегрированы с UIA (Windows), AT-SPI (Linux), NSAccess
 
 ## 8. Тесты
 
-Юнит-тесты: 59 тест-файлов в vgui (`*_test.v`), 8 в `../vgui-capi` и 13 файлов
+Юнит-тесты: 57 тест-файлов в vgui (`*_test.v`), 8 в `../vgui-capi` и 13 файлов
 (116 тестов) в `../vguipy/tests/` — на ~64k строк V-кода.
 
 - [x] **инструмент тестов для всех** (13.10.2026, `testkit.v`): синтетический
@@ -207,6 +207,13 @@ Qt/GTK/WPF интегрированы с UIA (Windows), AT-SPI (Linux), NSAccess
       `TreeNode`, вкладок `TabBox`, строк `ListBox`, пунктов `ComboBox`,
       секций `Accordion` — в V, C-ABI и Python (`icon=`). См. PROJECT.md,
       «Иконки элементов (ItemIcon)»
+- [x] **Убраны собственные файловые диалоги и UI Builder** (13.10.2026):
+      файловые диалоги — только нативные (`native_*`, в Python —
+      `file_dialog`/`open_file_dialog`/…); YAML UI Builder (`ui_builder.v`,
+      `features.v`, `vguipy/ui_builder.py`, примеры 43) удалён как
+      невостребованный
+- [ ] **Компактный декларативный формат интерфейса** на замену UI Builder —
+      обсуждается (варианты синтаксиса до написания кода)
 - [ ] **Печать / экспорт в PDF или SVG**
 - [x] **Undo/redo как общий фреймворк** (10.10.2026) — `undo.v`:
       `UndoHistory[T]` вместо пяти копий снимочной отмены в `TextInput`,

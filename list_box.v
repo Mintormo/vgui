@@ -867,11 +867,10 @@ fn (lb &ListBox) viewport_rect() Rect {
 fn (lb &ListBox) visible_row_range_v(vp Rect) (int, int) {
 	if lb.item_height <= 0 {
 		// item_height is a public field; callers normally clamp it to a
-		// positive value before it reaches here (ui_builder.v only
-		// assigns when `ih > 0`, and vgui_list_box_set_item_height clamps
-		// via max_f32(height, 1)), but a bad value here would divide by
-		// zero below, so this guard covers direct field assignment from
-		// V code that bypasses both of those paths.
+		// positive value before it reaches here
+		// (vgui_list_box_set_item_height clamps via max_f32(height, 1)),
+		// but a bad value here would divide by zero below, so this guard
+		// covers direct field assignment from V code.
 		return 0, -1
 	}
 	first := max_int(0, int(lb.scroll_y / lb.item_height))
