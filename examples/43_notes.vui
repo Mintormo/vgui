@@ -1,0 +1,29 @@
+// Пример 43: окно заметок в разметке .vui (см. 43_ui_markup.v / .py).
+// Одна строка - один элемент, вложенность - отступом; #id - имя для кода.
+vbox
+  menubar
+    menu "Файл"
+      item "Новая заметка" icon=file-plus shortcut=Ctrl+N #new
+      item "Сохранить" icon=save shortcut=Ctrl+S #save_menu
+      separator
+      item "Выход" icon=log-out #quit
+    menu "Вид"
+      check "Перенос строк" checked #wrap
+  vbox pad=12 gap=8 flex=1
+    hbox gap=8 cross=center
+      input hint="Поиск по заметкам" #search flex=1
+      button "Сохранить" icon=save style=accent #save
+      toggle "Тёмная тема" #dark
+    split ratio=0.3 flex=1
+      list #notes
+        item "Покупки" icon=shopping-cart
+        item "Идеи для фото" icon=camera
+        item "Синтезатор: аккорды" icon=music
+      tabs
+        tab "Текст" icon=file-text
+          textarea #text hint="Текст заметки"
+        tab "Просмотр" icon=eye
+          markdown "# Заметка\n\nВыберите заметку слева." #preview
+    hbox gap=8 cross=center
+      label "Готово" #status flex=1
+      badge "3 заметки" variant=neutral #count
