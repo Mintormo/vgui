@@ -7,7 +7,7 @@ module vgui
 // обёртки по режимам (open/save/folder); вызов блокирующий: функция сама крутит цикл событий
 // (process_events/render_all) до закрытия и возвращает путь или ''.
 // Устройство: FdState хранит состояние, дерево наполняется лениво (fd_populate при раскрытии), путь узла
-// лежит в TreeNode.icon_path ('dir:'/'file:'). Действия, меняющие дерево, откладываются флагами pending_*
+// лежит в TreeNode.tag ('dir:'/'file:'). Действия, меняющие дерево, откладываются флагами pending_*
 // и выполняются в цикле fd_run, а не внутри колбэков TreeView. Нативные диалоги ОС - отдельная
 // подсистема (SDL_ShowOpenFileDialog), здесь не используются.
 
@@ -47,7 +47,7 @@ enum FdSortMode {
 
 // FdState - всё изменяемое состояние одного открытого диалога. Создаётся в fd_run, живёт на куче и
 // захватывается замыканиями колбэков (fn [mut state]) - поэтому обязан быть ссылкой (&FdState).
-// Узлы дерева хранят путь в TreeNode.icon_path в виде префикса 'dir:<путь>' / 'file:<путь>' -
+// Узлы дерева хранят путь в TreeNode.tag в виде префикса 'dir:<путь>' / 'file:<путь>' -
 // так не нужна отдельная карта «узел -> путь» (см. fd_node_path).
 // Флаги pending_* - отложенные действия: колбэки (хоткей, меню) только ставят флаг, а само действие
 // выполняется в цикле fd_run вне обработки события, чтобы не менять дерево под руками TreeView.
@@ -85,10 +85,10 @@ mut:
 	app_ptr &App    = unsafe { nil }
 }
 
-// fd_node_path достаёт путь ФС из TreeNode.icon_path ('dir:/a/b' -> '/a/b').
+// fd_node_path достаёт путь ФС из TreeNode.tag ('dir:/a/b' -> '/a/b').
 // Возвращает '' для узла без префикса.
 fn fd_node_path(node &TreeNode) string {
-	ip := node.icon_path
+	ip := node.tag
 	if ip.starts_with('dir:') {
 		return ip[4..]
 	}
@@ -98,13 +98,13 @@ fn fd_node_path(node &TreeNode) string {
 	return ''
 }
 
-// fd_is_dir / fd_is_file - тип узла по префиксу icon_path (см. fd_node_path).
+// fd_is_dir / fd_is_file - тип узла по префиксу tag (см. fd_node_path).
 fn fd_is_dir(node &TreeNode) bool {
-	return node.icon_path.starts_with('dir:')
+	return node.tag.starts_with('dir:')
 }
 
 fn fd_is_file(node &TreeNode) bool {
-	return node.icon_path.starts_with('file:')
+	return node.tag.starts_with('file:')
 }
 
 // fd_is_hidden - «скрытый» файл в unix-смысле: имя начинается с точки (на Windows атрибут не проверяется).
@@ -255,7 +255,8 @@ fn fd_populate_impl(node &TreeNode, state &FdState, shallow bool) {
 	for d in dirs {
 		full := os.join_path(dir_path, d)
 		mut child := tree_node(d)
-		child.icon_path = 'dir:${full}'
+		child.tag = 'dir:${full}'
+		child.icon = item_icon('folder')
 		child.expanded = false
 		child.text_color = Color{130, 190, 255, 255}
 		n.add(child)
@@ -263,7 +264,8 @@ fn fd_populate_impl(node &TreeNode, state &FdState, shallow bool) {
 	for f in files {
 		full := os.join_path(dir_path, f)
 		mut child := tree_node(f)
-		child.icon_path = 'file:${full}'
+		child.tag = 'file:${full}'
+		child.icon = item_icon('file')
 		child.expanded = false
 		n.add(child)
 	}
@@ -301,7 +303,8 @@ fn fd_build_roots(_ &FdState) []&TreeNode {
 			drive := '${rune(letter)}:\\'
 			if os.is_dir(drive) {
 				mut r := tree_node('${rune(letter)}:')
-				r.icon_path = 'dir:${drive}'
+				r.tag = 'dir:${drive}'
+				r.icon = item_icon('hard-drive')
 				r.expanded = false
 				r.text_color = Color{130, 190, 255, 255}
 				roots << r
@@ -309,7 +312,8 @@ fn fd_build_roots(_ &FdState) []&TreeNode {
 		}
 	} $else {
 		mut r := tree_node('/')
-		r.icon_path = 'dir:/'
+		r.tag = 'dir:/'
+		r.icon = item_icon('hard-drive')
 		r.expanded = false
 		r.text_color = Color{130, 190, 255, 255}
 		roots << r

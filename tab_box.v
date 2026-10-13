@@ -13,7 +13,7 @@ module vgui
 // и в hit-test не участвуют (см. HitTestable в widget_tree.v).
 // Связи с библиотекой: фокус - FocusKind для TabBox в focus.v (register_tab_box / focus_tab_box,
 // вкладки переключаются стрелками), цвета - eff_tab_* у Theme, анимация фокуса - Anim (anim.v),
-// иконки вкладок - ctx.load_icon_texture. Тег типа kind_tab_box - widget_tag.v.
+// иконки вкладок - ItemIcon (item_icon.v). Тег типа kind_tab_box - widget_tag.v.
 
 // TabDir - наследие старого API (было только горизонтальное/вертикальное расположение);
 // оставлен для обратной совместимости, см. eff_pos(). В новом коде используйте TabPos.
@@ -53,14 +53,14 @@ pub enum IndicatorPos {
 	right
 }
 
-// Одна вкладка: заголовок, путь к иконке (пустой - без иконки), содержимое и флаг наведения
+// Одна вкладка: заголовок, иконка (ItemIcon{} - без иконки, см. item_icon.v), содержимое и флаг наведения
 // мыши (обновляется в handle_event по mouse_move, используется в draw для подсветки).
 struct TabEntry {
 mut:
-	title     string
-	icon_path string
-	widget    &Widget
-	hovered   bool
+	title   string
+	icon    ItemIcon
+	widget  &Widget
+	hovered bool
 }
 
 // Место заголовка вкладки в полосе: номер ряда (колонки для вертикальных), смещение вдоль
@@ -166,17 +166,34 @@ pub fn (mut tb TabBox) add_tab(title string, widget &Widget) {
 // Вкладка с иконкой и текстом (иконка над текстом).
 pub fn (mut tb TabBox) add_tab_with_icon(title string, icon_path string, widget &Widget) {
 	tb.tabs << TabEntry{
-		title:     title
-		icon_path: icon_path
-		widget:    unsafe { widget }
+		title:  title
+		icon:   item_icon_file(icon_path)
+		widget: unsafe { widget }
 	}
 }
 
 // Вкладка только с иконкой, без текста.
 pub fn (mut tb TabBox) add_icon_tab(icon_path string, widget &Widget) {
 	tb.tabs << TabEntry{
-		icon_path: icon_path
-		widget:    unsafe { widget }
+		icon:   item_icon_file(icon_path)
+		widget: unsafe { widget }
+	}
+}
+
+// Вкладка с иконкой любого вида (Lucide, файл, байты - item_icon.v) над текстом; title
+// может быть пустым - тогда вкладка только с иконкой.
+pub fn (mut tb TabBox) add_tab_icon(title string, ic ItemIcon, widget &Widget) {
+	tb.tabs << TabEntry{
+		title:  title
+		icon:   ic
+		widget: unsafe { widget }
+	}
+}
+
+// Меняет иконку вкладки idx (ItemIcon{} - убрать); недопустимый индекс игнорируется.
+pub fn (mut tb TabBox) set_tab_icon(idx int, ic ItemIcon) {
+	if idx >= 0 && idx < tb.tabs.len {
+		tb.tabs[idx].icon = ic
 	}
 }
 
@@ -229,7 +246,7 @@ fn (tb &TabBox) is_horizontal() bool {
 }
 
 fn (tb &TabBox) tab_has_icon(idx int) bool {
-	return idx >= 0 && idx < tb.tabs.len && tb.tabs[idx].icon_path.len > 0
+	return idx >= 0 && idx < tb.tabs.len && tb.tabs[idx].icon.is_set()
 }
 
 fn (tb &TabBox) tab_has_text(idx int) bool {
@@ -866,18 +883,14 @@ fn (tb &TabBox) draw_tab_content(idx int, trk Rect, tc Color, mut ctx RenderCont
 	if has_icon && has_text {
 		total_h := tb.icon_size + tb.icon_gap + fh
 		start_y := trk.y + (trk.h - total_h) * 0.5
-		icon_x := trk.x + (trk.w - tb.icon_size) * 0.5
-		icon_tex := ctx.load_icon_texture(tb.tabs[idx].icon_path)
-		ctx.draw_icon(icon_tex, icon_x, start_y, tb.icon_size, tb.icon_size)
+		ctx.draw_item_icon(tb.tabs[idx].icon, Rect{trk.x, start_y, trk.w, tb.icon_size},
+			tb.icon_size, tc)
 		tw := ctx.measure_text_with_font(tb.tabs[idx].title, font).x
 		text_x := trk.x + (trk.w - tw) * 0.5
 		text_y := start_y + tb.icon_size + tb.icon_gap
 		ctx.draw_text_with_font(tb.tabs[idx].title, text_x, text_y, tc, font)
 	} else if has_icon {
-		icon_x := trk.x + (trk.w - tb.icon_size) * 0.5
-		icon_y := trk.y + (trk.h - tb.icon_size) * 0.5
-		icon_tex := ctx.load_icon_texture(tb.tabs[idx].icon_path)
-		ctx.draw_icon(icon_tex, icon_x, icon_y, tb.icon_size, tb.icon_size)
+		ctx.draw_item_icon(tb.tabs[idx].icon, trk, tb.icon_size, tc)
 	} else {
 		tw := ctx.measure_text_with_font(tb.tabs[idx].title, font).x
 		tx := trk.x + (trk.w - tw) * 0.5

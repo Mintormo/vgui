@@ -24,6 +24,7 @@ pub mut:
 	text      string
 	widget    &Widget = unsafe { nil } // if set, drawn instead of text
 	height    f32 // 0 = use ComboBox.item_height
+	icon      ItemIcon // иконка слева от текста (item_icon.v); у пункта-виджета не рисуется
 	user_data voidptr = unsafe { nil }
 }
 
@@ -53,6 +54,9 @@ pub mut:
 	focus_anim  Anim = anim_smooth(anim_tau_focus)
 	focus_group int
 	item_height f32 = 26
+	// размер иконки пункта и зазор до текста (если у пунктов есть иконки)
+	icon_size f32 = 16
+	icon_gap  f32 = 6
 	// Сколько строк видно в popup без прокрутки (по первым max_visible строкам считается высота popup).
 	max_visible int = 8
 	scroll_y    f32
@@ -93,6 +97,18 @@ pub fn (mut cb ComboBox) add_entry(entry ComboItem) {
 
 pub fn (mut cb ComboBox) add_text_item(text string) {
 	cb.add_entry(ComboItem{ text: text })
+}
+
+// add_icon_item - текстовый пункт с иконкой слева (Lucide, файл, байты - item_icon.v).
+pub fn (mut cb ComboBox) add_icon_item(text string, ic ItemIcon) {
+	cb.add_entry(ComboItem{ text: text, icon: ic })
+}
+
+// set_item_icon меняет иконку пункта idx (ItemIcon{} - убрать); неверный индекс игнорируется.
+pub fn (mut cb ComboBox) set_item_icon(idx int, ic ItemIcon) {
+	if idx >= 0 && idx < cb.entries.len {
+		cb.entries[idx].icon = ic
+	}
 }
 
 // add_widget_item - элемент-виджет: в popup рисуется widget (ему раздаются bounds ячейки), text - подпись для закрытого вида.
@@ -466,7 +482,13 @@ fn (mut cb ComboBox) open_dropdown(mut ctx RenderContext) {
 					ctx.theme.eff_cb_item_text()
 				}
 				ty := iy + (h - fh) * 0.5
-				ctx.draw_text_with_font(entry.text, inner.x + 6, ty, tc, font)
+				mut tx := inner.x + 6
+				if entry.icon.is_set() {
+					ctx.draw_item_icon(entry.icon, Rect{tx, iy, cb.icon_size, h}, cb.icon_size,
+						tc)
+					tx += cb.icon_size + cb.icon_gap
+				}
+				ctx.draw_text_with_font(entry.text, tx, ty, tc, font)
 			}
 		}
 
@@ -791,8 +813,14 @@ pub fn (mut cb ComboBox) draw(mut ctx RenderContext) {
 	ctx.push_clip(text_clip)
 
 	if cb.selected >= 0 && cb.selected < cb.entries.len {
-		ctx.draw_text_with_font(cb.entries[cb.selected].text, cb.bounds.x + cb.pad, ty,
-			ctx.theme.eff_cb_text(), font)
+		sel := cb.entries[cb.selected]
+		mut tx := cb.bounds.x + cb.pad
+		if sel.icon.is_set() {
+			ctx.draw_item_icon(sel.icon, Rect{tx, cb.bounds.y, cb.icon_size, cb.bounds.h},
+				cb.icon_size, ctx.theme.eff_cb_text())
+			tx += cb.icon_size + cb.icon_gap
+		}
+		ctx.draw_text_with_font(sel.text, tx, ty, ctx.theme.eff_cb_text(), font)
 	} else {
 		ctx.draw_text_with_font(cb.eff_placeholder(), cb.bounds.x + cb.pad, ty, ctx.theme.text_secondary,
 			font)

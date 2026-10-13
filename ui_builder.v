@@ -1630,7 +1630,7 @@ fn (mut b YamlBuilder) build_menu_items(n &YNode) []&MenuItem {
 
 		if kind_str == 'checkbox' {
 			mut mi := menu_checkbox(text, yn_bool(&item_n, 'checked', false))
-			mi.icon_path = icon_path_str
+			mi.icon = item_icon_file(icon_path_str)
 			mi.shortcut = shortcut
 			mi.enabled = enabled
 			oc := yn_str(&item_n, 'on_toggle')
@@ -1658,7 +1658,7 @@ fn (mut b YamlBuilder) build_menu_items(n &YNode) []&MenuItem {
 
 		if kind_str == 'submenu' {
 			mut mi := menu_submenu(text)
-			mi.icon_path = icon_path_str
+			mi.icon = item_icon_file(icon_path_str)
 			mi.enabled = enabled
 			// Recursively parse children
 			children := b.build_menu_items(&item_n)

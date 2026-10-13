@@ -54,6 +54,7 @@ vgui - самостоятельная библиотека, ничего не з
 - Canvas (kind 50) — рисуемая поверхность с доступом к пикселям (`canvas.v`)
 - Системный трей (`tray.v`)
 - Undo/redo (`undo.v`)
+- Иконки элементов (`ItemIcon`, `item_icon.v`)
 - Мост из фоновых потоков (`App.post`) и свой цикл событий
 - Глобальное изменяемое состояние — контракт «единственного главного потока»
 - Добавление нового виджета (часть библиотеки)
@@ -887,6 +888,47 @@ SDL3 доставляет **drop'ы** drag-and-drop (файлы/текст, пе
 - `_destroy_now` сначала снимает свои id, потом зовёт V-destroy: release-вызовы находят `None` в реестре и безвредно отбрасываются.
 
 Тесты — `undo_test.v` (история, стек, встроенная отмена виджетов) и `vguipy/tests/test_undo.py`. Демо — `52_undo_stack` (V и Python).
+
+## Иконки элементов (`ItemIcon`, `item_icon.v`)
+
+С 13.10.2026. Одна структура и один код отрисовки для иконок «внутри» виджетов: пункты меню
+(`MenuItem` — значит, и `MenuBar`, `ContextMenu`, `MenuButton`), сам `MenuButton`, узлы
+`TreeNode`, вкладки `TabBox`, строки `ListBox`, пункты `ComboBox`, заголовки секций
+`Accordion`. Раньше каждый виджет держал своё `icon_path string` и сам звал
+`load_icon_texture`, а глифы Lucide умели только `Icon` и `Button`.
+
+`ItemIcon` — значение без ресурсов: источник `name` (Lucide) | `path` (файл) | байты (только
+через `item_icon_data`, который их клонирует и считает ключ кэша `mem:<FNV-1a>:<длина>`) и
+`color`. Приоритет при нескольких — в этом порядке; `ItemIcon{}` — иконки нет, и **место под неё
+не резервируется** (`is_set()`). Рисует `ctx.draw_item_icon(ic, rect, size, fallback)`: квадрат
+`size` по центру `rect`; глиф без своего цвета (`color.a == 0`) красится `fallback` — виджет
+передаёт цвет текста элемента (выделенного, неактивного), поэтому глиф следует за темой и
+состоянием. Картинки рисуются как есть. Размер иконки — у владельца (`icon_size`/`icon_gap`; у
+`Accordion` — `title_icon_size`, потому что `icon_size` там — стрелка; у меню — константа
+`menu_icon_sz` в колонке иконки, которая есть всегда). `measure()` учитывает иконку у
+`MenuButton` и `ComboBox`; у `TreeView` — ширина содержимого для горизонтальной прокрутки.
+
+Текстуры — в `RenderContext.icon_cache` окна (ключ — путь или `mem:...`), не вытесняются и
+освобождаются вместе с кэшем текста (`clear_text_cache`), поэтому `is_renderer_alive_gen`
+здесь не нужен. **Неудачная загрузка тоже кэшируется (nil)**: раньше битый путь читался с диска
+на каждой отрисовке — так было с узлами файлового диалога, который хранил путь узла в
+`TreeNode.icon_path` (`'dir:/a/b'`). Теперь путь лежит в `TreeNode.tag` (строка приложения,
+vgui её не читает), а узлы получили глифы `folder`/`file`/`hard-drive`. Следствие кэширования
+неудачи: файл, появившийся позже, подхватится только после сброса кэша. Байтовые иконки с
+разным содержимым копят текстуры до закрытия окна — для анимированной смены иконок по кадрам
+этот путь не годится.
+
+Иконка строки `ListBox` живёт в `LbRow` и едет вместе со строкой при сортировке; рисуется в
+первой колонке слева, текст выравнивается в остатке клетки. У ячеек-виджетов (`ListBox`,
+`ComboBox`) иконка не рисуется. V API: фабрики `item_icon`/`item_icon_file`/`item_icon_data`,
+`with_color`; `menu_action_lucide`, `MenuItem.set_icon`, `MenuButton.set_icon`,
+`tree_node_with`, `TreeView.set_node_icon`, `TabBox.add_tab_icon`/`set_tab_icon`,
+`ComboBox.add_icon_item`/`set_item_icon`, `ListBox.add_item_icon`/`set_row_icon`,
+`Accordion.set_section_icon`. Старые фабрики с путём (`menu_action_icon`, `tree_node_icon`,
+`add_tab_with_icon`...) оставлены и создают `item_icon_file`. `Button` и `Notification`
+сохранили свои поля иконок. Мост — `vgui-capi/PROJECT.md`; Python — параметр `icon=` (имя
+Lucide или `vguipy.ItemIcon`). Тесты — `item_icon_test.v`, `vguipy/tests/test_item_icon.py`;
+пример — `examples/54_item_icons.v`.
 
 ## Мост из фоновых потоков (`App.post`) и свой цикл событий
 

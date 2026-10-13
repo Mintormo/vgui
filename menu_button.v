@@ -57,7 +57,7 @@ pub mut:
 	pressed       bool // action zone pressed
 	pressed_arrow bool // arrow zone pressed
 	open          bool
-	icon_path     string
+	icon          ItemIcon // иконка слева от текста (item_icon.v); ItemIcon{} - нет
 	icon_size     f32       = 16
 	icon_gap      f32       = 6
 	radius        f32       = -1
@@ -103,8 +103,13 @@ pub fn menu_button_with_icon(placeholder string, icon_path string) &MenuButton {
 	return &MenuButton{
 		placeholder: placeholder
 		text:        placeholder
-		icon_path:   icon_path
+		icon:        item_icon_file(icon_path)
 	}
+}
+
+// set_icon задаёт иконку слева от текста (ItemIcon{} - убрать).
+pub fn (mut mb MenuButton) set_icon(ic ItemIcon) {
+	mb.icon = ic
 }
 
 // ─── Public API ────────────────────────────────────────
@@ -582,17 +587,15 @@ pub fn (mut mb MenuButton) draw(mut ctx RenderContext) {
 	mut tx := mb.bounds.x + mb.pad
 	ty := mb.bounds.y + (mb.bounds.h - fh) * 0.5
 
-	if mb.icon_path.len > 0 {
-		icon_tex := ctx.load_icon_texture(mb.icon_path)
-		icon_y := mb.bounds.y + (mb.bounds.h - mb.icon_size) * 0.5
-		ctx.draw_icon(icon_tex, tx, icon_y, mb.icon_size, mb.icon_size)
-		tx += mb.icon_size + mb.icon_gap
-	}
-
 	tc := if mb.text == mb.placeholder && mb.enabled {
 		ctx.theme.text_secondary
 	} else {
 		fg
+	}
+	if mb.icon.is_set() {
+		ctx.draw_item_icon(mb.icon, Rect{tx, mb.bounds.y, mb.icon_size, mb.bounds.h},
+			mb.icon_size, tc)
+		tx += mb.icon_size + mb.icon_gap
 	}
 	ctx.draw_text_with_font(disp, tx, ty, tc, font)
 	ctx.pop_clip()

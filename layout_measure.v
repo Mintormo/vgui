@@ -126,7 +126,7 @@ pub fn (mb &MenuButton) measure(ctx &RenderContext) SizeHint {
 		return SizeHint{}
 	}
 	text := if mb.text != '' { mb.text } else { mb.placeholder }
-	cw, ch := button_content_size(ctx, text, mb.font_style, mb.font_size, mb.icon_path != '',
+	cw, ch := button_content_size(ctx, text, mb.font_style, mb.font_size, mb.icon.is_set(),
 		mb.icon_size, mb.icon_gap)
 	// Плюс зона стрелки справа.
 	arrow_w := f32(22)
@@ -250,8 +250,12 @@ pub fn (cb &ComboBox) measure(ctx &RenderContext) SizeHint {
 	}
 	font := ctx.get_font_immut(.regular, 0)
 	mut widest := ctx.measure_text_with_font(cb.eff_placeholder(), font).x
-	for item in cb.items {
-		widest = max_f32(widest, ctx.measure_text_with_font(item, font).x)
+	for e in cb.entries {
+		mut w := ctx.measure_text_with_font(e.text, font).x
+		if e.icon.is_set() {
+			w += cb.icon_size + cb.icon_gap
+		}
+		widest = max_f32(widest, w)
 	}
 	arrow_w := f32(24)
 	h := max_f32(ctx.control_h(), max_f32(cb.item_height, ctx.font_height_of(font) +

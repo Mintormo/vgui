@@ -316,23 +316,47 @@ pub fn (mut ctx RenderContext) load_icon_texture(path string) voidptr {
 	if path.len == 0 {
 		return unsafe { nil }
 	}
+	// Неудача тоже кэшируется (nil): иначе битый путь читался бы с диска на
+	// каждой отрисовке. Файл, появившийся позже, подхватится после сброса кэша.
 	if path in ctx.icon_cache {
-		t := ctx.icon_cache[path] or { unsafe { nil } }
-		if unsafe { t != nil } {
-			return t
-		}
+		return ctx.icon_cache[path] or { unsafe { nil } }
 	}
 	surface := C.IMG_Load(path.str)
+	return ctx.cache_icon_surface(path, surface)
+}
+
+// load_icon_texture_data - то же для картинки из байтов; key - ключ кэша,
+// однозначно задающий байты (см. item_icon_data). SDL читает байты только во
+// время вызова, хранить их дольше не нужно.
+pub fn (mut ctx RenderContext) load_icon_texture_data(key string, data []u8) voidptr {
+	if key.len == 0 || data.len == 0 {
+		return unsafe { nil }
+	}
+	if key in ctx.icon_cache {
+		return ctx.icon_cache[key] or { unsafe { nil } }
+	}
+	io := C.SDL_IOFromConstMem(data.data, usize(data.len))
+	surface := if io == unsafe { nil } {
+		unsafe { nil }
+	} else {
+		C.IMG_Load_IO(io, true) // closeio = true: поток закрывает SDL
+	}
+	return ctx.cache_icon_surface(key, surface)
+}
+
+// cache_icon_surface делает из поверхности текстуру, освобождает поверхность и
+// кладёт результат в icon_cache под key (nil при ошибке - тоже кладёт).
+fn (mut ctx RenderContext) cache_icon_surface(key string, surface voidptr) voidptr {
 	if unsafe { surface == nil } {
+		ctx.icon_cache[key] = unsafe { nil }
 		return unsafe { nil }
 	}
 	texture := C.SDL_CreateTextureFromSurface(ctx.renderer, surface)
 	C.SDL_DestroySurface(surface)
-	if unsafe { texture == nil } {
-		return unsafe { nil }
+	if unsafe { texture != nil } {
+		C.SDL_SetTextureBlendMode(texture, sdl_blendmode_blend)
 	}
-	C.SDL_SetTextureBlendMode(texture, sdl_blendmode_blend)
-	ctx.icon_cache[path] = texture
+	ctx.icon_cache[key] = texture
 	return texture
 }
 

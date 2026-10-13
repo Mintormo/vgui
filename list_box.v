@@ -69,6 +69,8 @@ mut:
 	cells     []LbCell
 	text      string // legacy single-column text
 	user_data voidptr = unsafe { nil }
+	// иконка строки (item_icon.v) - слева от текста первой колонки; у ячейки-виджета не рисуется
+	icon ItemIcon
 	// порядковый номер добавления: по нему сортировка «none_» возвращает
 	// исходный порядок, и он же разбивает равенства (сортировка устойчива)
 	seq int
@@ -103,6 +105,9 @@ pub mut:
 	selected    int = -1
 	scroll_y    f32
 	item_height f32  = 24
+	// размер иконки строки и зазор до текста (если у строк есть иконки)
+	icon_size f32 = 16
+	icon_gap  f32 = 6
 	pad         f32  = 4
 	visible     bool = true
 	enabled     bool = true
@@ -567,6 +572,37 @@ pub fn (mut lb ListBox) set_row_data(row int, data voidptr) {
 	if row >= 0 && row < lb.rows.len {
 		lb.rows[row].user_data = data
 	}
+}
+
+// set_row_icon задаёт иконку строки row (ItemIcon{} - убрать); неверный индекс игнорируется.
+// Иконка едет вместе со строкой при сортировке.
+pub fn (mut lb ListBox) set_row_icon(row int, ic ItemIcon) {
+	if row >= 0 && row < lb.rows.len {
+		lb.rows[row].icon = ic
+	}
+}
+
+// add_item_icon - add_item с иконкой слева от текста.
+pub fn (mut lb ListBox) add_item_icon(text string, ic ItemIcon) {
+	lb.add_item(text)
+	// push_row при auto_sort ставит строку на её место, а не в конец - ищем по seq
+	seq := lb.next_seq - 1
+	for i, r in lb.rows {
+		if r.seq == seq {
+			lb.rows[i].icon = ic
+			break
+		}
+	}
+}
+
+// draw_row_icon рисует иконку строки i у левого края клетки (x, y, h) и возвращает,
+// на сколько сдвинуть текст вправо (0 - иконки нет).
+fn (lb &ListBox) draw_row_icon(mut ctx RenderContext, i int, x f32, y f32, h f32, tc Color) f32 {
+	if i < 0 || i >= lb.rows.len || !lb.rows[i].icon.is_set() {
+		return 0
+	}
+	ctx.draw_item_icon(lb.rows[i].icon, Rect{x, y, lb.icon_size, h}, lb.icon_size, tc)
+	return lb.icon_size + lb.icon_gap
 }
 
 pub fn (lb &ListBox) get_row_data(row int) voidptr {
@@ -1338,11 +1374,13 @@ pub fn (mut lb ListBox) draw(mut ctx RenderContext) {
 					w.draw(mut ctx)
 				} else if cell.text.len > 0 {
 					ty := vp.y + (ih - fh) * 0.5
-					ctx.draw_text_with_font(cell.text, ix + lb_cell_pad, ty, tc, font)
+					dx := lb.draw_row_icon(mut ctx, i, ix + lb_cell_pad, vp.y, ih, tc)
+					ctx.draw_text_with_font(cell.text, ix + lb_cell_pad + dx, ty, tc, font)
 				}
 			} else if i < lb.items.len {
 				ty := vp.y + (ih - fh) * 0.5
-				ctx.draw_text_with_font(lb.items[i], ix + lb_cell_pad, ty, tc, font)
+				dx := lb.draw_row_icon(mut ctx, i, ix + lb_cell_pad, vp.y, ih, tc)
+				ctx.draw_text_with_font(lb.items[i], ix + lb_cell_pad + dx, ty, tc, font)
 			}
 			// Separator between items
 			if i < lb.rows.len - 1 {
@@ -1387,13 +1425,20 @@ pub fn (mut lb ListBox) draw(mut ctx RenderContext) {
 								mut w := unsafe { cell.widget }
 								w.draw(mut ctx)
 							} else if cell.text.len > 0 {
-								// Text cell
+								// Text cell; иконка строки - в первой колонке слева,
+								// текст выравнивается в оставшейся части клетки
 								align := if ci < lb.columns.len {
 									lb.columns[ci].align
 								} else {
 									TextAlign.left
 								}
-								tbl_draw_text_aligned(mut ctx, cell.text, cell_r, align, tc, font)
+								mut text_r := cell_r
+								if ci == 0 {
+									dx := lb.draw_row_icon(mut ctx, i, cx + lb_cell_pad, iy,
+										lb.item_height, tc)
+									text_r = Rect{cx + dx, iy, col_w - dx, lb.item_height}
+								}
+								tbl_draw_text_aligned(mut ctx, cell.text, text_r, align, tc, font)
 							}
 							// Grid line
 							if lb.show_grid && ci < lb.columns.len - 1 {
@@ -1408,7 +1453,8 @@ pub fn (mut lb ListBox) draw(mut ctx RenderContext) {
 				// Single-column legacy
 				if i < lb.items.len {
 					ty := iy + (lb.item_height - fh) * 0.5
-					ctx.draw_text_with_font(lb.items[i], vp.x + 6, ty, tc, font)
+					dx := lb.draw_row_icon(mut ctx, i, vp.x + 6, iy, lb.item_height, tc)
+					ctx.draw_text_with_font(lb.items[i], vp.x + 6 + dx, ty, tc, font)
 				}
 			}
 		}

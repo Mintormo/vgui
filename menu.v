@@ -25,7 +25,9 @@ pub struct MenuItem {
 pub mut:
 	type_tag  int = kind_menu_item // тег типа, см. widget_tag.v
 	text      string
-	icon_path string
+	// иконка слева от текста (Lucide, файл или байты, см. item_icon.v); у пункта-флажка
+	// на её месте галочка
+	icon ItemIcon
 	// текст сочетания клавиш, например 'Ctrl+Shift+S'; и показывается справа в пункте, и разбирается menu_shortcut_matches
 	shortcut  string
 	kind      MenuItemKind = .action
@@ -50,10 +52,24 @@ pub fn menu_action(text string) &MenuItem {
 // menu_action_icon — обычный пункт с иконкой слева (icon_path — путь к картинке).
 pub fn menu_action_icon(text string, icon_path string) &MenuItem {
 	return &MenuItem{
-		text:      text
-		icon_path: icon_path
-		kind:      .action
+		text: text
+		icon: item_icon_file(icon_path)
+		kind: .action
 	}
+}
+
+// menu_action_lucide — обычный пункт с глифом Lucide слева (icon_name — например 'save').
+pub fn menu_action_lucide(text string, icon_name string) &MenuItem {
+	return &MenuItem{
+		text: text
+		icon: item_icon(icon_name)
+		kind: .action
+	}
+}
+
+// set_icon задаёт иконку пункта (ItemIcon{} - убрать).
+pub fn (mut mi MenuItem) set_icon(ic ItemIcon) {
+	mi.icon = ic
 }
 
 // menu_checkbox создаёт пункт с галочкой; начальное состояние — checked, смена приходит в on_toggle(bool).
@@ -96,6 +112,12 @@ const menu_icon_col_w = f32(24)
 const menu_arrow_w = f32(16)
 const menu_shortcut_gap = f32(24)
 const menu_check_sz = f32(12)
+
+// menu_icon_rect - клетка иконки пункта ir: квадрат menu_icon_sz у левого края,
+// по центру высоты (там же, где галочка пункта-флажка).
+fn menu_icon_rect(ir Rect) Rect {
+	return Rect{ir.x + 4, ir.y + (ir.h - menu_icon_sz) * 0.5, menu_icon_sz, menu_icon_sz}
+}
 
 // menu_popup_size считает размер попапа для items: высота — сумма высот пунктов и
 // разделителей плюс отступы; ширина — колонка иконки + самый широкий текст
@@ -245,6 +267,9 @@ fn menu_draw_popup(items []&MenuItem, popup Rect, mut ctx RenderContext) {
 
 		if !mi.enabled {
 			ty := iy + (menu_item_h - fh) * 0.5
+			if mi.kind != .checkbox && mi.icon.is_set() {
+				ctx.draw_item_icon(mi.icon, menu_icon_rect(ir), menu_icon_sz, ctx.theme.text_disabled)
+			}
 			ctx.draw_text_with_font(mi.text, ir.x + menu_icon_col_w, ty, ctx.theme.text_disabled,
 				font)
 			iy += menu_item_h
@@ -275,10 +300,8 @@ fn menu_draw_popup(items []&MenuItem, popup Rect, mut ctx RenderContext) {
 				ctx.draw_line_thick(cx - s, cy, cx - s * 0.3, cy + s * 0.7, 2, tc)
 				ctx.draw_line_thick(cx - s * 0.3, cy + s * 0.7, cx + s, cy - s * 0.5, 2, tc)
 			}
-		} else if mi.icon_path.len > 0 {
-			icon_tex := ctx.load_icon_texture(mi.icon_path)
-			ctx.draw_icon(icon_tex, icon_x, icon_cy - menu_icon_sz * 0.5, menu_icon_sz,
-				menu_icon_sz)
+		} else if mi.icon.is_set() {
+			ctx.draw_item_icon(mi.icon, menu_icon_rect(ir), menu_icon_sz, tc)
 		}
 
 		ty := iy + (menu_item_h - fh) * 0.5

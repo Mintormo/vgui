@@ -37,9 +37,12 @@ module vgui
 pub struct TreeNode {
 pub mut:
 	type_tag  int = kind_tree_node // тег типа, см. widget_tag.v
-	text      string
-	icon_path string
-	expanded  bool = true
+	text     string
+	icon     ItemIcon // иконка слева от текста (item_icon.v); ItemIcon{} - нет
+	expanded bool = true
+	// tag - произвольная строка приложения; vgui её не читает (файловый диалог
+	// хранит здесь путь узла)
+	tag       string
 	children  []&TreeNode
 	parent    &TreeNode = unsafe { nil }
 	// Per-node custom colors (a=0 means use default)
@@ -57,8 +60,16 @@ pub fn tree_node(text string) &TreeNode {
 
 pub fn tree_node_icon(text string, icon_path string) &TreeNode {
 	return &TreeNode{
-		text:      text
-		icon_path: icon_path
+		text: text
+		icon: item_icon_file(icon_path)
+	}
+}
+
+// tree_node_with - узел с иконкой любого вида (Lucide, файл, байты - см. item_icon.v).
+pub fn tree_node_with(text string, ic ItemIcon) &TreeNode {
+	return &TreeNode{
+		text: text
+		icon: ic
 	}
 }
 
@@ -310,7 +321,13 @@ pub fn (mut tv TreeView) set_item_text(node &TreeNode, text string) {
 
 pub fn (mut tv TreeView) set_item_icon(node &TreeNode, icon_path string) {
 	mut n := unsafe { node }
-	n.icon_path = icon_path
+	n.icon = item_icon_file(icon_path)
+}
+
+// set_node_icon - иконка узла любого вида (ItemIcon{} - убрать).
+pub fn (mut tv TreeView) set_node_icon(node &TreeNode, ic ItemIcon) {
+	mut n := unsafe { node }
+	n.icon = ic
 }
 
 // Раскрыть/свернуть все узлы рекурсивно. Колбэк on_expand не вызывается.
@@ -444,7 +461,7 @@ fn tv_fingerprint_node(node &TreeNode, seed u64) u64 {
 	mut h := seed
 	h = (h ^ u64(usize(voidptr(node)))) * 1099511628211
 	h = (h ^ node.text.hash()) * 1099511628211
-	h = (h ^ u64(node.children.len) ^ (if node.expanded { u64(1) << 63 } else { 0 }) ^ (if node.icon_path.len > 0 {
+	h = (h ^ u64(node.children.len) ^ (if node.expanded { u64(1) << 63 } else { 0 }) ^ (if node.icon.is_set() {
 		u64(1) << 62
 	} else {
 		0
@@ -495,7 +512,7 @@ fn (tv &TreeView) content_size(ctx &RenderContext) (f32, f32) {
 	for fn_ in flat {
 		x := tv.pad + f32(fn_.depth) * tv.indent + tv.indent
 		tw := ctx.measure_text_with_font(fn_.node.text, font).x
-		w := if fn_.node.icon_path.len > 0 {
+		w := if fn_.node.icon.is_set() {
 			x + tv.icon_size + tv.icon_gap + tw + tv.pad
 		} else {
 			x + tw + tv.pad
@@ -650,7 +667,7 @@ fn (tv &TreeView) node_text_rect(fn_ FlatNode, idx int, ctx &RenderContext) Rect
 	tw := ctx.measure_text_with_font(fn_.node.text, font).x
 	mut rx := text_x
 	mut rw := tw
-	if fn_.node.icon_path.len > 0 {
+	if fn_.node.icon.is_set() {
 		rw = tv.icon_size + tv.icon_gap + tw
 	}
 	ty := iy + (tv.item_height - fh) * 0.5
@@ -1113,12 +1130,20 @@ pub fn (mut tv TreeView) draw(mut ctx RenderContext) {
 			}
 		}
 
+		// Цвет текста узла; им же красится глиф Lucide без своего цвета.
+		tc := if is_sel {
+			ctx.theme.eff_tr_row_sel_text()
+		} else if fn_.node.text_color.a > 0 {
+			fn_.node.text_color
+		} else {
+			ctx.theme.eff_tr_row_text()
+		}
+
 		// ── Icon ──
 		mut content_x := text_x
-		if fn_.node.icon_path.len > 0 {
-			icon_tex := ctx.load_icon_texture(fn_.node.icon_path)
-			icon_y := iy + (tv.item_height - tv.icon_size) * 0.5
-			ctx.draw_icon(icon_tex, text_x, icon_y, tv.icon_size, tv.icon_size)
+		if fn_.node.icon.is_set() {
+			ctx.draw_item_icon(fn_.node.icon, Rect{text_x, iy, tv.icon_size, tv.item_height},
+				tv.icon_size, tc)
 			content_x = text_x + tv.icon_size + tv.icon_gap
 		}
 
@@ -1178,13 +1203,6 @@ pub fn (mut tv TreeView) draw(mut ctx RenderContext) {
 			}
 			ctx.pop_clip()
 		} else {
-			tc := if is_sel {
-				ctx.theme.eff_tr_row_sel_text()
-			} else if fn_.node.text_color.a > 0 {
-				fn_.node.text_color
-			} else {
-				ctx.theme.eff_tr_row_text()
-			}
 			ctx.draw_text_with_font(fn_.node.text, content_x, ty, tc, font)
 		}
 	}
@@ -1711,7 +1729,7 @@ fn (mut tv TreeView) edit_hit_cursor(mx f32, ctx_ptr &RenderContext) {
 		}
 		depth_x := inner.x + f32(fn_.depth) * tv.indent - tv.scroll_x
 		mut content_x := depth_x + tv.indent
-		if fn_.node.icon_path.len > 0 {
+		if fn_.node.icon.is_set() {
 			content_x += tv.icon_size + tv.icon_gap
 		}
 		local_x := mx - content_x + tv.edit_scroll_x

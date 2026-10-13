@@ -64,6 +64,7 @@ pub enum AccordionMode {
 struct AccordionSection {
 mut:
 	title    string
+	icon     ItemIcon // иконка в заголовке между стрелкой и текстом (item_icon.v)
 	expanded bool
 	hovered  bool
 	widget   &Widget = unsafe { nil }
@@ -103,6 +104,9 @@ pub mut:
 	spacing       f32 = 1 // gap between sections
 	pad           f32 // outer padding
 	icon_size     f32       = 8 // arrow triangle size
+	// размер иконки секции в заголовке и зазор до текста (не путать с icon_size - стрелкой)
+	title_icon_size f32 = 16
+	title_icon_gap  f32 = 6
 	font_style    FontStyle = .bold
 	font_size     int
 	// Colors (0 = theme defaults)
@@ -150,6 +154,14 @@ pub fn (mut a Accordion) add_section(title string, widget &Widget) {
 	a.sections << AccordionSection{
 		title:  title
 		widget: unsafe { widget }
+	}
+}
+
+// set_section_icon задаёт иконку заголовка секции idx (ItemIcon{} - убрать);
+// неверный индекс игнорируется.
+pub fn (mut a Accordion) set_section_icon(idx int, ic ItemIcon) {
+	if idx >= 0 && idx < a.sections.len {
+		a.sections[idx].icon = ic
 	}
 }
 
@@ -522,9 +534,14 @@ pub fn (mut a Accordion) draw(mut ctx RenderContext) {
 		}
 
 		// Title text
-		text_x := arrow_x + a.icon_size + a.header_pad
+		mut text_x := arrow_x + a.icon_size + a.header_pad
 		text_y := hr.y + (a.header_height - fh) * 0.5
 		tc := if a.enabled { hdr_tc } else { ctx.theme.text_disabled }
+		if sec.icon.is_set() {
+			ctx.draw_item_icon(sec.icon, Rect{text_x, hr.y, a.title_icon_size, hr.h},
+				a.title_icon_size, tc)
+			text_x += a.title_icon_size + a.title_icon_gap
+		}
 		ctx.draw_text_with_font(sec.title, text_x, text_y, tc, font)
 
 		y += a.header_height
