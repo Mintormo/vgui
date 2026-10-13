@@ -1267,9 +1267,9 @@ pub fn (mut c Canvas) handle_event(event &GuiEvent, app &App) bool {
 				c.hsb_hovered = false
 			}
 		}
-		// Второй щелчок SDL присылает отдельным типом - для холста это то же
-		// нажатие (on_input получает clicks = 2)
-		.mouse_down, .mouse_dbl_click {
+		// Второй быстрый щелчок приходит обычным mouse_down с clicks = 2 (его
+		// получает и on_input); следующий за ним mouse_dbl_click холсту не нужен
+		.mouse_down {
 			if !c.bounds.contains(event.mouse_x, event.mouse_y) {
 				// A click elsewhere releases keyboard focus (mirrors text widgets).
 				if c.focused && unsafe { ctx_ptr != nil } {

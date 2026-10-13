@@ -460,3 +460,47 @@ fn test_vbox_natural_height_without_sizes() {
 	sb.update_eff_content_size(ctx)
 	assert sb.eff_content_h == 500 // меньше видимой области - заполняет её
 }
+
+// ScrollBox с несколькими детьми (аудит 2026-10, раздел 6.4): раньше размер
+// содержимого брался по первому ребёнку, а все дети ложились в один и тот же
+// прямоугольник друг на друга. Теперь - стопка вдоль оси прокрутки.
+fn test_scroll_box_stacks_several_children() {
+	mut ctx := empty_ctx()
+	mut sb := scroll_box(0)
+	sb.spacing = 5
+	sb.pad = 0
+	sb.bounds = Rect{0, 0, 200, 50}
+	mut icons := []&Icon{}
+	for sz in [16, 24, 32] {
+		mut ic := icon('a')
+		ic.size = sz
+		icons << ic
+		sb.add(ic)
+	}
+	sb.arrange(mut ctx)
+	assert sb.eff_content_h == 16 + 24 + 32 + 2 * 5
+	assert sb.max_scroll() == sb.eff_content_h - 50
+	assert icons[0].bounds.y == 0
+	assert icons[1].bounds.y == 16 + 5
+	assert icons[2].bounds.y == 16 + 5 + 24 + 5
+	assert icons[2].bounds.h == 32
+	// прокрутка сдвигает всю стопку
+	sb.scroll_y = 10
+	sb.arrange(mut ctx)
+	assert icons[1].bounds.y == 16 + 5 - 10
+
+	// горизонтальный - то же по ширине
+	mut hb := scroll_box_h(0)
+	hb.spacing = 2
+	hb.pad = 0
+	hb.bounds = Rect{0, 0, 30, 40}
+	mut a := icon('a')
+	a.size = 20
+	mut b := icon('b')
+	b.size = 20
+	hb.add(a)
+	hb.add(b)
+	hb.arrange(mut ctx)
+	assert hb.eff_content_w == 42
+	assert b.bounds.x == 22
+}

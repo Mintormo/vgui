@@ -1252,6 +1252,15 @@ fn (mut w Window) render() {
 // движение мыши фокус не меняет).
 fn (mut w Window) dispatch_event_with_app(ev &GuiEvent, app &App) {
 	w.dispatch_event_inner(ev, app)
+	// Второй и следующий быстрый клик: сначала обычное нажатие (выше), затем
+	// mouse_dbl_click в той же точке. Раньше двойной клик приходил вместо
+	// нажатия, и кнопка, слушающая только mouse_down, теряла второй клик.
+	// Нажатие могло закрыть окно - dispatch_event_inner сам проверит w.open.
+	if ev.typ == .mouse_down && ev.clicks >= 2 {
+		mut dbl := *ev
+		dbl.typ = .mouse_dbl_click
+		w.dispatch_event_inner(&dbl, app)
+	}
 	// Фокус меняется кликом, клавишами, Tab - сверить нужду в текстовом
 	// вводе после события (движение мыши фокус не меняет)
 	if ev.typ != .mouse_move {

@@ -14,6 +14,8 @@ pub enum EventType {
 	mouse_up
 	mouse_move
 	mouse_wheel
+	// второй (и следующий) быстрый клик: приходит СРАЗУ ПОСЛЕ обычного mouse_down
+	// того же нажатия (clicks >= 2), см. Window.dispatch_event_with_app
 	mouse_dbl_click
 	window_resize
 	window_close
@@ -148,8 +150,10 @@ pub fn get_event_window_id(raw &C.SDL_Event) u32 {
 // parse_sdl_event превращает сырое SDL-событие в GuiEvent. Незнакомые типы дают typ == .none_.
 // Особенности:
 //   - Модификаторы берутся глобальным C.SDL_GetModState() в момент разбора (а не из самого события).
-//   - mouse_dbl_click выдаётся ВМЕСТО второго mouse_down, если SDL сообщил clicks >= 2; виджеты,
-//     которым нужен каждый клик, должны обрабатывать оба типа.
+//   - нажатие кнопки мыши всегда даёт mouse_down с clicks (счёт быстрых кликов ведёт SDL);
+//     mouse_dbl_click отсюда не выходит - его следом за mouse_down с clicks >= 2 рассылает
+//     Window.dispatch_event_with_app. Так виджет, слушающий только нажатия, не теряет
+//     второй клик, а реагирующий на двойной клик не обязан повторять логику нажатия.
 //   - sdl_event_window_pixel_size_changed игнорируется (.none_); а window_exposed превращается в
 //     window_resize с размером 0x0 - окно по нему просто перерисовывается.
 // Только чтение raw: SDL-память не удерживается (text копируется в строку V).
@@ -201,12 +205,7 @@ pub fn parse_sdl_event(raw &C.SDL_Event) GuiEvent {
 		}
 		sdl_mousebuttondown {
 			mb := unsafe { &C.SDL_MouseButtonEvent(raw) }
-			// Второй и последующие быстрые клики превращаются в mouse_dbl_click (счёт кликов ведёт SDL).
-			ev.typ = if mb.clicks >= u8(2) {
-				EventType.mouse_dbl_click
-			} else {
-				EventType.mouse_down
-			}
+			ev.typ = .mouse_down
 			ev.mouse_x = mb.x
 			ev.mouse_y = mb.y
 			ev.mod_keys = C.SDL_GetModState()

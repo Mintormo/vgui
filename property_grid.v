@@ -1641,6 +1641,11 @@ pub fn (mut pg PropertyGrid) handle_event(event &GuiEvent, app &App) bool {
 			if !pg.bounds.contains(mx, my) {
 				return false
 			}
+			// mouse_down этого же клика уже отработал: стрелку группы и
+			// флажок в колонке значения повторно не переключаем
+			if pg.hit_arrow(mx, my) >= 0 {
+				return true
+			}
 			idx := pg.hit_row(my)
 			if idx >= 0 {
 				flat := pg.build_flat()
@@ -1653,7 +1658,9 @@ pub fn (mut pg PropertyGrid) handle_event(event &GuiEvent, app &App) bool {
 					return true
 				}
 				if row.prop.kind == .bool_val {
-					pg.toggle_bool(row.prop)
+					if mx < pg.split_x() {
+						pg.toggle_bool(row.prop)
+					}
 					return true
 				}
 				// Start editing — passes app for FocusManager registration

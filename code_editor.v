@@ -124,16 +124,22 @@ pub mut:
 	block_states_hl  voidptr
 	// Колесо мыши: false - виджет его не берёт (прокрутка уходит
 	// контейнеру, например панели в ScrollBox)
-	wheel                 bool = true
-	bounds                Rect
-	visible               bool = true
-	enabled               bool = true
-	focused               bool
-	hovered               bool
-	readonly              bool
-	lines                 [][]rune
-	cur_line              int
-	cur_col               int
+	wheel    bool = true
+	bounds   Rect
+	visible  bool = true
+	enabled  bool = true
+	focused  bool
+	hovered  bool
+	readonly bool
+	lines    [][]rune
+	cur_line int
+	cur_col  int
+	// «Желаемая» колонка вертикального движения: проход стрелками через
+	// короткую строку не теряет исходную колонку. Действует, пока курсор
+	// стоит там, куда его поставило последнее вертикальное движение (goal_at);
+	// любое другое перемещение или правка сдвигает курсор и тем самым её сбрасывает.
+	goal_col              int   = -1
+	goal_at               CePos = CePos{-1, -1}
 	sel_a                 CePos = CePos{-1, -1}
 	sel_b                 CePos = CePos{-1, -1}
 	scroll_x              f32
@@ -940,6 +946,21 @@ pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
 	if !e.visible {
 		return
 	}
+	// Регистрация в FocusManager и синхронизация флага focused - до проверки
+	// клипа, как у TextArea: Tab-порядок не должен зависеть от того, попал ли
+	// виджет в dirty region кадра. Фокус ставят и снимают только через
+	// ctx.focus (клик, Ctrl+Tab, Esc), флаг focused лишь отражает его.
+	if e.enabled {
+		ctx.focus.register_code_editor(&e, e.focus_group)
+	}
+	should_focus := ctx.focus.is_focused(unsafe { &e })
+	if e.focused && !should_focus {
+		e.focused = false
+		e.drag = false
+		e.clear_sel()
+	} else if !e.focused && should_focus {
+		e.focused = true
+	}
 	// Mark animation needed when focused (for cursor blink). mark_anim_rect
 	// (not a raw ctx.needs_animation = true write) so the dirty tracker
 	// actually schedules e's rect for the NEXT frame. Standing here, above
@@ -1322,7 +1343,7 @@ pub fn (mut e CodeEditor) handle_event(event &GuiEvent, app &App) bool {
 						if mr.contains(event.mouse_x, event.mouse_y) {
 							e.minimap_dragging = true
 							e.scroll_y = e.minimap_y_to_scroll(event.mouse_y, ctx_ptr)
-							e.focused = true
+							e.take_focus(ctx_ptr)
 							return true
 						}
 					}
@@ -1349,8 +1370,7 @@ pub fn (mut e CodeEditor) handle_event(event &GuiEvent, app &App) bool {
 					// Focus + cursor: клик в тексте берёт фокус, ставит курсор и
 					// начинает выделение (якорь sel_a); с Shift выделение
 					// продолжается от прежнего якоря.
-					mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
-					e.focused = true
+					e.take_focus(ctx_ptr)
 					pos := e.hit_pos(event.mouse_x, event.mouse_y, ctx_ptr)
 					e.cur_line = pos.line
 					e.cur_col = pos.col
@@ -1363,12 +1383,12 @@ pub fn (mut e CodeEditor) handle_event(event &GuiEvent, app &App) bool {
 					}
 					e.drag = true
 					e.fire_cursor_move()
-					_ = ctx_mut
 				}
 				return true
 			}
 			// Нажатие мимо редактора снимает фокус и выделение.
 			if e.focused && !e.hovered {
+				e.drop_focus(ctx_ptr)
 				e.focused = false
 				e.drag = false
 				e.clear_sel()
@@ -1445,6 +1465,39 @@ pub fn (mut e CodeEditor) handle_event(event &GuiEvent, app &App) bool {
 	return false
 }
 
+// ─── Фокус ─────────────────────────────────────────────
+// Фокус редактора ведёт FocusManager окна (запись .code_editor): так редактор
+// участвует в Tab-порядке, а окно включает текстовый ввод SDL. Без контекста
+// (тесты без окна) меняется только собственный флаг.
+
+// take_focus - клик в редакторе: фокус через FocusManager
+fn (mut e CodeEditor) take_focus(ctx_ptr &RenderContext) {
+	if unsafe { ctx_ptr != nil } {
+		mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
+		ctx_mut.focus.focus_code_editor(&e, e.focus_group)
+	}
+	e.focused = true
+}
+
+// drop_focus - клик мимо или Esc: снимает фокус в FocusManager, если он у этого
+// редактора (blur_current сам сбросит focused, drag и выделение)
+fn (mut e CodeEditor) drop_focus(ctx_ptr &RenderContext) {
+	if unsafe { ctx_ptr != nil } {
+		mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
+		if ctx_mut.focus.is_focused(unsafe { &e }) {
+			ctx_mut.focus.blur_current()
+		}
+	}
+}
+
+// tab_focus - Ctrl+Tab (reverse - с Shift): следующий виджет Tab-порядка
+fn (mut e CodeEditor) tab_focus(reverse bool, ctx_ptr &RenderContext) {
+	if unsafe { ctx_ptr != nil } {
+		mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
+		ctx_mut.focus.tab(reverse)
+	}
+}
+
 // ─── Key handling ──────────────────────────────────────
 
 // handle_key обрабатывает нажатие клавиши в сфокусированном редакторе.
@@ -1512,6 +1565,17 @@ fn (mut e CodeEditor) handle_key(ev &GuiEvent, app &App, ctx_ptr &RenderContext)
 				if unsafe { ctx_ptr != nil } {
 					e.ensure_cursor_visible(ctx_ptr)
 				}
+				return true
+			}
+			sdl_k_tab {
+				// отступов в readonly нет - Tab и Ctrl+Tab просто передают фокус
+				e.tab_focus(shift, ctx_ptr)
+				return true
+			}
+			sdl_k_escape {
+				e.drop_focus(ctx_ptr)
+				e.focused = false
+				e.clear_sel()
 				return true
 			}
 			else {}
@@ -1646,6 +1710,12 @@ fn (mut e CodeEditor) handle_key(ev &GuiEvent, app &App, ctx_ptr &RenderContext)
 			return true
 		}
 		sdl_k_tab {
+			// Tab/Shift+Tab - отступ; Ctrl+Tab/Ctrl+Shift+Tab передаёт фокус
+			// дальше по Tab-порядку (как в TextArea)
+			if ctrl {
+				e.tab_focus(shift, ctx_ptr)
+				return true
+			}
 			if shift {
 				e.key_shift_tab()
 			} else {
@@ -1685,6 +1755,7 @@ fn (mut e CodeEditor) handle_key(ev &GuiEvent, app &App, ctx_ptr &RenderContext)
 			return true
 		}
 		sdl_k_escape {
+			e.drop_focus(ctx_ptr)
 			e.focused = false
 			e.clear_sel()
 			return true
@@ -1700,8 +1771,7 @@ fn (mut e CodeEditor) handle_key(ev &GuiEvent, app &App, ctx_ptr &RenderContext)
 		if shift {
 			e.ensure_sel()
 		}
-		e.cur_line = max_int(0, e.cur_line - page)
-		e.clamp_cursor()
+		e.move_to_line(max_int(0, e.cur_line - page))
 		if shift {
 			e.sel_b = ce_pos(e.cur_line, e.cur_col)
 		} else {
@@ -1718,8 +1788,7 @@ fn (mut e CodeEditor) handle_key(ev &GuiEvent, app &App, ctx_ptr &RenderContext)
 		if shift {
 			e.ensure_sel()
 		}
-		e.cur_line = min_int(e.lines.len - 1, e.cur_line + page)
-		e.clamp_cursor()
+		e.move_to_line(min_int(e.lines.len - 1, e.cur_line + page))
 		if shift {
 			e.sel_b = ce_pos(e.cur_line, e.cur_col)
 		} else {
@@ -1736,17 +1805,29 @@ fn (mut e CodeEditor) handle_key(ev &GuiEvent, app &App, ctx_ptr &RenderContext)
 // ─── Cursor movement ───────────────────────────────────
 // Общая схема перемещений: с Shift выделение растёт (ensure_sel заводит якорь
 // до сдвига, после сдвига sel_b = новая позиция), без Shift выделение сбрасывается.
-// Каждое перемещение зовёт on_cursor_move. При вертикальном перемещении колонка
-// просто обрезается по длине новой строки; "желаемая" колонка НЕ запоминается,
-// поэтому после прохода через короткую строку прежняя колонка не восстановится.
+// Каждое перемещение зовёт on_cursor_move. Вертикальное перемещение (стрелки,
+// PageUp/PageDown) идёт через move_to_line: колонка обрезается по длине новой
+// строки, но «желаемая» колонка запоминается, и после прохода через короткую
+// строку курсор возвращается на прежнюю колонку.
+
+// move_to_line переводит курсор на строку line, сохраняя желаемую колонку.
+// Если курсор стоит не там, куда его поставило прошлое вертикальное движение,
+// желаемой колонкой становится текущая.
+fn (mut e CodeEditor) move_to_line(line int) {
+	if e.goal_col < 0 || !e.goal_at.eq(ce_pos(e.cur_line, e.cur_col)) {
+		e.goal_col = e.cur_col
+	}
+	e.cur_line = clamp_int(line, 0, e.lines.len - 1)
+	e.cur_col = min_int(e.goal_col, e.lines[e.cur_line].len)
+	e.goal_at = ce_pos(e.cur_line, e.cur_col)
+}
 
 fn (mut e CodeEditor) move_cursor_up(shift bool) {
 	if shift {
 		e.ensure_sel()
 	}
 	if e.cur_line > 0 {
-		e.cur_line -= 1
-		e.cur_col = min_int(e.cur_col, e.lines[e.cur_line].len)
+		e.move_to_line(e.cur_line - 1)
 	}
 	if shift {
 		e.sel_b = ce_pos(e.cur_line, e.cur_col)
@@ -1761,8 +1842,7 @@ fn (mut e CodeEditor) move_cursor_down(shift bool) {
 		e.ensure_sel()
 	}
 	if e.cur_line < e.lines.len - 1 {
-		e.cur_line += 1
-		e.cur_col = min_int(e.cur_col, e.lines[e.cur_line].len)
+		e.move_to_line(e.cur_line + 1)
 	}
 	if shift {
 		e.sel_b = ce_pos(e.cur_line, e.cur_col)

@@ -794,10 +794,13 @@ pub fn (mut c Centered) handle_event(event &GuiEvent, app &App) bool {
 //
 // Supports both vertical (.vertical) and horizontal (.horizontal) scroll.
 //
-// If content_h/content_w <= 0 (or set to 0), ScrollBox takes the natural size of
-// its first child from measure() (update_eff_content_size), but never less than
-// the visible area. (Раньше размер считался вручную по типу ребёнка, теперь -
-// единый measure(), см. «Layout: measure/arrange» в PROJECT.md.)
+// Детей может быть несколько: они идут стопкой вдоль оси прокрутки (как в
+// VBox/HBox) через spacing, каждый - своего естественного размера из measure();
+// единственный ребёнок, как и раньше, растягивается на всю область содержимого.
+// If content_h/content_w <= 0 (or set to 0), the content size is the natural
+// size of the stack (update_eff_content_size), but never less than the visible
+// area. (Раньше размер считался вручную по типу ребёнка, теперь - единый
+// measure(), см. «Layout: measure/arrange» в PROJECT.md.)
 // ═══════════════════════════════════════════════════════
 
 // ScrollDir - ось прокрутки ScrollBox.
@@ -828,6 +831,7 @@ pub mut:
 	children     []&Widget
 	scroll_speed f32 = 30
 	pad          f32 = 2
+	spacing      f32 = 4 // между детьми стопки (при одном ребёнке не используется)
 	// ── Scrollbar customization ──
 	sb_width             f32 // track width/height; 0 → 14
 	sb_radius            f32 = -1 // corner radius; <0 → 3
@@ -845,6 +849,9 @@ pub mut:
 	hovered              bool
 	eff_content_h        f32 // actual content height used for scrolling (vertical)
 	eff_content_w        f32 // actual content width used for scrolling (horizontal)
+	// размеры детей вдоль оси прокрутки (естественные, из measure()) -
+	// считаются в update_eff_content_size, раздаются в arrange()
+	child_sizes []f32
 }
 
 pub fn (mut s ScrollBox) add(w &Widget) {
@@ -872,25 +879,34 @@ pub fn (mut s ScrollBox) clear() {
 // ── Размер содержимого: из measure() ребёнка ──
 
 // update_eff_content_size - высота (ширина) прокручиваемого содержимого:
-// заданная явно (content_h/content_w), иначе естественный размер
-// первого ребёнка из measure(), но не меньше видимой области (меньшее
-// содержимое просто заполняет её, прокрутки нет).
+// заданная явно (content_h/content_w), иначе естественный размер стопки
+// детей (сумма их measure() вдоль оси плюс spacing), но не меньше видимой
+// области (меньшее содержимое просто заполняет её, прокрутки нет). Заодно
+// запоминает размеры детей для arrange() (child_sizes).
 fn (mut s ScrollBox) update_eff_content_size(ctx &RenderContext) {
-	if s.dir == .vertical {
-		if s.content_h > 0 {
-			s.eff_content_h = s.content_h
-		} else if s.children.len > 0 {
-			s.eff_content_h = max_f32(measure_widget(s.children[0], ctx).h, s.bounds.h)
+	vertical := s.dir == .vertical
+	s.child_sizes = []f32{cap: s.children.len}
+	mut natural := f32(0)
+	for i, c in s.children {
+		hint := measure_widget(c, ctx)
+		size := if vertical { hint.h } else { hint.w }
+		s.child_sizes << size
+		natural += size
+		if i > 0 {
+			natural += s.spacing
+		}
+	}
+	if vertical {
+		s.eff_content_h = if s.content_h > 0 {
+			s.content_h
 		} else {
-			s.eff_content_h = s.bounds.h
+			max_f32(natural, s.bounds.h)
 		}
 	} else {
-		if s.content_w > 0 {
-			s.eff_content_w = s.content_w
-		} else if s.children.len > 0 {
-			s.eff_content_w = max_f32(measure_widget(s.children[0], ctx).w, s.bounds.w)
+		s.eff_content_w = if s.content_w > 0 {
+			s.content_w
 		} else {
-			s.eff_content_w = s.bounds.w
+			max_f32(natural, s.bounds.w)
 		}
 	}
 }
@@ -1041,7 +1057,7 @@ pub fn (mut s ScrollBox) arrange(mut ctx RenderContext) {
 		return
 	}
 
-	// Размер содержимого - из measure() ребёнка
+	// Размер содержимого - из measure() детей
 	s.update_eff_content_size(ctx)
 
 	// Размер содержимого мог измениться - возвращаем прокрутку в допустимый диапазон.
@@ -1052,24 +1068,34 @@ pub fn (mut s ScrollBox) arrange(mut ctx RenderContext) {
 		s.scroll_x = clamp_f32(s.scroll_x, 0, s.max_scroll())
 	}
 
-	// Layout children into content area, shifted by scroll offset
+	// Layout children into content area, shifted by scroll offset. Один ребёнок
+	// занимает всю область содержимого; несколько - стопкой, каждый своего
+	// размера (child_sizes), поперёк оси - на всю ширину (высоту).
 	cr := s.content_rect()
-	for mut c in s.children {
+	single := s.children.len == 1
+	mut pos := f32(0)
+	for i, mut c in s.children {
+		size := if single || i >= s.child_sizes.len {
+			if s.dir == .vertical { cr.h } else { cr.w }
+		} else {
+			s.child_sizes[i]
+		}
 		child_r := if s.dir == .vertical {
 			Rect{
 				x: cr.x
-				y: cr.y - s.scroll_y
+				y: cr.y - s.scroll_y + pos
 				w: cr.w
-				h: cr.h
+				h: size
 			}
 		} else {
 			Rect{
-				x: cr.x - s.scroll_x
+				x: cr.x - s.scroll_x + pos
 				y: cr.y
-				w: cr.w
+				w: size
 				h: cr.h
 			}
 		}
+		pos += size + s.spacing
 		disable_child_clip(mut c)
 		arrange_child(mut c, child_r, mut ctx)
 	}

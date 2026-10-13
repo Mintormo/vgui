@@ -1,5 +1,7 @@
 module vgui
 
+import strconv
+
 // ═══════════════════════════════════════════════════════
 // ListBox — multi-column scrollable list with header,
 // optional sort buttons, widget-based rows, keyboard
@@ -22,16 +24,17 @@ module vgui
 //   * выбор: selected (текущая строка) + необязательный множественный выбор (sel_marks);
 //   * прокрутка: scroll_y/scroll_x и две полосы с перетаскиванием; в режиме колонок по ширине
 //     прокручивается сумма ширин колонок;
-//   * заголовок: сортировка (только сигнал on_sort, сами строки ListBox не переставляет!) и
-//     изменение ширины колонок перетаскиванием границы;
+//   * заголовок: сортировка (при auto_sort ListBox сам переставляет строки - см. «Сортировка»
+//     ниже; иначе только индикатор и сигнал on_sort) и изменение ширины колонок
+//     перетаскиванием границы;
 //   * раскладка/отрисовка: measure() - layout_measure.v (константный scrollable_hint); виджетам
 //     в ячейках bounds раздаёт arrange() (только для видимых строк), draw() их лишь рисует;
 //     hit_children - widget_tree.v; фокус - focus.v (register_list_box/focus_list_box);
 //   * события: handle_event (ниже) - единый обработчик с приоритетом активных перетаскиваний.
 //
 // Header is always read-only. Sort buttons are optional
-// Header is always read-only. Sort buttons are optional
-// per-column (show_sort flag). Clicking sort fires on_sort.
+// per-column (show_sort flag). Clicking sort reorders rows
+// (auto_sort) and fires on_sort.
 // ═══════════════════════════════════════════════════════
 
 // Направление сортировки колонки: none_ (не сортируется, имя с подчёркиванием - none зарезервировано), по возрастанию, по убыванию.
@@ -66,6 +69,9 @@ mut:
 	cells     []LbCell
 	text      string // legacy single-column text
 	user_data voidptr = unsafe { nil }
+	// порядковый номер добавления: по нему сортировка «none_» возвращает
+	// исходный порядок, и он же разбивает равенства (сортировка устойчива)
+	seq int
 }
 
 // Размеры по умолчанию: толщина полосы прокрутки, высота шапки, ширина кнопки сортировки, внутренний
@@ -124,7 +130,16 @@ pub mut:
 	show_header   bool
 	header_height f32                 = lb_header_h
 	on_sort       fn (int, LbSortDir) = unsafe { nil } // (col_index, new_dir)
-	show_grid     bool // draw vertical grid lines between columns
+	// auto_sort - ListBox сам переставляет строки по колонке с индикатором
+	// сортировки (щелчок по кнопке в шапке, set_column_sort); false - строки
+	// не трогаются, сортирует приложение в on_sort.
+	auto_sort bool = true
+	// sort_cmp - своё сравнение текстов ячеек колонки col (<0, 0, >0 как у
+	// strcmp, по возрастанию); nil - lb_text_cmp (числа как числа, текст без
+	// учёта регистра)
+	sort_cmp  fn (col int, a string, b string) int = unsafe { nil }
+	next_seq  int
+	show_grid bool // draw vertical grid lines between columns
 	// Horizontal scroll for wide content
 	scroll_x       f32
 	scroll_x_speed f32 = 30
@@ -298,7 +313,8 @@ pub fn (mut lb ListBox) add_column_resizable(title string, width f32, min_w f32,
 	}
 }
 
-// set_column_sort ставит индикатор сортировки колонке и снимает у остальных (одновременно сортируется одна колонка). Строки не переставляет и on_sort не зовёт.
+// set_column_sort ставит индикатор сортировки колонке и снимает у остальных (одновременно сортируется одна колонка).
+// При auto_sort переставляет строки (dir = none_ - исходный порядок); on_sort не зовёт.
 pub fn (mut lb ListBox) set_column_sort(col int, dir LbSortDir) {
 	if col >= 0 && col < lb.columns.len {
 		// Clear other columns' sort
@@ -306,7 +322,174 @@ pub fn (mut lb ListBox) set_column_sort(col int, dir LbSortDir) {
 			lb.columns[i].sort_dir = .none_
 		}
 		lb.columns[col].sort_dir = dir
+		if lb.auto_sort {
+			lb.resort()
+		}
 	}
+}
+
+// ─── Сортировка ────────────────────────────────────────
+// При auto_sort строки упорядочены по колонке с индикатором сортировки
+// (sorted_col): resort() переставляет все строки, push_row вставляет новую
+// строку сразу на её место. Сортировка устойчива: равные строки остаются в
+// порядке добавления (LbRow.seq), а без индикатора возвращается исходный
+// порядок. Выбор (selected, отметки множественного выбора, якорь Shift)
+// следует за своими строками. Правка текста ячейки (set_row_cell_text)
+// порядок не обновляет - после неё зовите resort().
+
+// lb_text_cmp - сравнение по умолчанию: если оба текста - числа, сравниваются
+// как числа (2 < 10), иначе как строки без учёта регистра.
+pub fn lb_text_cmp(a string, b string) int {
+	if na := lb_number(a) {
+		if nb := lb_number(b) {
+			return if na < nb {
+				-1
+			} else if na > nb {
+				1
+			} else {
+				0
+			}
+		}
+	}
+	la, lb_ := a.to_lower(), b.to_lower()
+	if la != lb_ {
+		return if la < lb_ { -1 } else { 1 }
+	}
+	return if a < b {
+		-1
+	} else if a > b {
+		1
+	} else {
+		0
+	}
+}
+
+// lb_number - текст целиком число (пробелы по краям допускаются)
+fn lb_number(s string) ?f64 {
+	t := s.trim_space()
+	if t == '' {
+		return none
+	}
+	for c in t {
+		if !(c.is_digit() || c in [`-`, `+`, `.`, `e`, `E`]) {
+			return none
+		}
+	}
+	return strconv.atof64(t) or { return none }
+}
+
+// sorted_col - колонка с индикатором сортировки (-1 - нет)
+pub fn (lb &ListBox) sorted_col() int {
+	for i, c in lb.columns {
+		if c.sort_dir != .none_ {
+			return i
+		}
+	}
+	return -1
+}
+
+// row_cmp - порядок строк a и b при сортировке по колонке col (-1 - по
+// порядку добавления); равенство разбивает seq
+fn (lb &ListBox) row_cmp(a &LbRow, b &LbRow, col int) int {
+	if col >= 0 {
+		ta := if col < a.cells.len { a.cells[col].text } else { '' }
+		tb := if col < b.cells.len { b.cells[col].text } else { '' }
+		mut r := if lb.sort_cmp != unsafe { nil } {
+			lb.sort_cmp(col, ta, tb)
+		} else {
+			lb_text_cmp(ta,
+				tb)
+		}
+		if lb.columns[col].sort_dir == .desc {
+			r = -r
+		}
+		if r != 0 {
+			return r
+		}
+	}
+	return if a.seq < b.seq {
+		-1
+	} else if a.seq > b.seq {
+		1
+	} else {
+		0
+	}
+}
+
+// resort переставляет строки по текущему индикатору сортировки (без него -
+// исходный порядок добавления); выбор следует за строками.
+pub fn (mut lb ListBox) resort() {
+	n := lb.rows.len
+	if n < 2 {
+		return
+	}
+	col := lb.sorted_col()
+	// вставки с бинарным поиском места: устойчиво (равные - по seq), а сдвиги
+	// int-массива дёшевы даже для десятков тысяч строк
+	mut order := []int{cap: n}
+	for i in 0 .. n {
+		mut lo, mut hi := 0, order.len
+		for lo < hi {
+			mid := (lo + hi) / 2
+			if lb.row_cmp(&lb.rows[order[mid]], &lb.rows[i], col) <= 0 {
+				lo = mid + 1
+			} else {
+				hi = mid
+			}
+		}
+		order.insert(lo, i)
+	}
+	mut new_pos := []int{len: n}
+	mut rows := []LbRow{cap: n}
+	mut items := []string{cap: n}
+	for ni, oi in order {
+		new_pos[oi] = ni
+		rows << lb.rows[oi]
+		items << if oi < lb.items.len { lb.items[oi] } else { lb.rows[oi].text }
+	}
+	lb.rows = rows
+	lb.items = items
+	remap := fn [new_pos] (i int) int {
+		return if i >= 0 && i < new_pos.len { new_pos[i] } else { i }
+	}
+	lb.selected = remap(lb.selected)
+	lb.sel_anchor = remap(lb.sel_anchor)
+	lb.sel_marks = lb.sel_marks.map(remap(it))
+	lb.hover_index = -1
+}
+
+// push_row добавляет строку: в конец или, если список отсортирован
+// (auto_sort и есть индикатор), сразу на её место по порядку
+fn (mut lb ListBox) push_row(row LbRow, item string) {
+	mut r := row
+	r.seq = lb.next_seq
+	lb.next_seq++
+	col := if lb.auto_sort { lb.sorted_col() } else { -1 }
+	if col < 0 {
+		lb.items << item
+		lb.rows << r
+		return
+	}
+	mut lo, mut hi := 0, lb.rows.len
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if lb.row_cmp(&lb.rows[mid], &r, col) <= 0 {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	lb.rows.insert(lo, r)
+	lb.items.insert(lo, item)
+	// индексы за точкой вставки сдвигаются на одну строку
+	if lb.selected >= lo {
+		lb.selected++
+	}
+	if lb.sel_anchor >= lo {
+		lb.sel_anchor++
+	}
+	lb.sel_marks = lb.sel_marks.map(if it >= lo { it + 1 } else { it })
+	lb.hover_index = -1
 }
 
 // ─── Row management (multi-column) ─────────────────────
@@ -322,19 +505,17 @@ pub fn (mut lb ListBox) add_row_texts(texts []string) {
 	}
 	// Legacy compat: first column text → items array
 	first_text := if texts.len > 0 { texts[0] } else { '' }
-	lb.items << first_text
-	lb.rows << LbRow{
+	lb.push_row(LbRow{
 		cells: cells
 		text:  first_text
-	}
+	}, first_text)
 }
 
 // add_item_widget adds a single widget as an item (used in horizontal/filmstrip mode)
 pub fn (mut lb ListBox) add_item_widget(widget &Widget) {
-	lb.items << ''
-	lb.rows << LbRow{
+	lb.push_row(LbRow{
 		cells: [LbCell{ widget: unsafe { widget } }]
-	}
+	}, '')
 }
 
 // add_row_widgets - строка из виджетов-ячеек (по одному на колонку). Ссылки на виджеты ListBox не удерживает от GC/удаления - это забота вызывающего (в Python - список _children).
@@ -349,10 +530,9 @@ pub fn (mut lb ListBox) add_row_widgets(widgets []&Widget) {
 			cells << LbCell{}
 		}
 	}
-	lb.items << ''
-	lb.rows << LbRow{
+	lb.push_row(LbRow{
 		cells: cells
-	}
+	}, '')
 }
 
 // set_row_cell_text заменяет ячейку текстом (виджет в ней сбрасывается); для колонки 0 синхронизирует items и row.text.
@@ -401,13 +581,12 @@ pub fn (lb &ListBox) get_row_data(row int) voidptr {
 // add_item - старый API: без колонок добавляет однострочную строку, с колонками - строку add_row_texts([text]).
 pub fn (mut lb ListBox) add_item(text string) {
 	if lb.columns.len == 0 {
-		lb.items << text
-		lb.rows << LbRow{
+		lb.push_row(LbRow{
 			text:  text
 			cells: [LbCell{
 				text: text
 			}]
-		}
+		}, text)
 	} else {
 		lb.add_row_texts([text])
 	}
@@ -921,7 +1100,8 @@ fn (mut lb ListBox) fire_select() {
 	}
 }
 
-// toggle_sort - цикл none -> asc -> desc -> none для колонки; остальным сбрасывает индикатор и зовёт on_sort. Сортировку данных выполняет вызывающий код.
+// toggle_sort - цикл none -> asc -> desc -> none для колонки; остальным сбрасывает индикатор,
+// при auto_sort переставляет строки (resort) и зовёт on_sort.
 fn (mut lb ListBox) toggle_sort(col int) {
 	if col < 0 || col >= lb.columns.len {
 		return
@@ -936,6 +1116,9 @@ fn (mut lb ListBox) toggle_sort(col int) {
 		lb.columns[i].sort_dir = .none_
 	}
 	lb.columns[col].sort_dir = new_dir
+	if lb.auto_sort {
+		lb.resort()
+	}
 	if lb.on_sort != unsafe { nil } {
 		lb.on_sort(col, new_dir)
 	}

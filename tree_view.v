@@ -1330,8 +1330,9 @@ pub fn (mut tv TreeView) handle_event(event &GuiEvent, app &App) bool {
 				tv.focused = false
 			}
 		}
-		// Двойной клик: по стрелке - раскрыть/свернуть; по узлу - начать правку (если
-		// editable) либо раскрыть ветку; затем всегда on_dbl_click.
+		// Двойной клик: по стрелке - ничего сверх нажатия (mouse_down того же клика
+		// уже переключил ветку); по узлу - начать правку (если editable) либо
+		// раскрыть ветку; затем всегда on_dbl_click.
 		.mouse_dbl_click {
 			if tv.hovered && tv.focused && unsafe { ctx_ptr != nil } {
 				node, _ := tv.hit_node(event.mouse_y, ctx_ptr)
@@ -1339,11 +1340,6 @@ pub fn (mut tv TreeView) handle_event(event &GuiEvent, app &App) bool {
 					tv.selected = node
 					exp_node := tv.hit_expand_btn(event.mouse_x, event.mouse_y, ctx_ptr)
 					if unsafe { exp_node != nil } {
-						mut en := unsafe { exp_node }
-						en.expanded = !en.expanded
-						if tv.on_expand != unsafe { nil } {
-							tv.on_expand(exp_node, en.expanded)
-						}
 						return true
 					}
 					if tv.editable {
