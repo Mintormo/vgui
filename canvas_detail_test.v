@@ -11,28 +11,10 @@ import os
 // Запуск: v -enable-globals test vgui/canvas_detail_test.v (из v/, SDL_VIDEODRIVER=dummy)
 // ═══════════════════════════════════════════════════════
 
+// detail_capture - кадр окна (testkit.v, capture_frame): пиксели и pitch
 fn detail_capture(mut w Window) ([]u8, int) {
-	if w.rt == unsafe { nil } {
-		return []u8{}, 0
-	}
-	C.SDL_SetRenderTarget(w.renderer, w.rt)
-	raw := C.SDL_RenderReadPixels(w.renderer, unsafe { nil })
-	C.SDL_SetRenderTarget(w.renderer, unsafe { nil })
-	if unsafe { raw == nil } {
-		return []u8{}, 0
-	}
-	conv := C.SDL_ConvertSurface(raw, sdl_pixelformat_abgr8888)
-	C.SDL_DestroySurface(raw)
-	if unsafe { conv == nil } {
-		return []u8{}, 0
-	}
-	s := unsafe { &C.SDL_Surface(conv) }
-	n := s.pitch * s.h
-	mut buf := []u8{len: n}
-	unsafe { vmemcpy(buf.data, s.pixels, n) }
-	pitch := s.pitch
-	C.SDL_DestroySurface(conv)
-	return buf, pitch
+	f := capture_frame(mut w)
+	return f.pixels, f.pitch
 }
 
 // detail_rgb - цвет пикселя кадра (x, y)

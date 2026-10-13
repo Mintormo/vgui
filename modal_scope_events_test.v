@@ -9,8 +9,8 @@ import os
 // modal_blocker_index (modal_scope.v, свои тесты в modal_scope_test.v) —
 // здесь проверяется, что оно правильно подключено к циклу событий.
 //
-// События подкладываются в очередь SDL через SDL_PushEvent, дисплей не
-// нужен (SDL_VIDEODRIVER=dummy).
+// События подкладываются в очередь SDL (testkit.v, sim_click: SDL_PushEvent +
+// process_events), дисплей не нужен (SDL_VIDEODRIVER=dummy).
 //
 // Запуск: v -enable-globals test vgui/modal_scope_events_test.v
 // ═══════════════════════════════════════════════════════
@@ -19,37 +19,6 @@ import os
 struct ClickCounter {
 mut:
 	n int
-}
-
-// push_mouse кладёт в очередь SDL событие мыши для окна wid.
-fn push_mouse(etype u32, wid u32, x f32, y f32) {
-	mut ev := C.SDL_Event{}
-	if etype == sdl_mousemotion {
-		mut me := unsafe { &C.SDL_MouseMotionEvent(&ev) }
-		me.@type = etype
-		me.windowID = wid
-		me.x = x
-		me.y = y
-	} else {
-		mut be := unsafe { &C.SDL_MouseButtonEvent(&ev) }
-		be.@type = etype
-		be.windowID = wid
-		be.button = sdl_button_left
-		be.down = etype == sdl_mousebuttondown
-		be.clicks = 1
-		be.x = x
-		be.y = y
-	}
-	C.SDL_PushEvent(&ev)
-}
-
-// click_in прогоняет через цикл событий полный клик по точке окна wid.
-fn click_in(mut app App, wid u32, x f32, y f32) {
-	push_mouse(sdl_mousemotion, wid, x, y)
-	push_mouse(sdl_mousebuttondown, wid, x, y)
-	push_mouse(sdl_mousebuttonup, wid, x, y)
-	// Одного вызова хватает: process_events разбирает очередь до конца.
-	app.process_events()
 }
 
 // make_two_windows собирает два независимых окна, в каждом — кнопка на всю
@@ -111,8 +80,8 @@ fn test_modal_blocks_only_its_own_window_end_to_end() {
 	}
 
 	// До диалога кликаются оба окна.
-	click_in(mut app, win1.sdl_id, 100, 100)
-	click_in(mut app, win2.sdl_id, 100, 100)
+	sim_click(mut app, win1, 100, 100, .left, 1, 0)
+	sim_click(mut app, win2, 100, 100, .left, 1, 0)
 	assert c1.n == 1
 	assert c2.n == 1
 
@@ -121,8 +90,8 @@ fn test_modal_blocks_only_its_own_window_end_to_end() {
 		return
 	}
 
-	click_in(mut app, win1.sdl_id, 100, 100)
-	click_in(mut app, win2.sdl_id, 100, 100)
+	sim_click(mut app, win1, 100, 100, .left, 1, 0)
+	sim_click(mut app, win2, 100, 100, .left, 1, 0)
 	assert c1.n == 1, 'окно под модальным диалогом должно молчать'
 	assert c2.n == 2, 'соседнее окно должно продолжать получать события'
 
@@ -131,7 +100,7 @@ fn test_modal_blocks_only_its_own_window_end_to_end() {
 	app.remove_dialog(dlg)
 	dlg.win.cleanup()
 
-	click_in(mut app, win1.sdl_id, 100, 100)
+	sim_click(mut app, win1, 100, 100, .left, 1, 0)
 	assert c1.n == 2
 }
 
@@ -150,8 +119,8 @@ fn test_parentless_modal_blocks_all_windows_end_to_end() {
 		return
 	}
 
-	click_in(mut app, win1.sdl_id, 100, 100)
-	click_in(mut app, win2.sdl_id, 100, 100)
+	sim_click(mut app, win1, 100, 100, .left, 1, 0)
+	sim_click(mut app, win2, 100, 100, .left, 1, 0)
 	assert c1.n == 0
 	assert c2.n == 0
 
@@ -183,7 +152,7 @@ fn test_modeless_dialog_blocks_nothing_end_to_end() {
 	app.add_dialog(dlg)
 	dlg.show()
 
-	click_in(mut app, win1.sdl_id, 100, 100)
+	sim_click(mut app, win1, 100, 100, .left, 1, 0)
 	assert c1.n == 1
 
 	dlg.close_with_result(0)

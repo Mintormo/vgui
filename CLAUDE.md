@@ -44,6 +44,9 @@ SDL_VIDEODRIVER=dummy ~/soft/v/v -enable-globals test .
 # один тест
 SDL_VIDEODRIVER=dummy ~/soft/v/v -enable-globals test layout_test.v
 
+# снапшоты рендера: намеренно изменили вид - перезаписать эталоны, посмотреть и закоммитить
+VGUI_UPDATE_SNAPSHOTS=1 SDL_VIDEODRIVER=dummy ~/soft/v/v -enable-globals test snapshot_test.v
+
 # примеры (статически включают vgui — ПЕРЕСОБИРАТЬ после правок движка)
 PATH="$HOME/soft/v:$PATH" ./examples/build.sh
 ~/soft/v/v -enable-globals run examples/01_label.v
@@ -51,6 +54,9 @@ PATH="$HOME/soft/v:$PATH" ./examples/build.sh
 
 «В демо не работает, а тесты зелёные» почти всегда означает устаревший бинарник примера.
 `__global`-переменные модуля не видны из `_test.v` - тестам нужны функции-аксессоры.
+Новые тесты интерфейса пишите через `testkit.v` (`new_test_ui`, `t.click_widget`, `t.capture`,
+`match_snapshot`), а не копией своего окна/захвата кадра: каждый `_test.v` компилируется отдельно,
+общий код живёт только в модуле. Упал `snapshot_test.v` - откройте `testdata/snapshots/*.actual.png`.
 
 ## Правила V-кода и демо
 

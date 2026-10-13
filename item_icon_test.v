@@ -1,57 +1,9 @@
 module vgui
 
-import os
-
 // Тесты ItemIcon (item_icon.v): значение иконки, кэш текстур (в том числе
 // кэширование неудачной загрузки) и отрисовка глифа Lucide и картинки из байтов.
 //
 // Запуск: v -enable-globals test item_icon_test.v
-
-fn make_item_icon_window(w int, h int) !(&App, &Window) {
-	os.setenv('SDL_VIDEODRIVER', 'dummy', true)
-	mut app := create_app()!
-	mut win := create_window(title: 'item icon test', width: w, height: h, theme: light_theme())!
-	app.add_window(win)
-	return app, win
-}
-
-// item_icon_capture читает кадр окна (persistent render target) в RGBA.
-fn item_icon_capture(mut w Window) ([]u8, int, int, int) {
-	C.SDL_SetRenderTarget(w.renderer, w.rt)
-	raw := C.SDL_RenderReadPixels(w.renderer, unsafe { nil })
-	C.SDL_SetRenderTarget(w.renderer, unsafe { nil })
-	if unsafe { raw == nil } {
-		return []u8{}, 0, 0, 0
-	}
-	conv := C.SDL_ConvertSurface(raw, sdl_pixelformat_abgr8888)
-	C.SDL_DestroySurface(raw)
-	s := unsafe { &C.SDL_Surface(conv) }
-	n := s.pitch * s.h
-	mut buf := []u8{len: n}
-	unsafe { vmemcpy(buf.data, s.pixels, n) }
-	w_, h_, pitch := s.w, s.h, s.pitch
-	C.SDL_DestroySurface(conv)
-	return buf, w_, h_, pitch
-}
-
-// count_px - сколько пикселей прямоугольника (x, y, w, h) близки к цвету c.
-fn count_px(buf []u8, pitch int, x int, y int, w int, h int, c Color) int {
-	mut n := 0
-	for yy in y .. y + h {
-		for xx in x .. x + w {
-			off := yy * pitch + xx * 4
-			if iabs_i(int(buf[off]) - int(c.r)) < 40 && iabs_i(int(buf[off + 1]) - int(c.g)) < 40
-				&& iabs_i(int(buf[off + 2]) - int(c.b)) < 40 {
-				n++
-			}
-		}
-	}
-	return n
-}
-
-fn iabs_i(v int) int {
-	return if v < 0 { -v } else { v }
-}
 
 // solid_bmp - BMP 24 бит w×h одного цвета (ширина кратна 4 - строки без выравнивания).
 fn solid_bmp(w int, h int, c Color) []u8 {
@@ -121,34 +73,36 @@ fn test_item_icon_value() {
 // Непрочитанная картинка кэшируется как nil: иначе IMG_Load шёл бы с диска на
 // каждой отрисовке (так было с узлами файлового диалога).
 fn test_failed_load_is_cached() {
-	_, mut win := make_item_icon_window(100, 60)!
+	mut t := new_test_ui(width: 120, height: 80)!
+	defer {
+		t.close()
+	}
 	path := '/nonexistent/vgui_item_icon.png'
-	assert win.ctx.load_icon_texture(path) == unsafe { nil }
-	assert path in win.ctx.icon_cache
-	assert win.ctx.load_icon_texture(path) == unsafe { nil }
-	assert win.ctx.load_icon_texture_data('mem:bad', [u8(1), 2, 3]) == unsafe { nil }
-	assert 'mem:bad' in win.ctx.icon_cache
-	win.cleanup()
+	assert t.win.ctx.load_icon_texture(path) == unsafe { nil }
+	assert path in t.win.ctx.icon_cache
+	assert t.win.ctx.load_icon_texture(path) == unsafe { nil }
+	assert t.win.ctx.load_icon_texture_data('mem:bad', [u8(1), 2, 3]) == unsafe { nil }
+	assert 'mem:bad' in t.win.ctx.icon_cache
 }
 
 fn test_draw_glyph_and_bytes_image() {
-	_, mut win := make_item_icon_window(200, 100)!
+	mut t := new_test_ui(width: 200, height: 100)!
+	defer {
+		t.close()
+	}
 	red := Color{220, 20, 20, 255}
 	blue := Color{20, 40, 220, 255}
 	mut probe := &ItemIconProbe{
 		glyph: item_icon('square').with_color(red)
 		image: item_icon_data(solid_bmp(4, 4, blue))
 	}
-	win.add_widget(probe)
-	win.render()
-	buf, _, _, pitch := item_icon_capture(mut win)
-	assert buf.len > 0
+	t.add(probe)
+	f := t.capture()
 	// Глиф красится цветом иконки, а не fallback (чёрным)
-	assert count_px(buf, pitch, 10, 10, 32, 32, red) > 20
-	assert count_px(buf, pitch, 10, 10, 32, 32, Color{0, 0, 0, 255}) == 0
+	assert f.count(Rect{10, 10, 32, 32}, red, 40) > 20
+	assert f.count(Rect{10, 10, 32, 32}, Color{0, 0, 0, 255}, 40) == 0
 	// Картинка 4×4 растянута в 16×16
-	assert count_px(buf, pitch, 60, 10, 16, 16, blue) >= 200
-	win.cleanup()
+	assert f.count(Rect{60, 10, 16, 16}, blue, 40) >= 200
 }
 
 // Иконка строки ListBox едет вместе со строкой при сортировке.

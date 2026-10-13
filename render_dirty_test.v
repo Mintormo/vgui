@@ -77,46 +77,14 @@ fn (mut m TooltipMockWidget) handle_event(event &GuiEvent, app &App) bool {
 
 // ─── Pixel readback helpers (frame-diff instrument) ───
 
-// capture_rgba reads back rendered pixels and returns them converted to a
-// known byte layout: R,G,B,A per pixel (ABGR8888 — see canvas.v's notes on
-// this format), plus width/height/pitch so callers can index into it with
-// get_px.
-//
-// Reads from w.rt — the persistent render target — rather than the default
-// backbuffer after SDL_RenderPresent. SDL's own docs call backbuffer content
-// undefined after a present; under the dummy driver it happens to come back
-// stable (which is why this passed before), but that's an accident of this
-// specific backend, not a guarantee, and would make the instrument flaky on
-// a real one. w.rt holds exactly what render() blitted to the backbuffer
-// this frame (the blit is a plain unscaled copy — see ensure_render_target's
-// comment), so reading it is equivalent but well-defined. Temporarily
-// rebinds the render target to read it, then restores the target render()
-// itself leaves bound (nil / the default backbuffer) so a subsequent
-// win.render() call isn't affected.
+// capture_rgba / get_px / diff_count - тонкие обёртки над testkit.v
+// (capture_frame, Frame.diff), оставленные ради множества вызовов ниже:
+// пиксели R,G,B,A построчно, плюс ширина/высота/pitch. Кадр читается из
+// w.rt - persistent render target - а не из backbuffer после present (его
+// содержимое SDL не гарантирует), см. capture_frame.
 fn capture_rgba(mut w Window) ([]u8, int, int, int) {
-	if w.rt == unsafe { nil } {
-		return []u8{}, 0, 0, 0
-	}
-	C.SDL_SetRenderTarget(w.renderer, w.rt)
-	raw := C.SDL_RenderReadPixels(w.renderer, unsafe { nil })
-	C.SDL_SetRenderTarget(w.renderer, unsafe { nil })
-	if unsafe { raw == nil } {
-		return []u8{}, 0, 0, 0
-	}
-	conv := C.SDL_ConvertSurface(raw, sdl_pixelformat_abgr8888)
-	C.SDL_DestroySurface(raw)
-	if unsafe { conv == nil } {
-		return []u8{}, 0, 0, 0
-	}
-	s := unsafe { &C.SDL_Surface(conv) }
-	n := s.pitch * s.h
-	mut buf := []u8{len: n}
-	unsafe { vmemcpy(buf.data, s.pixels, n) }
-	w_ := s.w
-	h_ := s.h
-	pitch := s.pitch
-	C.SDL_DestroySurface(conv)
-	return buf, w_, h_, pitch
+	f := capture_frame(mut w)
+	return f.pixels, f.w, f.h, f.pitch
 }
 
 fn get_px(buf []u8, pitch int, x int, y int) (u8, u8, u8, u8) {
@@ -124,41 +92,24 @@ fn get_px(buf []u8, pitch int, x int, y int) (u8, u8, u8, u8) {
 	return buf[off], buf[off + 1], buf[off + 2], buf[off + 3]
 }
 
-// diff_count returns how many pixels differ between two equally-sized
-// captures, and the largest single-channel absolute difference seen — the
-// same two numbers review quoted ("14 040 pixels, max diff 75/255").
+// diff_count - сколько пикселей двух одинаковых по размеру снимков различаются
+// хоть на единицу, и наибольшая разница канала - те же два числа, что
+// приводило ревью («14 040 pixels, max diff 75/255»).
 fn diff_count(a []u8, b []u8, pitch int, w int, h int) (int, int) {
-	mut n := 0
-	mut max_d := 0
-	for y in 0 .. h {
-		for x in 0 .. w {
-			ar, ag, ab, aa := get_px(a, pitch, x, y)
-			br, bg, bb, ba := get_px(b, pitch, x, y)
-			d := max_i(max_i(iabs(int(ar) - int(br)), iabs(int(ag) - int(bg))), max_i(iabs(int(ab) - int(bb)),
-				iabs(int(aa) - int(ba))))
-			if d > 0 {
-				n++
-				if d > max_d {
-					max_d = d
-				}
-			}
-		}
+	fa := Frame{
+		w:      w
+		h:      h
+		pitch:  pitch
+		pixels: a
 	}
-	return n, max_d
-}
-
-fn iabs(v int) int {
-	if v < 0 {
-		return -v
+	fb := Frame{
+		w:      w
+		h:      h
+		pitch:  pitch
+		pixels: b
 	}
-	return v
-}
-
-fn max_i(a int, b int) int {
-	if a > b {
-		return a
-	}
-	return b
+	d := fa.diff(&fb, 0)
+	return d.count, d.max_delta
 }
 
 // ═══════════════════════════════════════════════════════
