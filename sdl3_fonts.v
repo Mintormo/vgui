@@ -167,37 +167,24 @@ pub fn (mut ctx RenderContext) get_font(style FontStyle, size int) voidptr {
 	return font
 }
 
-// Версия get_font, не меняющая ctx (для const-методов вроде измерения). Не открывает новых
-// шрифтов: если шрифта нужного размера ещё нет в кэше, возвращает regular. Поэтому размер должен
-// быть заранее "прогрет" вызовом get_font.
+// Версия get_font для методов с неизменяемым ctx (measure() и прочие измерения).
+// Шрифт нужного размера, если его ещё нет в кэше, ОТКРЫВАЕТ - так же, как get_font.
+//
+// Раньше она не открывала новых шрифтов и при промахе отдавала regular базового
+// размера, рассчитывая, что размер «прогреет» draw(). Но первая раскладка идёт ДО
+// первой отрисовки: метка size=20 мерилась шрифтом 15 пт (высота 27 вместо 32),
+// draw() открывал нужный шрифт, и со второго кадра раскладка сдвигалась на 5 px -
+// а перерисовывались лишь dirty-области, и на экране оставались куски кадра со
+// старыми позициями (полоски поверх рамок полей ввода в примере 56 при наведении).
+//
+// Изменение здесь - только заполнение общего кэша шрифтов (ctx.fonts - указатель на
+// FontSet, его size_cache/handle_map); поля самого RenderContext не меняются. Для
+// вызывающего это мемоизация: результат одинаков при любом вызове, так что measure()
+// остаётся чистой (PROJECT.md, «Layout: measure/arrange»). Потоки: как и всё
+// остальное - только главный поток (PROJECT.md, «Глобальное изменяемое состояние»).
 pub fn (ctx &RenderContext) get_font_immut(style FontStyle, size int) voidptr {
-	effective_size := if size <= 0 { ctx.fonts.size } else { size }
-
-	if effective_size == ctx.fonts.size {
-		return match style {
-			.regular { ctx.fonts.regular }
-			.bold { ctx.fonts.bold }
-			.italic { ctx.fonts.italic }
-			.bold_italic { ctx.fonts.bold_italic }
-			.mono { ctx.fonts.mono }
-			.mono_bold { ctx.fonts.mono_bold }
-		}
-	}
-
-	// Must mirror the key computation in get_font (logical + physical size).
-	open_size := if ctx.dpi_scale * ctx.ui_scale > 1.0 {
-		int(f32(effective_size) * ctx.dpi_scale * ctx.ui_scale + 0.5)
-	} else {
-		effective_size
-	}
-	key := '${int(style)}_${effective_size}_${open_size}'
-	if key in ctx.fonts.size_cache {
-		cached := ctx.fonts.size_cache[key] or { unsafe { nil } }
-		if unsafe { cached != nil } {
-			return cached
-		}
-	}
-	return ctx.fonts.regular
+	mut cache_owner := unsafe { &RenderContext(ctx) }
+	return cache_owner.get_font(style, size)
 }
 
 // open_font_for_role opens a TTF font at `size`.
