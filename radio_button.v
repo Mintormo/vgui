@@ -107,6 +107,7 @@ fn (mut rb RadioButton) select_in_group(app &App) {
 // draw рисует кружок, кольцо фокуса, точку выбора и подпись; регистрирует
 // кнопку в фокус-учёте (только если enabled) и шагает анимации focus_anim/sel_anim.
 pub fn (mut rb RadioButton) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(rb.enabled)
 	if !rb.visible {
 		return
 	}
@@ -114,12 +115,14 @@ pub fn (mut rb RadioButton) draw(mut ctx RenderContext) {
 		return
 	}
 
-	if rb.enabled {
+	if en {
 		ctx.focus.register_radio_button(&rb, rb.focus_group)
+	} else {
+		ctx.focus_block(&rb)
 	}
 
 	is_focused := ctx.focus.is_focused(unsafe { &rb })
-	target_focus := if is_focused && rb.enabled { f32(1.0) } else { f32(0.0) }
+	target_focus := if is_focused && en { f32(1.0) } else { f32(0.0) }
 	mut animating := rb.focus_anim.update(target_focus, ctx)
 
 	target_sel := if rb.selected { f32(1.0) } else { f32(0.0) }
@@ -134,13 +137,13 @@ pub fn (mut rb RadioButton) draw(mut ctx RenderContext) {
 	radius := rb.circle_size * 0.5
 
 	// Outer circle
-	outer_c := if !rb.enabled {
+	outer_c := if !en {
 		ctx.theme.button_disabled_border
 	} else {
 		ctx.theme.eff_rad_border().blend(ctx.theme.eff_rad_dot(), max_f32(rb.sel_anim.value,
 			rb.focus_anim.value * 0.5))
 	}
-	bg := if !rb.enabled {
+	bg := if !en {
 		ctx.theme.button_disabled_bg
 	} else {
 		ctx.theme.eff_rad_bg().blend(ctx.theme.button_hover, if rb.hovered {
@@ -161,7 +164,7 @@ pub fn (mut rb RadioButton) draw(mut ctx RenderContext) {
 	// Inner dot
 	if rb.sel_anim.value > 0.05 {
 		dot_r := radius * 0.45 * rb.sel_anim.value
-		dc := if rb.enabled { ctx.theme.eff_rad_dot() } else { ctx.theme.text_disabled }
+		dc := if en { ctx.theme.eff_rad_dot() } else { ctx.theme.text_disabled }
 		ctx.fill_circle(cx, cy, dot_r, dc)
 	}
 
@@ -171,7 +174,7 @@ pub fn (mut rb RadioButton) draw(mut ctx RenderContext) {
 		fh := ctx.font_height_of(font)
 		tx := rb.bounds.x + rb.circle_size + rb.gap + 1
 		ty := rb.bounds.y + (rb.bounds.h - fh) * 0.5
-		tc := if rb.enabled { ctx.theme.text_primary } else { ctx.theme.text_disabled }
+		tc := if en { ctx.theme.text_primary } else { ctx.theme.text_disabled }
 		ctx.push_clip(rb.bounds)
 		ctx.draw_text_with_font(rb.text, tx, ty, tc, font)
 		ctx.pop_clip()

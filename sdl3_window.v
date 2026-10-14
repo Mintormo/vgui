@@ -1020,6 +1020,7 @@ fn (mut w Window) render() {
 	// push and pop) would otherwise leave a stale entry that progressively
 	// shrinks the effective clip on every subsequent frame.
 	w.ctx.clip_stack.clear()
+	w.ctx.disabled_depth = 0
 
 	screen_rect := Rect{0, 0, w.ctx.screen_width, w.ctx.screen_height}
 	size_changed := w.ctx.screen_width != w.last_layout_w || w.ctx.screen_height != w.last_layout_h

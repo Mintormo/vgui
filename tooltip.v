@@ -32,6 +32,9 @@ pub mut:
 	type_tag     int = kind_tooltip // тег типа, см. widget_tag.v
 	text         string
 	visible      bool    = true
+	// enabled = false - подсказка не показывается. Неактивность цели подсказку
+	// НЕ гасит: объяснить, почему элемент недоступен, - её обычная работа.
+	enabled      bool    = true
 	delay_ms     u32     = tt_default_delay
 	bg           Color   = Color{0, 0, 0, 0}
 	text_color   Color   = Color{0, 0, 0, 0}
@@ -236,7 +239,7 @@ fn tooltip_draw(t &Tooltip, mut ctx RenderContext) {
 // Замечание: после клика (handle_event сбрасывает target_hover) страховочная проверка
 // в draw снова обнаружит мышь над целью и запустит таймер заново.
 pub fn (mut t Tooltip) draw(mut ctx RenderContext) {
-	if !t.visible || t.text.len == 0 || unsafe { t.target == nil } {
+	if !t.visible || !t.enabled || t.text.len == 0 || unsafe { t.target == nil } {
 		t.showing = false
 		return
 	}
@@ -285,7 +288,7 @@ pub fn (mut t Tooltip) draw(mut ctx RenderContext) {
 // Событие никогда не поглощается (всегда false) - подсказка не должна перехватывать
 // ввод у виджетов.
 pub fn (mut t Tooltip) handle_event(event &GuiEvent, app &App) bool {
-	if !t.visible || t.text.len == 0 || unsafe { t.target == nil } {
+	if !t.visible || !t.enabled || t.text.len == 0 || unsafe { t.target == nil } {
 		t.showing = false
 		t.target_hover = false
 		return false

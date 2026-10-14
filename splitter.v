@@ -63,6 +63,7 @@ pub mut:
 	bar_hover  Color    = Color{0, 0, 0, 0}
 	bar_drag   Color    = Color{0, 0, 0, 0}
 	visible    bool     = true
+	enabled    bool     = true // false - полоса не тянется, обе панели неактивны (enabled.v)
 	// Children
 	first  &Widget = unsafe { nil }
 	second &Widget = unsafe { nil }
@@ -270,8 +271,10 @@ pub fn (mut s Splitter) draw(mut ctx RenderContext) {
 	if !s.visible {
 		return
 	}
+	en := ctx.is_enabled(s.enabled)
 
 	// Draw first child
+	ctx.begin_disabled(s.enabled)
 	if unsafe { s.first != nil } {
 		fr := s.first_rect()
 		ctx.push_clip(fr)
@@ -285,6 +288,15 @@ pub fn (mut s Splitter) draw(mut ctx RenderContext) {
 		ctx.push_clip(sr)
 		s.second.draw(mut ctx)
 		ctx.pop_clip()
+	}
+	ctx.end_disabled(s.enabled)
+
+	// Неактивная полоса: только свой bar_color, приглушённый
+	if !en {
+		if s.bar_color.a > 0 {
+			ctx.fill_rect(s.bar_rect(), ctx.disabled_color(s.bar_color))
+		}
+		return
 	}
 
 	// Draw bar. Idle state is invisible (unless a custom bar_color is set) —
@@ -346,6 +358,11 @@ fn (s &Splitter) draw_grip(br Rect, bar_c Color, mut ctx RenderContext) {
 // отдаются детям: сначала second, потом first (порядок z-order).
 pub fn (mut s Splitter) handle_event(event &GuiEvent, app &App) bool {
 	if !s.visible {
+		return false
+	}
+	if !s.enabled && is_input_event(event) {
+		s.dragging = false
+		s.hovered = false
 		return false
 	}
 

@@ -1040,7 +1040,11 @@ pub fn (cm &ContextMenu) is_open() bool {
 }
 
 // draw ничего не рисует: попап рисует оверлей окна.
+// Неактивное меню (свой enabled или отключённый предок) закрывается, если было открыто.
 pub fn (mut cm ContextMenu) draw(mut ctx RenderContext) {
+	if !ctx.is_enabled(cm.enabled) && cm.state.open {
+		cm.state.close_all(mut ctx)
+	}
 }
 
 // Раньше это был ручной if-is по типам, со старым неполным списком:
@@ -1443,8 +1447,12 @@ fn (mut mb MenuBar) open_entry(idx int, mut ctx RenderContext) {
 
 // draw рисует фон полосы с нижней границей, заголовки (активный и наведённый подсвечены) и ничего больше — попапы рисует оверлей.
 pub fn (mut mb MenuBar) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(mb.enabled)
 	if !mb.visible {
 		return
+	}
+	if !en && mb.state.open {
+		mb.state.close_all(mut ctx)
 	}
 
 	bh := mb.eff_bar_height() // ← НОВОЕ
@@ -1458,7 +1466,7 @@ pub fn (mut mb MenuBar) draw(mut ctx RenderContext) {
 	for i in 0 .. mb.entries.len {
 		er := mb.entry_rect(i, ctx)
 		is_active := mb.state.open && mb.state.bar_active == i
-		is_hov := mb.entries[i].hovered
+		is_hov := mb.entries[i].hovered && en
 
 		if is_active {
 			ctx.fill_rect(er, ctx.theme.eff_menubar_item_active().with_alpha(180))
@@ -1466,7 +1474,9 @@ pub fn (mut mb MenuBar) draw(mut ctx RenderContext) {
 			ctx.fill_rect(er, ctx.theme.eff_menubar_item_hover())
 		}
 
-		tc := if is_active {
+		tc := if !en {
+			ctx.theme.text_disabled
+		} else if is_active {
 			ctx.theme.eff_menu_item_sel_text()
 		} else {
 			ctx.theme.eff_menubar_item_text()

@@ -78,7 +78,9 @@ mut:
 	bg           Color = Color{0, 0, 0, 0}
 	use_panel_bg bool
 	visible      bool = true
-	clip         bool = true
+	// enabled - отключает всё поддерево (enabled.v); у HBox/VBox/WindowTitleDrag флаг живёт здесь.
+	enabled bool = true
+	clip    bool = true
 	// Выравнивание детей поперёк главной оси. stretch —
 	// историческое поведение (ребёнок на всю ширину/высоту).
 	cross_align CrossAlign = .stretch
@@ -303,9 +305,11 @@ fn (mut b BoxLayout) draw_impl(mut ctx RenderContext) {
 		// сами виджеты клипают своё содержимое по собственным bounds.
 		ctx.push_clip(b.bounds.expanded(ctx.visual_margin()))
 	}
+	ctx.begin_disabled(b.enabled)
 	for mut c in b.children {
 		c.widget.draw(mut ctx)
 	}
+	ctx.end_disabled(b.enabled)
 	if b.clip {
 		ctx.pop_clip()
 	}
@@ -313,7 +317,7 @@ fn (mut b BoxLayout) draw_impl(mut ctx RenderContext) {
 
 // event_impl - раздаёт событие детям с конца (последний добавленный - сверху); true, если кто-то поглотил.
 fn (mut b BoxLayout) event_impl(event &GuiEvent, app &App) bool {
-	if !b.visible {
+	if !b.visible || (!b.enabled && is_input_event(event)) {
 		return false
 	}
 	for i := b.children.len - 1; i >= 0; i-- {
@@ -549,6 +553,7 @@ pub mut:
 	radius   f32     = -1
 	pad      f32     = 8
 	visible  bool    = true
+	enabled  bool    = true // false - неактивно всё содержимое (enabled.v)
 	child    &Widget = unsafe { nil }
 }
 
@@ -590,13 +595,15 @@ pub fn (mut p Panel) draw(mut ctx RenderContext) {
 		// меньше вылета тени срезал бы тень ребёнка. Ограничено самой
 		// панелью: за её рамку тень содержимого выходить не должна.
 		ctx.push_clip(inner.expanded(ctx.visual_margin()).intersection(p.bounds))
+		ctx.begin_disabled(p.enabled)
 		p.child.draw(mut ctx)
+		ctx.end_disabled(p.enabled)
 		ctx.pop_clip()
 	}
 }
 
 pub fn (mut p Panel) handle_event(event &GuiEvent, app &App) bool {
-	if !p.visible {
+	if !p.visible || (!p.enabled && is_input_event(event)) {
 		return false
 	}
 	if unsafe { p.child != nil } {
@@ -616,6 +623,7 @@ pub mut:
 	bounds   Rect
 	children []&Widget
 	visible  bool  = true
+	enabled  bool  = true // false - неактивны все слои (enabled.v)
 	bg       Color = Color{0, 0, 0, 0}
 }
 
@@ -661,13 +669,15 @@ pub fn (mut s Stack) draw(mut ctx RenderContext) {
 	if s.bg.a > 0 {
 		ctx.fill_rect(s.bounds, s.bg)
 	}
+	ctx.begin_disabled(s.enabled)
 	for mut c in s.children {
 		c.draw(mut ctx)
 	}
+	ctx.end_disabled(s.enabled)
 }
 
 pub fn (mut s Stack) handle_event(event &GuiEvent, app &App) bool {
-	if !s.visible {
+	if !s.visible || (!s.enabled && is_input_event(event)) {
 		return false
 	}
 	for i := s.children.len - 1; i >= 0; i-- {
@@ -688,6 +698,7 @@ pub mut:
 	type_tag int = kind_spacer // тег типа, см. widget_tag.v
 	bounds   Rect
 	visible  bool = true
+	enabled  bool = true // ни на что не влияет: флаг для единообразия set_enabled
 }
 
 // create_spacer - распорка: забирает свободное место (прижать
@@ -717,6 +728,7 @@ pub mut:
 	child_w  f32     = 200
 	child_h  f32     = 40
 	visible  bool    = true
+	enabled  bool    = true // false - неактивен ребёнок (enabled.v)
 	bg       Color   = Color{0, 0, 0, 0}
 	child    &Widget = unsafe { nil }
 }
@@ -769,7 +781,9 @@ pub fn (mut c Centered) draw(mut ctx RenderContext) {
 		ctx.fill_rect(c.bounds, c.bg)
 	}
 	if unsafe { c.child != nil } {
+		ctx.begin_disabled(c.enabled)
 		c.child.draw(mut ctx)
+		ctx.end_disabled(c.enabled)
 	}
 }
 
@@ -783,7 +797,7 @@ pub fn (mut c Centered) handle_event(event &GuiEvent, app &App) bool {
 			c.bounds.h = f32(event.win_h)
 		}
 	}
-	if unsafe { c.child != nil } {
+	if unsafe { c.child != nil } && (c.enabled || !is_input_event(event)) {
 		return c.child.handle_event(event, app)
 	}
 	return false
@@ -827,6 +841,7 @@ pub mut:
 	scroll_y     f32
 	scroll_x     f32
 	visible      bool  = true
+	enabled      bool  = true // false - не прокручивается, содержимое неактивно (enabled.v)
 	bg           Color = Color{0, 0, 0, 0}
 	children     []&Widget
 	scroll_speed f32 = 30
@@ -1129,9 +1144,11 @@ pub fn (mut s ScrollBox) draw(mut ctx RenderContext) {
 	}
 	ctx.push_clip(viewport)
 
+	ctx.begin_disabled(s.enabled)
 	for mut c in s.children {
 		c.draw(mut ctx)
 	}
+	ctx.end_disabled(s.enabled)
 
 	ctx.pop_clip()
 
@@ -1145,7 +1162,9 @@ pub fn (mut s ScrollBox) draw(mut ctx RenderContext) {
 			ctx.fill_rounded_rect(track, track_c, sb_rad)
 		}
 
-		thumb_c := if s.sb_dragging {
+		thumb_c := if !ctx.is_enabled(s.enabled) {
+			ctx.disabled_color(s.eff_sb_thumb_color(ctx))
+		} else if s.sb_dragging {
 			s.eff_sb_thumb_drag(ctx)
 		} else if s.sb_hovered {
 			s.eff_sb_thumb_hover(ctx)
@@ -1160,6 +1179,11 @@ pub fn (mut s ScrollBox) draw(mut ctx RenderContext) {
 
 pub fn (mut s ScrollBox) handle_event(event &GuiEvent, app &App) bool {
 	if !s.visible {
+		return false
+	}
+	if !s.enabled && is_input_event(event) {
+		s.sb_dragging = false
+		s.sb_hovered = false
 		return false
 	}
 

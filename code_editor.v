@@ -943,6 +943,7 @@ fn (e &CodeEditor) minimap_y_to_scroll(my f32, ctx &RenderContext) f32 {
 // (first_vis..last_vis), поэтому стоимость кадра не зависит от размера файла
 // (кроме max_content_width для горизонтальной прокрутки).
 pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(e.enabled)
 	if !e.visible {
 		return
 	}
@@ -950,8 +951,10 @@ pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
 	// клипа, как у TextArea: Tab-порядок не должен зависеть от того, попал ли
 	// виджет в dirty region кадра. Фокус ставят и снимают только через
 	// ctx.focus (клик, Ctrl+Tab, Esc), флаг focused лишь отражает его.
-	if e.enabled {
+	if en {
 		ctx.focus.register_code_editor(&e, e.focus_group)
+	} else {
+		ctx.focus_block(&e)
 	}
 	should_focus := ctx.focus.is_focused(unsafe { &e })
 	if e.focused && !should_focus {
@@ -976,6 +979,15 @@ pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
 	if !ctx.is_in_clip(e.bounds) {
 		return
 	}
+	// Встроенные виджеты (ячейки, редакторы) неактивны вместе с владельцем;
+	// всё содержимое приглушается вуалью поверх (enabled.v)
+	ctx.begin_disabled(e.enabled)
+	defer {
+		ctx.end_disabled(e.enabled)
+		if !en {
+			ctx.draw_disabled_veil(e.bounds, ctx.theme.border_radius)
+		}
+	}
 
 	lh := e.line_height(ctx)
 	font := ctx.get_font(e.font_style, e.font_size)
@@ -994,7 +1006,7 @@ pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
 	bc := ctx.theme.eff_ce_border().blend(ctx.theme.input_focus, e.focus_anim.value)
 	ctx.draw_rounded_rect(e.bounds, bc, ctx.theme.border_radius)
 
-	target_focus := if e.focused && e.enabled { f32(1.0) } else { f32(0.0) }
+	target_focus := if e.focused && en { f32(1.0) } else { f32(0.0) }
 	// Кольцо фокуса и подсветка рамки — внутри bounds (+1 px свечения).
 	if e.focus_anim.update(target_focus, ctx) {
 		ctx.mark_anim_rect('codeeditor', e.bounds.expanded(1))
@@ -1075,8 +1087,8 @@ pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
 		// Ширины считаются по раскрытым табам, как и сам текст.
 		if e.has_sel() {
 			s := e.sel_start()
-			en := e.sel_end()
-			if i >= s.line && i <= en.line {
+			se := e.sel_end()
+			if i >= s.line && i <= se.line {
 				line := e.lines[i]
 				mut sx := f32(0)
 				mut ex := cr.w
@@ -1088,8 +1100,8 @@ pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
 						f32(0)
 					}
 				}
-				if i == en.line {
-					ec := clamp_int(en.col, 0, line.len)
+				if i == se.line {
+					ec := clamp_int(se.col, 0, line.len)
 					ex = if ec > 0 {
 						ctx.measure_text_with_font(ce_expand_tabs(line[..ec].string(), e.tab_size), font).x
 					} else {

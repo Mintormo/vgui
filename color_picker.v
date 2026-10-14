@@ -191,6 +191,7 @@ fn cp_hue_color(h f32) Color {
 // (формула Rec.601: 0.299R + 0.587G + 0.114B, порог 128).
 // Заливка не смешивается с шахматкой, поэтому прозрачность цвета на образце не видна.
 pub fn (mut cp ColorPicker) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(cp.enabled)
 	if !cp.visible {
 		return
 	}
@@ -202,7 +203,7 @@ pub fn (mut cp ColorPicker) draw(mut ctx RenderContext) {
 	if cp.color.a < 255 {
 		ctx.draw_rounded_rect(cp.bounds, ctx.theme.input_border, rad)
 	}
-	bc := if cp.hovered && cp.enabled { ctx.theme.accent } else { ctx.theme.input_border }
+	bc := if cp.hovered && en { ctx.theme.accent } else { ctx.theme.input_border }
 	ctx.draw_rounded_rect(cp.bounds, bc, rad)
 	font := ctx.get_font(.mono, 0)
 	fh := ctx.font_height_of(font)
@@ -213,6 +214,9 @@ pub fn (mut cp ColorPicker) draw(mut ctx RenderContext) {
 	lum := f32(cp.color.r) * 0.299 + f32(cp.color.g) * 0.587 + f32(cp.color.b) * 0.114
 	tc := if lum > 128 { color_black } else { color_white }
 	ctx.draw_text_with_font(hex, tx, ty, tc, font)
+	if !en {
+		ctx.draw_disabled_veil(cp.bounds, rad)
+	}
 }
 
 // ─── Events ────────────────────────────────────────────

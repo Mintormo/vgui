@@ -41,6 +41,7 @@ pub mut:
 	fg       Color        = Color{0, 0, 0, 0} // custom override; zero = auto
 	dot_mode bool // show only a colored dot, no text
 	visible  bool = true
+	enabled  bool = true // false - приглушённые цвета (enabled.v)
 	pad_x    f32  = 7
 	pad_y    f32  = 3
 }
@@ -96,7 +97,11 @@ pub fn (mut b Badge) draw(mut ctx RenderContext) {
 		return
 	}
 
-	bg, fg := b.resolve_colors(ctx)
+	mut bg, mut fg := b.resolve_colors(ctx)
+	if !ctx.is_enabled(b.enabled) {
+		bg = ctx.disabled_color(bg)
+		fg = ctx.disabled_color(fg)
+	}
 
 	if b.dot_mode {
 		r := min_f32(b.bounds.w, b.bounds.h) * 0.5

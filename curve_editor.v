@@ -353,8 +353,14 @@ fn (ce &CurveEditor) draw_curve(mut ctx RenderContext, r Rect, pts []CurvePoint,
 // кривые (кроме тождественных), основная кривая (цвет акцента темы, если curve_color.a == 0) и точки.
 // Всё внутри clip по bounds.
 pub fn (mut ce CurveEditor) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(ce.enabled)
 	if !ce.visible || !ctx.is_in_clip(ce.bounds) {
 		return
+	}
+	defer {
+		if !en {
+			ctx.draw_disabled_veil(ce.bounds, 0)
+		}
 	}
 	r := ce.plot_rect()
 	ctx.fill_rect(ce.bounds, ctx.theme.plot_bg)

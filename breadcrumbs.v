@@ -419,6 +419,7 @@ fn (bc &Breadcrumbs) segment_to_item_index(seg_idx int) int {
 // многоточие > hover > текущий > обычный) и разделитель после каждого сегмента,
 // кроме последнего. Всё под клипом bounds.
 pub fn (mut bc Breadcrumbs) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(bc.enabled)
 	if !bc.visible || bc.items.len == 0 {
 		return
 	}
@@ -474,7 +475,7 @@ pub fn (mut bc Breadcrumbs) draw(mut ctx RenderContext) {
 		is_hovered := i == bc.hover_seg
 
 		// Hover background pill
-		if is_hovered && is_clickable && bc.enabled {
+		if is_hovered && is_clickable && en {
 			pill_r := Rect{
 				x: seg.x - bc_sep_pad
 				y: cy - fh * 0.5 - bc.pad_v * 0.5
@@ -486,7 +487,7 @@ pub fn (mut bc Breadcrumbs) draw(mut ctx RenderContext) {
 
 		// Text color
 		mut tc := tc_normal
-		if !bc.enabled {
+		if !en {
 			tc = ctx.theme.text_disabled
 		} else if is_ellipsis {
 			tc = tc_sep

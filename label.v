@@ -57,6 +57,7 @@ pub mut:
 	font_style FontStyle = .regular
 	font_size  int
 	visible    bool = true
+	enabled    bool = true // false - текст цветом text_disabled (enabled.v)
 	wrap       bool
 	clip       bool
 	pad        f32 = 4
@@ -98,7 +99,13 @@ pub fn (mut l Label) draw(mut ctx RenderContext) {
 		return
 	}
 
-	color := if l.color.a > 0 { l.color } else { ctx.theme.text_primary }
+	color := if !ctx.is_enabled(l.enabled) {
+		ctx.theme.text_disabled
+	} else if l.color.a > 0 {
+		l.color
+	} else {
+		ctx.theme.text_primary
+	}
 	has_rect := l.bounds.w > 0 && l.bounds.h > 0
 
 	if has_rect {

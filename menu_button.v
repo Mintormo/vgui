@@ -468,6 +468,7 @@ fn (mut mb MenuButton) open_menu(mut ctx RenderContext) {
 // зоне, чтобы сохранить скруглённые углы), рамку, кольцо фокуса, разделитель,
 // иконку + текст и стрелку (вверх, когда меню открыто). Сам попап рисует оверлей.
 pub fn (mut mb MenuButton) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(mb.enabled)
 	if !mb.visible {
 		return
 	}
@@ -475,23 +476,25 @@ pub fn (mut mb MenuButton) draw(mut ctx RenderContext) {
 		return
 	}
 
-	if mb.enabled && !mb.no_focus {
+	if en && !mb.no_focus {
 		ctx.focus.register_menu_button(&mb, mb.focus_group)
+	} else {
+		ctx.focus_block(&mb)
 	}
 
 	is_focused := if mb.no_focus { false } else { ctx.focus.is_focused(unsafe { &mb }) }
 
 	// Animate — action zone and arrow zone highlight independently
-	action_hot := mb.hovered && !mb.hovered_arrow && mb.enabled
-	arrow_hot := (mb.hovered_arrow || mb.open) && mb.enabled
+	action_hot := mb.hovered && !mb.hovered_arrow && en
+	arrow_hot := (mb.hovered_arrow || mb.open) && en
 	target_h := if action_hot { f32(1.0) } else { f32(0.0) }
 	target_ah := if arrow_hot { f32(1.0) } else { f32(0.0) }
-	target_p := if (mb.pressed || mb.pressed_arrow || mb.open) && mb.enabled {
+	target_p := if (mb.pressed || mb.pressed_arrow || mb.open) && en {
 		f32(1.0)
 	} else {
 		f32(0.0)
 	}
-	target_f := if is_focused && mb.enabled { f32(1.0) } else { f32(0.0) }
+	target_f := if is_focused && en { f32(1.0) } else { f32(0.0) }
 	mut animating := mb.hover_anim.update(target_h, ctx)
 	animating = mb.arrow_hover_anim.update(target_ah, ctx) || animating
 	animating = mb.press_anim.update(target_p, ctx) || animating
@@ -511,7 +514,7 @@ pub fn (mut mb MenuButton) draw(mut ctx RenderContext) {
 	mut fg := Color{}
 	mut bc := Color{}
 
-	if !mb.enabled {
+	if !en {
 		bg = ctx.theme.button_disabled_bg
 		fg = ctx.theme.text_disabled
 		bc = ctx.theme.button_disabled_border
@@ -525,7 +528,7 @@ pub fn (mut mb MenuButton) draw(mut ctx RenderContext) {
 	rad := mb.eff_radius(ctx)
 
 	if mb.style != .flat && ctx.theme.shadow_offset > 0 {
-		if mb.hovered && mb.enabled && !mb.open {
+		if mb.hovered && en && !mb.open {
 			ctx.draw_shadow(mb.bounds, rad)
 		}
 	}
@@ -535,7 +538,7 @@ pub fn (mut mb MenuButton) draw(mut ctx RenderContext) {
 
 	// Per-zone hover/press highlight, clipped to each zone so the
 	// rounded corners are respected.
-	if mb.enabled {
+	if en {
 		arect := mb.action_rect()
 		brect := mb.arrow_rect()
 		if mb.hover_anim.value > 0.01 || (mb.pressed && action_hot) {
@@ -570,7 +573,7 @@ pub fn (mut mb MenuButton) draw(mut ctx RenderContext) {
 		dx := mb.bounds.x + mb.bounds.w - mb.arrow_w
 		dy0 := mb.bounds.y + mb.pad * 0.5
 		dy1 := mb.bounds.y + mb.bounds.h - mb.pad * 0.5
-		dc := if mb.enabled { bc } else { ctx.theme.button_disabled_border }
+		dc := if en { bc } else { ctx.theme.button_disabled_border }
 		ctx.draw_line(dx, dy0, dx, dy1, dc)
 	}
 
@@ -587,7 +590,7 @@ pub fn (mut mb MenuButton) draw(mut ctx RenderContext) {
 	mut tx := mb.bounds.x + mb.pad
 	ty := mb.bounds.y + (mb.bounds.h - fh) * 0.5
 
-	tc := if mb.text == mb.placeholder && mb.enabled {
+	tc := if mb.text == mb.placeholder && en {
 		ctx.theme.text_secondary
 	} else {
 		fg
@@ -606,7 +609,7 @@ pub fn (mut mb MenuButton) draw(mut ctx RenderContext) {
 	acy := mb.bounds.y + mb.bounds.h * 0.5
 	aw := f32(7)
 	ah := f32(4)
-	ac := if mb.enabled { ctx.theme.text_secondary } else { ctx.theme.text_disabled }
+	ac := if en { ctx.theme.text_secondary } else { ctx.theme.text_disabled }
 	if mb.open {
 		ctx.fill_triangle(acx, acy - ah * 0.5, acx - aw * 0.5, acy + ah * 0.5, acx + aw * 0.5,
 

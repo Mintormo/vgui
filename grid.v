@@ -48,6 +48,7 @@ pub mut:
 	bg           Color = Color{0, 0, 0, 0}
 	use_panel_bg bool
 	visible      bool = true
+	enabled      bool = true // false - неактивны все ячейки (enabled.v)
 	clip         bool = true
 }
 
@@ -307,9 +308,11 @@ pub fn (mut g GridLayout) draw(mut ctx RenderContext) {
 	if g.clip {
 		ctx.push_clip(g.bounds)
 	}
+	ctx.begin_disabled(g.enabled)
 	for mut c in g.cells {
 		c.widget.draw(mut ctx)
 	}
+	ctx.end_disabled(g.enabled)
 	if g.clip {
 		ctx.pop_clip()
 	}
@@ -317,7 +320,7 @@ pub fn (mut g GridLayout) draw(mut ctx RenderContext) {
 
 // handle_event: ячейки получают событие с конца списка (последняя добавленная - сверху); при window_resize корневая сетка подгоняет размер под окно.
 pub fn (mut g GridLayout) handle_event(event &GuiEvent, app &App) bool {
-	if !g.visible {
+	if !g.visible || (!g.enabled && is_input_event(event)) {
 		return false
 	}
 	if event.typ == .window_resize {

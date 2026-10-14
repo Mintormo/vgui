@@ -43,6 +43,10 @@ pub mut:
 	// за O(1) ловит переиспользование адреса под виджет другого типа — см.
 	// комментарий там же.
 	registered map[voidptr]FocusKind
+	// blocked - неактивные виджеты (свой enabled или отключённый предок,
+	// enabled.v): вне Tab-обхода. Ставит set_blocked из draw(), снимает
+	// следующая регистрация. Такой же GC-якорь, как entries: unregister чистит.
+	blocked map[voidptr]bool
 }
 
 // ─── Регистрация (идемпотентная — дубликаты игнорируются) ───
@@ -56,6 +60,9 @@ fn (mut fm FocusManager) register_ptr(ptr voidptr, kind FocusKind, group int) {
 	}
 	if ptr in fm.registered {
 		if fm.registered[ptr] == kind {
+			if ptr in fm.blocked {
+				fm.blocked.delete(ptr)
+			}
 			return
 		}
 		// Тот же адрес, но виджет ДРУГОГО типа — аллокатор отдал память
@@ -93,6 +100,7 @@ pub fn (mut fm FocusManager) unregister(ptr voidptr) {
 		return
 	}
 	fm.registered.delete(ptr)
+	fm.blocked.delete(ptr)
 	for i, e in fm.entries {
 		if e.ptr == ptr {
 			// current — ИНДЕКС в entries, а не указатель: после delete
@@ -106,6 +114,26 @@ pub fn (mut fm FocusManager) unregister(ptr voidptr) {
 			fm.entries.delete(i)
 			break
 		}
+	}
+}
+
+// set_blocked помечает запись неактивной (выпадает из Tab-обхода) или снимает
+// пометку. Блокировка текущей записи снимает с неё фокус. Незарегистрированный
+// указатель игнорируется. См. RenderContext.focus_block (enabled.v).
+pub fn (mut fm FocusManager) set_blocked(ptr voidptr, b bool) {
+	if ptr == unsafe { nil } || ptr !in fm.registered {
+		return
+	}
+	if !b {
+		fm.blocked.delete(ptr)
+		return
+	}
+	if ptr in fm.blocked {
+		return
+	}
+	fm.blocked[ptr] = true
+	if fm.current >= 0 && fm.current < fm.entries.len && fm.entries[fm.current].ptr == ptr {
+		fm.blur_current()
 	}
 }
 
@@ -460,6 +488,9 @@ pub fn (mut fm FocusManager) tab(reverse bool) {
 
 // is_entry_available - виджет участвует в Tab-обходе: visible && enabled. Читает поля через cast по e.kind.
 fn (fm &FocusManager) is_entry_available(e FocusEntry) bool {
+	if e.ptr in fm.blocked {
+		return false
+	}
 	match e.kind {
 		.text_input {
 			ti := unsafe { &TextInput(e.ptr) }

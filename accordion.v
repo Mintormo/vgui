@@ -453,6 +453,7 @@ pub fn (mut a Accordion) arrange(mut ctx RenderContext) {
 // Секции целиком выше/ниже видимой области пропускаются. bounds детей здесь
 // НЕ выставляются - это сделал arrange().
 pub fn (mut a Accordion) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(a.enabled)
 	if !a.visible || a.sections.len == 0 {
 		return
 	}
@@ -511,7 +512,7 @@ pub fn (mut a Accordion) draw(mut ctx RenderContext) {
 
 		// ── Header ──
 		hr := Rect{inner.x, y, inner.w, a.header_height}
-		bg := if sec.hovered && a.enabled { hdr_hover } else { hdr_bg }
+		bg := if sec.hovered && en { hdr_hover } else { hdr_bg }
 		ctx.fill_rounded_rect(hr, bg, if sec.anim.value > 0.01 { f32(0) } else { rad * 0.5 })
 
 		// Border bottom on header (or around whole section)
@@ -521,7 +522,7 @@ pub fn (mut a Accordion) draw(mut ctx RenderContext) {
 		arrow_x := hr.x + a.header_pad
 		arrow_cy := hr.y + hr.h * 0.5
 		as_ := a.icon_size * 0.5
-		arrow_c := if a.enabled { ctx.theme.eff_acc_arrow() } else { ctx.theme.text_disabled }
+		arrow_c := if en { ctx.theme.eff_acc_arrow() } else { ctx.theme.text_disabled }
 
 		if sec.anim.value > 0.5 {
 			// Down arrow (expanded)
@@ -536,7 +537,7 @@ pub fn (mut a Accordion) draw(mut ctx RenderContext) {
 		// Title text
 		mut text_x := arrow_x + a.icon_size + a.header_pad
 		text_y := hr.y + (a.header_height - fh) * 0.5
-		tc := if a.enabled { hdr_tc } else { ctx.theme.text_disabled }
+		tc := if en { hdr_tc } else { ctx.theme.text_disabled }
 		if sec.icon.is_set() {
 			ctx.draw_item_icon(sec.icon, Rect{text_x, hr.y, a.title_icon_size, hr.h},
 				a.title_icon_size, tc)
@@ -558,7 +559,9 @@ pub fn (mut a Accordion) draw(mut ctx RenderContext) {
 
 			// Bounds (full child_h, not animated) were set in arrange()
 			mut w := unsafe { sec.widget }
+			ctx.begin_disabled(a.enabled)
 			w.draw(mut ctx)
+			ctx.end_disabled(a.enabled)
 
 			ctx.pop_clip()
 

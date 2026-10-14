@@ -305,6 +305,7 @@ fn (t &TextInput) fit_font_size() int {
 // Курсор мигает с периодом 1060 мс (видим первые 530 мс); поэтому у сфокусированного
 // поля каждый кадр заказывается перерисовка его области (mark_anim_rect).
 pub fn (mut t TextInput) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(t.enabled)
 	if !t.visible {
 		return
 	}
@@ -321,8 +322,10 @@ pub fn (mut t TextInput) draw(mut ctx RenderContext) {
 	// reach it even while it is entirely clipped away — a side effect of
 	// moving this block ahead of is_in_clip for the cursor-blink fix below,
 	// not an intentional focus-order redesign.
-	if t.enabled {
+	if en {
 		ctx.focus.register_text_input(&t, t.focus_group)
+	} else {
+		ctx.focus_block(&t)
 	}
 	should_focus := ctx.focus.is_focused(unsafe { &t })
 	if t.focused && !should_focus {
@@ -361,7 +364,7 @@ pub fn (mut t TextInput) draw(mut ctx RenderContext) {
 
 	rad := ctx.theme.border_radius
 	if !t.flat {
-		bg := if t.enabled { ctx.theme.input_bg } else { ctx.theme.input_bg.darken(0.05) }
+		bg := if en { ctx.theme.input_bg } else { ctx.theme.input_bg.darken(0.05) }
 		ctx.fill_rounded_rect(t.bounds, bg, rad)
 		bc := ctx.theme.input_border.blend(ctx.theme.input_focus, t.focus_t.value)
 		ctx.draw_rounded_rect(t.bounds, bc, rad)
@@ -376,7 +379,8 @@ pub fn (mut t TextInput) draw(mut ctx RenderContext) {
 	ty := cr.y + (cr.h - fh) * 0.5
 
 	if dr.len == 0 && !t.focused {
-		ctx.draw_text_with_font(t.placeholder, cr.x, ty, ctx.theme.text_hint, ti_font)
+		phc := if en { ctx.theme.text_hint } else { ctx.theme.text_disabled }
+		ctx.draw_text_with_font(t.placeholder, cr.x, ty, phc, ti_font)
 	} else if dr.len == 0 && t.focused {
 		ms := C.SDL_GetTicks()
 		phase := ms % u64(1060)
@@ -413,7 +417,8 @@ pub fn (mut t TextInput) draw(mut ctx RenderContext) {
 		} else {
 			t.scroll_x = 0
 			ds := dr.string()
-			ctx.draw_text_with_font(ds, cr.x, ty, ctx.theme.text_secondary, ti_font)
+			utc := if en { ctx.theme.text_secondary } else { ctx.theme.text_disabled }
+			ctx.draw_text_with_font(ds, cr.x, ty, utc, ti_font)
 		}
 	}
 

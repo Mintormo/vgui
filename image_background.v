@@ -42,6 +42,7 @@ pub mut:
 	path          string
 	mode          BgMode = .fill
 	visible       bool   = true
+	enabled       bool   = true // false - картинка приглушена вуалью (enabled.v)
 	bg_color      Color  = Color{0, 0, 0, 0}
 	corner_radius f32
 	// Cached texture (same pattern + ABA guard as ImageView)
@@ -192,6 +193,11 @@ pub fn (mut ib ImageBackground) draw(mut ctx RenderContext) {
 	}
 
 	ib.ensure_texture_loaded(ctx)
+	defer {
+		if !ctx.is_enabled(ib.enabled) {
+			ctx.draw_disabled_veil(ib.bounds, ib.corner_radius)
+		}
+	}
 
 	// Optional solid background / fallback color.
 	if ib.bg_color.a > 0 {

@@ -2288,6 +2288,7 @@ fn (md &MarkdownView) hsb_rects() (Rect, Rect) {
 
 // draw рисует виджет (описание кадра выше). Побочные эффекты: пересобирает md.links и md.copy_btns (области под мышь), может поставить анимацию (mark_anim) для таймера подсказки и индикации «скопировано», добавляет Tooltip в ctx.pending_tooltips.
 pub fn (mut md MarkdownView) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(md.enabled)
 	if !md.visible {
 		return
 	}
@@ -2307,9 +2308,16 @@ pub fn (mut md MarkdownView) draw(mut ctx RenderContext) {
 		if unsafe { md.editor != nil } {
 			mut ce := md.editor
 			ce.bounds = md.bounds.shrunk(2)
+			ctx.begin_disabled(en)
 			ce.draw(mut ctx)
+			ctx.end_disabled(en)
 		}
 		return
+	}
+	defer {
+		if !en {
+			ctx.draw_disabled_veil(md.bounds, rad)
+		}
 	}
 
 	md.ensure_layout(ctx, md.bounds.w)

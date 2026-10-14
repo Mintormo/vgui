@@ -1232,16 +1232,28 @@ fn (mut pg PropertyGrid) ensure_visible() {
 // полосу прокрутки и поверх всего — активный редактор. Строки вне области данных
 // пропускаются.
 pub fn (mut pg PropertyGrid) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(pg.enabled)
 	if !pg.visible {
 		return
 	}
 	if !ctx.is_in_clip(pg.bounds) {
 		return
 	}
+	// Встроенные виджеты (ячейки, редакторы) неактивны вместе с владельцем;
+	// всё содержимое приглушается вуалью поверх (enabled.v)
+	ctx.begin_disabled(pg.enabled)
+	defer {
+		ctx.end_disabled(pg.enabled)
+		if !en {
+			ctx.draw_disabled_veil(pg.bounds, ctx.theme.border_radius)
+		}
+	}
 
 	// Register self in FocusManager so PropertyGrid is part of Tab chain
-	if pg.enabled {
+	if en {
 		ctx.focus.register_property_grid(&pg, pg.focus_group)
+	} else {
+		ctx.focus_block(&pg)
 	}
 
 	// Sync focused state with FocusManager (but don't override
@@ -1255,7 +1267,7 @@ pub fn (mut pg PropertyGrid) draw(mut ctx RenderContext) {
 		}
 	}
 
-	target_focus := if pg.focused && pg.enabled { f32(1.0) } else { f32(0.0) }
+	target_focus := if pg.focused && en { f32(1.0) } else { f32(0.0) }
 	// Кольцо фокуса и подсветка рамки — внутри bounds (+1 px свечения).
 	if pg.focus_anim.update(target_focus, ctx) {
 		ctx.mark_anim_rect('propertygrid', pg.bounds.expanded(1))

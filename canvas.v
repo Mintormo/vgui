@@ -910,15 +910,27 @@ fn (mut c Canvas) zoom_at(mx f32, my f32, new_zoom f32) {
 // viewport, затем detail-слой, полосы прокрутки, on_overlay и кольцо кисти.
 // Если текстуру создать не удалось (нет рендерера) - не рисует ничего.
 pub fn (mut c Canvas) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(c.enabled)
 	if !c.visible {
 		return
 	}
 	if !ctx.is_in_clip(c.bounds) {
 		return
 	}
+	// Встроенные виджеты (ячейки, редакторы) неактивны вместе с владельцем;
+	// всё содержимое приглушается вуалью поверх (enabled.v)
+	ctx.begin_disabled(c.enabled)
+	defer {
+		ctx.end_disabled(c.enabled)
+		if !en {
+			ctx.draw_disabled_veil(c.bounds, ctx.theme.border_radius)
+		}
+	}
 
-	if c.enabled {
+	if en {
 		ctx.focus.register_canvas(&c, c.focus_group)
+	} else {
+		ctx.focus_block(&c)
 	}
 
 	c.ensure_texture(ctx)

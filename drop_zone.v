@@ -31,6 +31,7 @@ pub mut:
 	bounds       Rect
 	text         string = 'Перетащите файлы сюда'
 	visible      bool   = true
+	enabled      bool   = true // false - сбросы и клик не принимаются, вид приглушён (enabled.v)
 	accept_files bool   = true
 	accept_text  bool   = true
 	hovering     bool // drag currently over the zone
@@ -65,9 +66,10 @@ pub fn (mut d DropZone) draw(mut ctx RenderContext) {
 	}
 
 	radius := ctx.theme.border_radius
+	en := ctx.is_enabled(d.enabled)
 	// Background and border brighten while a drag hovers over the zone, or
 	// while a click-to-browse press is held.
-	highlight := d.hovering || d.pressed
+	highlight := (d.hovering || d.pressed) && en
 	bg := if highlight {
 		mix_with_accent(ctx.theme.panel_bg, ctx.theme.accent, 0.18)
 	} else {
@@ -83,7 +85,13 @@ pub fn (mut d DropZone) draw(mut ctx RenderContext) {
 		font := ctx.get_font(.regular, 0)
 		sz := measure_text_lines(ctx, d.text, font, 2)
 		fh := ctx.font_height_of(font)
-		fg := if highlight { ctx.theme.accent } else { ctx.theme.text_secondary }
+		fg := if !en {
+			ctx.theme.text_disabled
+		} else if highlight {
+			ctx.theme.accent
+		} else {
+			ctx.theme.text_secondary
+		}
 		ctx.push_clip(d.bounds)
 		mut ty := d.bounds.y + (d.bounds.h - sz.y) * 0.5
 		for line in d.text.split('\n') {
@@ -104,6 +112,11 @@ pub fn (mut d DropZone) draw(mut ctx RenderContext) {
 //    событие уходит дальше, например в обработчик на уровне окна.
 pub fn (mut d DropZone) handle_event(event &GuiEvent, app &App) bool {
 	if !d.visible {
+		return false
+	}
+	if !d.enabled {
+		d.hovering = false
+		d.pressed = false
 		return false
 	}
 	match event.typ {

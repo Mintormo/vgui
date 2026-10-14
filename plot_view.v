@@ -616,6 +616,7 @@ fn (p &PlotView) vsb_thumb_rect() Rect {
 
 // draw: фон и рамка, затем в клипе plot_rect — сетка, оси и все видимые серии; вне клипа — подписи осей и полосы прокрутки.
 pub fn (mut p PlotView) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(p.enabled)
 	if !p.visible {
 		return
 	}
@@ -623,6 +624,11 @@ pub fn (mut p PlotView) draw(mut ctx RenderContext) {
 		return
 	}
 
+	defer {
+		if !en {
+			ctx.draw_disabled_veil(p.bounds, ctx.theme.border_radius)
+		}
+	}
 	rad := ctx.theme.border_radius
 	ctx.fill_rounded_rect(p.bounds, p.eff_bg(ctx), rad)
 	ctx.draw_rounded_rect(p.bounds, p.eff_border(ctx), rad)

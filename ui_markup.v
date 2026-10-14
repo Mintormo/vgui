@@ -468,7 +468,11 @@ fn (mut b UiBuilder) register_node(n &UiNode, tn &TreeNode) ! {
 // build - виджет узла n и всего его поддерева. Свойства раскладки (flex...)
 // читает родитель, он же зовёт finish(n).
 fn (mut b UiBuilder) build(mut n UiNode) !&Widget {
-	w := b.build_widget(mut n)!
+	mut w := b.build_widget(mut n)!
+	// disabled - у любого элемента (enabled.v); у контейнера гасит всё поддерево
+	if b.prop_flag(mut n, 'disabled')! {
+		set_widget_enabled(mut w, false)
+	}
 	b.register_id(n, w)!
 	return w
 }
@@ -864,8 +868,6 @@ fn (mut b UiBuilder) build_leaf(mut n UiNode) !&Widget {
 	if text.len > 0 && n.typ in ['slider', 'progress', 'spinbox', 'separator', 'spacer'] {
 		return b.fail(n, '${n.typ}: текст здесь неприменим')
 	}
-	// disabled читают только виджеты с полем enabled; у остальных оно
-	// останется неиспользованным, и finish сообщит «неприменимо»
 	match n.typ {
 		'label' {
 			mut l := label(text)
@@ -896,26 +898,22 @@ fn (mut b UiBuilder) build_leaf(mut n UiNode) !&Widget {
 				'success' { ButtonStyle.success }
 				else { ButtonStyle.normal }
 			}
-			bt.enabled = !b.prop_flag(mut n, 'disabled')!
 			return bt
 		}
 		'checkbox' {
 			mut cb := checkbox(text)
 			cb.checked = b.prop_flag(mut n, 'checked')!
-			cb.enabled = !b.prop_flag(mut n, 'disabled')!
 			return cb
 		}
 		'radio' {
 			mut rb := radio_button(text)
 			rb.selected = b.prop_flag(mut n, 'checked')!
 			rb.radio_group = b.prop_str(mut n, 'group', rb.radio_group)
-			rb.enabled = !b.prop_flag(mut n, 'disabled')!
 			return rb
 		}
 		'toggle' {
 			mut ts := toggle_switch(text)
 			ts.on = b.prop_flag(mut n, 'on')!
-			ts.enabled = !b.prop_flag(mut n, 'disabled')!
 			return ts
 		}
 		'slider' {
@@ -929,7 +927,6 @@ fn (mut b UiBuilder) build_leaf(mut n UiNode) !&Widget {
 			}
 			sl.step = b.prop_num(mut n, 'step', sl.step)!
 			sl.show_value = b.prop_flag(mut n, 'show_value')!
-			sl.enabled = !b.prop_flag(mut n, 'disabled')!
 			return sl
 		}
 		'progress' {
@@ -942,7 +939,6 @@ fn (mut b UiBuilder) build_leaf(mut n UiNode) !&Widget {
 			sp.set_range(b.prop_int(mut n, 'min', 0)!, b.prop_int(mut n, 'max', 100)!)
 			sp.set_step(b.prop_int(mut n, 'step', 1)!)
 			sp.set_value(b.prop_int(mut n, 'value', 0)!)
-			sp.enabled = !b.prop_flag(mut n, 'disabled')!
 			return sp
 		}
 		'input' {
@@ -950,13 +946,11 @@ fn (mut b UiBuilder) build_leaf(mut n UiNode) !&Widget {
 			ti.set_text(text)
 			ti.pw_mode = b.prop_flag(mut n, 'password')!
 			ti.max_len = b.prop_int(mut n, 'max_len', ti.max_len)!
-			ti.enabled = !b.prop_flag(mut n, 'disabled')!
 			return ti
 		}
 		'textarea' {
 			mut ta := text_area(b.prop_str(mut n, 'hint', ''))
 			ta.set_text(text)
-			ta.enabled = !b.prop_flag(mut n, 'disabled')!
 			return ta
 		}
 		'code' {

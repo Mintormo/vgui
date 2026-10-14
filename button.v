@@ -182,6 +182,7 @@ fn (b &Button) is_visually_pressed() bool {
 // style (смешивание bg с hover/pressed-цветами пропорционально значению Anim),
 // тень при наведении, фон, рамка, кольцо фокуса, содержимое (draw_content).
 pub fn (mut b Button) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(b.enabled)
 	if !b.visible {
 		return
 	}
@@ -190,17 +191,19 @@ pub fn (mut b Button) draw(mut ctx RenderContext) {
 	}
 
 	// Register in focus only if not excluded
-	if b.enabled && !b.no_focus {
+	if en && !b.no_focus {
 		ctx.focus.register_button(&b, b.focus_group)
+	} else {
+		ctx.focus_block(&b)
 	}
 
 	is_focused := if b.no_focus { false } else { ctx.focus.is_focused(unsafe { &b }) }
 
 	// Animate
-	target_hover := if b.hovered && b.enabled { f32(1.0) } else { f32(0.0) }
-	target_press := if b.is_visually_pressed() && b.enabled { f32(1.0) } else { f32(0.0) }
-	target_focus := if is_focused && b.enabled { f32(1.0) } else { f32(0.0) }
-	target_active := if b.active && b.toggle && b.enabled { f32(1.0) } else { f32(0.0) }
+	target_hover := if b.hovered && en { f32(1.0) } else { f32(0.0) }
+	target_press := if b.is_visually_pressed() && en { f32(1.0) } else { f32(0.0) }
+	target_focus := if is_focused && en { f32(1.0) } else { f32(0.0) }
+	target_active := if b.active && b.toggle && en { f32(1.0) } else { f32(0.0) }
 	// Все четыре шага — обязательно (не через ||: он бы не шагнул остальные).
 	mut animating := b.hover_anim.update(target_hover, ctx)
 	animating = b.press_anim.update(target_press, ctx) || animating
@@ -220,7 +223,7 @@ pub fn (mut b Button) draw(mut ctx RenderContext) {
 	mut fg := Color{}
 	mut border_c := Color{}
 
-	if !b.enabled {
+	if !en {
 		bg = ctx.theme.button_disabled_bg
 		fg = ctx.theme.text_disabled
 		border_c = ctx.theme.button_disabled_border
@@ -282,7 +285,7 @@ pub fn (mut b Button) draw(mut ctx RenderContext) {
 
 	// Shadow (not for active toggle — looks "pushed in")
 	if b.style != .flat && b.style != .outline && ctx.theme.shadow_offset > 0 {
-		if b.hovered && b.enabled && !b.is_visually_pressed() {
+		if b.hovered && en && !b.is_visually_pressed() {
 			ctx.draw_shadow(b.bounds, radius)
 		}
 	}

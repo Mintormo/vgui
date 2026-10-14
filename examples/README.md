@@ -119,3 +119,4 @@ v -enable-globals run examples/01_label.v
 | `52_undo_stack.v` | Стек отмены приложения — `UndoStack`, `UndoCommand`, слияние `merge_id`, группы, `set_clean` |
 | `53_animation.v` | Анимации своего виджета — `Anim`: `.tween` + `Easing` (8 кривых), `.smooth` для hover, `mark_anim_rect` |
 | `54_item_icons.v` | Иконки элементов — `ItemIcon` (Lucide, файл, байты) в меню, дереве, списке, вкладках, ComboBox, MenuButton, Accordion |
+| `55_disabled_state.v` | Неактивное состояние — `enabled = false` у виджета, у контейнера (гасит всё содержимое, флаги детей не трогает) и у пункта меню |

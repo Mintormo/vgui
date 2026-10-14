@@ -1220,6 +1220,7 @@ pub fn (mut lb ListBox) arrange(mut ctx RenderContext) {
 // линия при перетаскивании границы) -> строки внутри clip(viewport) -> полосы прокрутки.
 // Виджеты-ячейки здесь только рисуются: их bounds уже выставил arrange().
 pub fn (mut lb ListBox) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(lb.enabled)
 	if !lb.visible {
 		return
 	}
@@ -1227,9 +1228,20 @@ pub fn (mut lb ListBox) draw(mut ctx RenderContext) {
 	if !ctx.is_in_clip(lb.bounds) {
 		return
 	}
+	// Встроенные виджеты (ячейки, редакторы) неактивны вместе с владельцем;
+	// всё содержимое приглушается вуалью поверх (enabled.v)
+	ctx.begin_disabled(lb.enabled)
+	defer {
+		ctx.end_disabled(lb.enabled)
+		if !en {
+			ctx.draw_disabled_veil(lb.bounds, ctx.theme.border_radius)
+		}
+	}
 
-	if lb.enabled {
+	if en {
 		ctx.focus.register_list_box(&lb, lb.focus_group)
+	} else {
+		ctx.focus_block(&lb)
 	}
 
 	should_focus := ctx.focus.is_focused(unsafe { &lb })
@@ -1239,7 +1251,7 @@ pub fn (mut lb ListBox) draw(mut ctx RenderContext) {
 		lb.focused = true
 	}
 
-	target_focus := if lb.focused && lb.enabled { f32(1.0) } else { f32(0.0) }
+	target_focus := if lb.focused && en { f32(1.0) } else { f32(0.0) }
 	// Кольцо фокуса и подсветка рамки — внутри bounds (+1 px свечения).
 	if lb.focus_anim.update(target_focus, ctx) {
 		ctx.mark_anim_rect('listbox', lb.bounds.expanded(1))
@@ -1249,7 +1261,7 @@ pub fn (mut lb ListBox) draw(mut ctx RenderContext) {
 	lb.scroll_x = clamp_f32(lb.scroll_x, 0, lb.max_scroll_x())
 
 	rad := ctx.theme.border_radius
-	bg := if lb.enabled { ctx.theme.eff_lb_bg() } else { ctx.theme.eff_lb_bg().darken(0.05) }
+	bg := if en { ctx.theme.eff_lb_bg() } else { ctx.theme.eff_lb_bg().darken(0.05) }
 	ctx.fill_rounded_rect(lb.bounds, bg, rad)
 
 	bc := ctx.theme.eff_lb_border().blend(ctx.theme.input_focus, lb.focus_anim.value)

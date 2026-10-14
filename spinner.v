@@ -28,6 +28,7 @@ pub mut:
 	type_tag  int = kind_spinner // тег типа, см. widget_tag.v
 	bounds    Rect
 	visible   bool         = true
+	enabled   bool         = true // false - приглушённые цвета (enabled.v)
 	spinning  bool         = true
 	style     SpinnerStyle = .arc
 	color     Color        = Color{0, 0, 0, 0}
@@ -66,10 +67,8 @@ pub fn (s &Spinner) is_spinning() bool {
 }
 
 fn (s &Spinner) eff_color(ctx &RenderContext) Color {
-	if s.color.a > 0 {
-		return s.color
-	}
-	return ctx.theme.eff_spin_color()
+	c := if s.color.a > 0 { s.color } else { ctx.theme.eff_spin_color() }
+	return if ctx.is_enabled(s.enabled) { c } else { ctx.disabled_color(c) }
 }
 
 // Цвет фонового кольца: свой или цвет темы с прозрачностью 60 (кольцо должно быть бледным).
@@ -238,7 +237,13 @@ fn (s &Spinner) draw_label(mut ctx RenderContext) {
 	fh := ctx.font_height_of(font)
 	tw := ctx.measure_text_with_font(s.text, font).x
 
-	tc := if s.color.a > 0 { s.color } else { ctx.theme.text_secondary }
+	tc := if !ctx.is_enabled(s.enabled) {
+		ctx.theme.text_disabled
+	} else if s.color.a > 0 {
+		s.color
+	} else {
+		ctx.theme.text_secondary
+	}
 
 	tx := s.bounds.x + (s.bounds.w - tw) * 0.5
 	ty := s.bounds.y + s.bounds.h - fh

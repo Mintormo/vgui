@@ -997,15 +997,27 @@ fn (tv &TreeView) draw_hdash(x1 f32, x2 f32, y f32, c Color, mut ctx RenderConte
 // выделение/наведение -> стрелка -> иконка -> текст или поле ввода; (5) полосы
 // прокрутки поверх.
 pub fn (mut tv TreeView) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(tv.enabled)
 	if !tv.visible {
 		return
 	}
 	if !ctx.is_in_clip(tv.bounds) {
 		return
 	}
+	// Встроенные виджеты (ячейки, редакторы) неактивны вместе с владельцем;
+	// всё содержимое приглушается вуалью поверх (enabled.v)
+	ctx.begin_disabled(tv.enabled)
+	defer {
+		ctx.end_disabled(tv.enabled)
+		if !en {
+			ctx.draw_disabled_veil(tv.bounds, ctx.theme.border_radius)
+		}
+	}
 
-	if tv.enabled {
+	if en {
 		ctx.focus.register_tree_view(&tv, tv.focus_group)
+	} else {
+		ctx.focus_block(&tv)
 	}
 	should_focus := ctx.focus.is_focused(unsafe { &tv })
 	if tv.focused && !should_focus {
@@ -1020,14 +1032,14 @@ pub fn (mut tv TreeView) draw(mut ctx RenderContext) {
 		tv.focused = true
 	}
 
-	target_focus := if tv.focused && tv.enabled { f32(1.0) } else { f32(0.0) }
+	target_focus := if tv.focused && en { f32(1.0) } else { f32(0.0) }
 	// Кольцо фокуса и подсветка рамки — внутри bounds (+1 px свечения).
 	if tv.focus_anim.update(target_focus, ctx) {
 		ctx.mark_anim_rect('treeview', tv.bounds.expanded(1))
 	}
 
 	rad := ctx.theme.border_radius
-	bg := if tv.enabled { ctx.theme.eff_tr_bg() } else { ctx.theme.eff_tr_bg().darken(0.05) }
+	bg := if en { ctx.theme.eff_tr_bg() } else { ctx.theme.eff_tr_bg().darken(0.05) }
 	ctx.fill_rounded_rect(tv.bounds, bg, rad)
 	bc := ctx.theme.eff_tr_border().blend(ctx.theme.input_focus, tv.focus_anim.value)
 	ctx.draw_rounded_rect(tv.bounds, bc, rad)

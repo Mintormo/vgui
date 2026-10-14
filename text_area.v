@@ -263,6 +263,7 @@ fn (ta &TextArea) selected_text() string {
 // мс, видим 530 мс) -> полосы прокрутки поверх. Рисуются только видимые строки.
 // Меняет состояние виджета: scroll_x/scroll_y подправляются здесь.
 pub fn (mut ta TextArea) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(ta.enabled)
 	if !ta.visible {
 		return
 	}
@@ -283,8 +284,10 @@ pub fn (mut ta TextArea) draw(mut ctx RenderContext) {
 	// флаг focused не должны зависеть от того, попал ли виджет в dirty region
 	// кадра (подробности - в комментарии выше). Побочный эффект: полностью
 	// вырезанный клипом виджет всё равно виден FocusManager'у.
-	if ta.enabled {
+	if en {
 		ctx.focus.register_text_area(&ta, ta.focus_group)
+	} else {
+		ctx.focus_block(&ta)
 	}
 
 	should_focus := ctx.focus.is_focused(unsafe { &ta })
@@ -317,7 +320,7 @@ pub fn (mut ta TextArea) draw(mut ctx RenderContext) {
 
 	rad := ctx.theme.border_radius
 	if !ta.flat {
-		bg := if ta.enabled { ctx.theme.input_bg } else { ctx.theme.input_bg.darken(0.05) }
+		bg := if en { ctx.theme.input_bg } else { ctx.theme.input_bg.darken(0.05) }
 		ctx.fill_rounded_rect(ta.bounds, bg, rad)
 		bc := ctx.theme.input_border.blend(ctx.theme.input_focus, ta.focus_t.value)
 		ctx.draw_rounded_rect(ta.bounds, bc, rad)
@@ -381,7 +384,7 @@ pub fn (mut ta TextArea) draw(mut ctx RenderContext) {
 		for pi, ph_line in ph_lines {
 			row_y := cr.y + f32(pi) * line_step
 			if row_y > cr.y + cr_h { break }
-			ctx.draw_text_with_font(ph_line, cr.x, row_y, ctx.theme.text_hint, font)
+			ctx.draw_text_with_font(ph_line, cr.x, row_y, if en { ctx.theme.text_hint } else { ctx.theme.text_disabled }, font)
 		}
 		ctx.pop_clip()
 		return
@@ -442,7 +445,7 @@ pub fn (mut ta TextArea) draw(mut ctx RenderContext) {
 	}
 
 	// Draw text lines
-	tc := if ta.enabled { ctx.theme.text_primary } else { ctx.theme.text_secondary }
+	tc := if en { ctx.theme.text_primary } else { ctx.theme.text_disabled }
 	for li, line in ta.lines {
 		row_y := cr.y + f32(li) * line_step - ta.scroll_y
 		if row_y + fh < cr.y {

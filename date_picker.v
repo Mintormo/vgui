@@ -159,6 +159,7 @@ fn dp_day_name(i int) string {
 
 // draw рисует поле: скруглённый фон (подсветка при наведении) и дату по центру. Календарь рисуется не здесь, а в диалоге (DpArea).
 pub fn (mut dp DatePicker) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(dp.enabled)
 	if !dp.visible {
 		return
 	}
@@ -166,7 +167,13 @@ pub fn (mut dp DatePicker) draw(mut ctx RenderContext) {
 		return
 	}
 	rad := ctx.theme.border_radius
-	bg := if dp.hovered && dp.enabled { ctx.theme.button_hover } else { ctx.theme.input_bg }
+	bg := if !en {
+		ctx.theme.input_bg.darken(0.05)
+	} else if dp.hovered {
+		ctx.theme.button_hover
+	} else {
+		ctx.theme.input_bg
+	}
 	ctx.fill_rounded_rect(dp.bounds, bg, rad)
 	ctx.draw_rounded_rect(dp.bounds, ctx.theme.input_border, rad)
 	font := ctx.get_font(.regular, 0)
@@ -175,7 +182,7 @@ pub fn (mut dp DatePicker) draw(mut ctx RenderContext) {
 	tw := ctx.measure_text_with_font(text, font).x
 	tx := dp.bounds.x + (dp.bounds.w - tw) * 0.5
 	ty := dp.bounds.y + (dp.bounds.h - fh) * 0.5
-	tc := if dp.enabled { ctx.theme.text_primary } else { ctx.theme.text_disabled }
+	tc := if en { ctx.theme.text_primary } else { ctx.theme.text_disabled }
 	ctx.draw_text_with_font(text, tx, ty, tc, font)
 }
 

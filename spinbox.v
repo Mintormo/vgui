@@ -160,6 +160,7 @@ fn (mut s Spinbox) update_text_input() {
 // дочернего поля делается прямо в draw) -> подсветка нажатых/наведённых кнопок в клипе по общей
 // форме -> знаки "-" и "+" линиями.
 pub fn (mut s Spinbox) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(s.enabled)
 	if !s.visible {
 		return
 	}
@@ -172,14 +173,14 @@ pub fn (mut s Spinbox) draw(mut ctx RenderContext) {
 	// Animated focus ring strength — real focus lives on the embedded
 	// text input, not on Spinbox itself (see `focused` field removal note).
 	ti_has_focus := s.text_input != unsafe { nil } && unsafe { s.text_input.focused }
-	target_focus := if ti_has_focus && s.enabled { f32(1.0) } else { f32(0.0) }
+	target_focus := if ti_has_focus && en { f32(1.0) } else { f32(0.0) }
 	if s.focus_anim.update(target_focus, ctx) {
 		// mark_anim_rect — см. button.v; кольцо фокуса рисуется внутрь bounds.
 		ctx.mark_anim_rect('spinbox', s.bounds)
 	}
 
 	// Background
-	bg := if s.enabled {
+	bg := if en {
 		ctx.theme.eff_spinbox_bg()
 	} else {
 		ctx.theme.eff_spinbox_bg().darken(0.1)
@@ -201,7 +202,10 @@ pub fn (mut s Spinbox) draw(mut ctx RenderContext) {
 	mut ti := unsafe { s.text_input }
 	if ti != unsafe { nil } {
 		ti.bounds = Rect{s.bounds.x, s.bounds.y, s.bounds.w - s.bounds.h * 2, s.bounds.h}
+		// Поле внутри неактивного Spinbox - тоже неактивно: серый текст, вне Tab-обхода
+		ctx.begin_disabled(s.enabled)
 		ti.draw(mut ctx)
+		ctx.end_disabled(s.enabled)
 	}
 
 	// Draw buttons [+] and [-]
@@ -211,7 +215,7 @@ pub fn (mut s Spinbox) draw(mut ctx RenderContext) {
 	// subtle overlay on hover/press so the buttons feel responsive but
 	// stay visually merged with the Spinbox surface.
 	transparent := Color{0, 0, 0, 0}
-	dec_bg := if !s.enabled {
+	dec_bg := if !en {
 		transparent
 	} else if s.active_dec {
 		ctx.theme.button_pressed
@@ -221,7 +225,7 @@ pub fn (mut s Spinbox) draw(mut ctx RenderContext) {
 		transparent
 	}
 
-	inc_bg := if !s.enabled {
+	inc_bg := if !en {
 		transparent
 	} else if s.active_inc {
 		ctx.theme.button_pressed
@@ -242,7 +246,7 @@ pub fn (mut s Spinbox) draw(mut ctx RenderContext) {
 	}
 	ctx.pop_clip()
 
-	sign_c := ctx.theme.eff_spinbox_text()
+	sign_c := if en { ctx.theme.eff_spinbox_text() } else { ctx.theme.text_disabled }
 	// Draw minus sign
 	mx := dec_rect.x + dec_rect.w * 0.5
 	my := dec_rect.y + dec_rect.h * 0.5

@@ -55,6 +55,7 @@ pub mut:
 	color     Color        = Color{0, 0, 0, 0} // a == 0 -> цвет из темы (theme.eff_sep_color())
 	margin    f32 // inset from edges (both sides)
 	visible   bool = true
+	enabled   bool = true // false - линия приглушена (enabled.v)
 }
 
 // ─── Constructors ──────────────────────────────────────
@@ -93,7 +94,8 @@ pub fn (mut s Separator) draw(mut ctx RenderContext) {
 
 	// Прозрачный цвет (значение по умолчанию) означает «взять из темы» -
 	// так разделитель следует за сменой светлой/тёмной темы.
-	c := if s.color.a > 0 { s.color } else { ctx.theme.eff_sep_color() }
+	c0 := if s.color.a > 0 { s.color } else { ctx.theme.eff_sep_color() }
+	c := if ctx.is_enabled(s.enabled) { c0 } else { ctx.disabled_color(c0) }
 
 	// Разрешаем .auto: ширина >= высоты -> горизонтальная линия
 	// (так растягивает VBox), иначе вертикальная (HBox).

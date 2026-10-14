@@ -643,6 +643,7 @@ pub fn (mut tb TabBox) arrange(mut ctx RenderContext) {
 // кнопки прокрутки -> содержимое активной вкладки (в своей обрезке) -> индикатор. Индикатор
 // рисуется последним, поверх содержимого, чтобы его не перекрывали границы потомков.
 pub fn (mut tb TabBox) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(tb.enabled)
 	if !tb.visible || tb.tabs.len == 0 {
 		return
 	}
@@ -652,8 +653,10 @@ pub fn (mut tb TabBox) draw(mut ctx RenderContext) {
 	}
 
 	// Регистрируемся в фокус-менеджере при каждой отрисовке; выключенный виджет в Tab-обход не попадает.
-	if tb.enabled {
+	if en {
 		ctx.focus.register_tab_box(&tb, tb.focus_group)
+	} else {
+		ctx.focus_block(&tb)
 	}
 
 	// Флаг focused в виджете - зеркало решения фокус-менеджера (его меняют Tab/клик).
@@ -664,7 +667,7 @@ pub fn (mut tb TabBox) draw(mut ctx RenderContext) {
 		tb.focused = true
 	}
 
-	target_focus := if tb.focused && tb.enabled { f32(1.0) } else { f32(0.0) }
+	target_focus := if tb.focused && en { f32(1.0) } else { f32(0.0) }
 	// Кольцо фокуса и подсветка рамки — внутри bounds (+1 px свечения).
 	if tb.focus_anim.update(target_focus, ctx) {
 		ctx.mark_anim_rect('tabbox', tb.bounds.expanded(1))
@@ -689,7 +692,7 @@ pub fn (mut tb TabBox) draw(mut ctx RenderContext) {
 			continue
 		}
 		is_active := i == tb.active
-		is_hovered := tb.tabs[i].hovered && tb.enabled
+		is_hovered := tb.tabs[i].hovered && en
 
 		// Фон вкладки: активная > под мышью > прозрачная.
 		tab_bg := if is_active {
@@ -708,7 +711,7 @@ pub fn (mut tb TabBox) draw(mut ctx RenderContext) {
 			ctx.draw_focus_ring(trk, rad, tb.focus_anim.value)
 		}
 
-		tc := if !tb.enabled {
+		tc := if !en {
 			ctx.theme.eff_tab_disabled_text()
 		} else if is_active {
 			ctx.theme.eff_tab_active_text()
@@ -748,7 +751,9 @@ pub fn (mut tb TabBox) draw(mut ctx RenderContext) {
 	if tb.active >= 0 && tb.active < tb.tabs.len {
 		cr := tb.content_rect(ctx)
 		ctx.push_clip(cr)
+		ctx.begin_disabled(tb.enabled)
 		tb.tabs[tb.active].widget.draw(mut ctx)
+		ctx.end_disabled(tb.enabled)
 		ctx.pop_clip()
 	}
 
@@ -829,7 +834,8 @@ fn (tb &TabBox) draw_scroll_buttons(mut ctx RenderContext) {
 // Отступ pad по краям уменьшается (max_pad), если вкладка слишком мала для двух отступов
 // и самой полоски - иначе ширина полоски ушла бы в отрицательные значения.
 fn (tb &TabBox) draw_indicator(trk Rect, visible Rect, mut ctx RenderContext) {
-	ic := tb.eff_indicator_color(ctx)
+	ic0 := tb.eff_indicator_color(ctx)
+	ic := if ctx.is_enabled(tb.enabled) { ic0 } else { ctx.disabled_color(ic0) }
 	thick := tb.indicator_thickness
 	ipos := tb.eff_indicator_pos()
 

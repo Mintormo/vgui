@@ -80,6 +80,7 @@ fn (ts &ToggleSwitch) track_rect() Rect {
 // дорожки) -> подпись справа под клипом bounds. У выключенного (disabled) виджета
 // цвета приглушены.
 pub fn (mut ts ToggleSwitch) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(ts.enabled)
 	if !ts.visible {
 		return
 	}
@@ -87,12 +88,14 @@ pub fn (mut ts ToggleSwitch) draw(mut ctx RenderContext) {
 		return
 	}
 
-	if ts.enabled {
+	if en {
 		ctx.focus.register_toggle_switch(&ts, ts.focus_group)
+	} else {
+		ctx.focus_block(&ts)
 	}
 
 	is_focused := ctx.focus.is_focused(unsafe { &ts })
-	target_focus := if is_focused && ts.enabled { f32(1.0) } else { f32(0.0) }
+	target_focus := if is_focused && en { f32(1.0) } else { f32(0.0) }
 	mut animating := ts.focus_anim.update(target_focus, ctx)
 
 	target_slide := if ts.on { f32(1.0) } else { f32(0.0) }
@@ -106,7 +109,7 @@ pub fn (mut ts ToggleSwitch) draw(mut ctx RenderContext) {
 	trk := ts.track_rect()
 	track_rad := trk.h * 0.5
 
-	off_c := if ts.enabled {
+	off_c := if en {
 		ctx.theme.eff_tog_track_off().blend(ctx.theme.button_hover, if ts.hovered {
 			f32(0.3)
 		} else {
@@ -115,23 +118,24 @@ pub fn (mut ts ToggleSwitch) draw(mut ctx RenderContext) {
 	} else {
 		ctx.theme.button_disabled_bg
 	}
-	on_c := if ts.enabled {
+	on_c := if en {
 		ctx.theme.eff_tog_track_on().blend(ctx.theme.accent_hover, if ts.hovered {
 			f32(0.3)
 		} else {
 			f32(0)
 		})
 	} else {
-		ctx.theme.eff_tog_track_on().darken(0.2)
+		ctx.disabled_color(ctx.theme.eff_tog_track_on())
 	}
 	track_c := off_c.blend(on_c, ts.slide_anim.value)
 	ctx.fill_rounded_rect(trk, track_c, track_rad)
 
-	tbc := if ts.slide_anim.value > 0.5 {
+	tbc0 := if ts.slide_anim.value > 0.5 {
 		ctx.theme.eff_tog_track_on().darken(0.1)
 	} else {
 		ctx.theme.eff_tog_track_off()
 	}
+	tbc := if en { tbc0 } else { ctx.disabled_color(tbc0) }
 	ctx.draw_rounded_rect(trk, tbc, track_rad)
 
 	// expanded(4) so the inset ring lands at the original expanded(2) geometry around the pill
@@ -145,7 +149,7 @@ pub fn (mut ts ToggleSwitch) draw(mut ctx RenderContext) {
 	thumb_max_x := trk.x + trk.w - thumb_pad - thumb_r
 	thumb_cx := lerp(thumb_min_x, thumb_max_x, ts.slide_anim.value)
 	thumb_cy := trk.y + trk.h * 0.5
-	thumb_c := if ts.enabled { ctx.theme.eff_tog_thumb() } else { ctx.theme.text_disabled }
+	thumb_c := if en { ctx.theme.eff_tog_thumb() } else { ctx.theme.text_disabled }
 	ctx.fill_circle(thumb_cx, thumb_cy, thumb_r, thumb_c)
 
 	if ts.text.len > 0 {
@@ -153,7 +157,7 @@ pub fn (mut ts ToggleSwitch) draw(mut ctx RenderContext) {
 		fh := ctx.font_height_of(font)
 		tx := trk.x + trk.w + ts.gap
 		ty := ts.bounds.y + (ts.bounds.h - fh) * 0.5
-		tc := if ts.enabled { ctx.theme.text_primary } else { ctx.theme.text_disabled }
+		tc := if en { ctx.theme.text_primary } else { ctx.theme.text_disabled }
 		ctx.push_clip(ts.bounds)
 		ctx.draw_text_with_font(ts.text, tx, ty, tc, font)
 		ctx.pop_clip()

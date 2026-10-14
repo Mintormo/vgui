@@ -176,10 +176,20 @@ pub fn (mut c Calendar) set_date(y int, m int, d int) {
 // draw рисует рамку/фон и делегирует содержимое draw_month или draw_year.
 // Рамка подсвечивается input_focus, если focused (его ставит фокус-учёт).
 pub fn (mut c Calendar) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(c.enabled)
 	if !c.visible { return }
 	if !ctx.is_in_clip(c.bounds) { return }
 
-	ctx.focus.register_calendar(&c, c.focus_group)
+	if en {
+		ctx.focus.register_calendar(&c, c.focus_group)
+	} else {
+		ctx.focus_block(&c)
+	}
+	defer {
+		if !en {
+			ctx.draw_disabled_veil(c.bounds, ctx.theme.border_radius)
+		}
+	}
 	c.font_h = ctx.font_height_of(ctx.get_font(.regular, 0))
 
 	bg := ctx.theme.input_bg

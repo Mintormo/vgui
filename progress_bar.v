@@ -28,6 +28,7 @@ pub mut:
 	bounds        Rect
 	value         f32
 	visible       bool          = true
+	enabled       bool          = true // false - приглушённые цвета (enabled.v)
 	style         ProgressStyle = .linear
 	indeterminate bool
 	// Appearance
@@ -112,26 +113,25 @@ pub fn (p &ProgressBar) get_percent() f32 {
 
 // eff_bg_color / eff_fill_color / eff_text_color: собственный цвет виджета, если он
 // задан (альфа > 0), иначе цвет из темы. Нулевая альфа — признак «не задано»,
-// поэтому полностью прозрачный цвет задать нельзя.
+// поэтому полностью прозрачный цвет задать нельзя. Неактивная полоса (свой
+// enabled или отключённый предок) получает те же цвета, приглушённые к фону.
 fn (p &ProgressBar) eff_bg_color(ctx &RenderContext) Color {
-	if p.bg_color.a > 0 {
-		return p.bg_color
-	}
-	return ctx.theme.eff_prog_track()
+	c := if p.bg_color.a > 0 { p.bg_color } else { ctx.theme.eff_prog_track() }
+	return p.dim(ctx, c)
 }
 
 fn (p &ProgressBar) eff_fill_color(ctx &RenderContext) Color {
-	if p.fill_color.a > 0 {
-		return p.fill_color
-	}
-	return ctx.theme.eff_prog_fill()
+	c := if p.fill_color.a > 0 { p.fill_color } else { ctx.theme.eff_prog_fill() }
+	return p.dim(ctx, c)
 }
 
 fn (p &ProgressBar) eff_text_color(ctx &RenderContext) Color {
-	if p.text_color.a > 0 {
-		return p.text_color
-	}
-	return ctx.theme.eff_prog_text()
+	c := if p.text_color.a > 0 { p.text_color } else { ctx.theme.eff_prog_text() }
+	return p.dim(ctx, c)
+}
+
+fn (p &ProgressBar) dim(ctx &RenderContext, c Color) Color {
+	return if ctx.is_enabled(p.enabled) { c } else { ctx.disabled_color(c) }
 }
 
 // eff_corner_radius: отрицательный corner_radius означает «таблетка» (радиус = половина высоты полосы).
@@ -303,7 +303,7 @@ fn (p &ProgressBar) draw_linear(mut ctx RenderContext) {
 				fill_w := bar.w * clamp_f32(p.value, 0, 1)
 				if fill_w > 0.5 {
 					ctx.push_clip(Rect{bar.x, p.bounds.y, fill_w, p.bounds.h})
-					ctx.draw_text_with_font(lbl, tx, ty, p.text_fill_color, font)
+					ctx.draw_text_with_font(lbl, tx, ty, p.dim(ctx, p.text_fill_color), font)
 					ctx.pop_clip()
 				}
 			}

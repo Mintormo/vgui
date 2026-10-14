@@ -27,6 +27,7 @@ pub mut:
 	// явно: у Color альфа по умолчанию 255, без него иконка была бы чёрной
 	color   Color = Color{0, 0, 0, 0}
 	visible bool  = true
+	enabled bool  = true // false - глиф цветом text_disabled (enabled.v)
 }
 
 // ─── Constructors ──────────────────────────────────────
@@ -70,7 +71,13 @@ pub fn (mut ic Icon) draw(mut ctx RenderContext) {
 	}
 	// Альфа 0 - маркер «цвет не задан»: берём цвет текста текущей темы, чтобы
 	// иконка автоматически перекрашивалась при смене светлой/тёмной темы.
-	c := if ic.color.a > 0 { ic.color } else { ctx.theme.text_primary }
+	c := if !ctx.is_enabled(ic.enabled) {
+		ctx.theme.text_disabled
+	} else if ic.color.a > 0 {
+		ic.color
+	} else {
+		ctx.theme.text_primary
+	}
 	ctx.draw_icon_glyph(codepoint, ic.bounds, ic.size, c)
 }
 

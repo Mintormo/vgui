@@ -71,6 +71,7 @@ fn (cb &CheckBox) box_rect() Rect {
 // галочки, фон (с подмешиванием hover-цвета), рамка, фокус-кольцо, галочка
 // из двух линий (размер пропорционален check_anim.value - "вырастает"), текст.
 pub fn (mut cb CheckBox) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(cb.enabled)
 	if !cb.visible {
 		return
 	}
@@ -78,12 +79,14 @@ pub fn (mut cb CheckBox) draw(mut ctx RenderContext) {
 		return
 	}
 
-	if cb.enabled {
+	if en {
 		ctx.focus.register_checkbox(&cb, cb.focus_group)
+	} else {
+		ctx.focus_block(&cb)
 	}
 
 	is_focused := ctx.focus.is_focused(unsafe { &cb })
-	target_focus := if is_focused && cb.enabled { f32(1.0) } else { f32(0.0) }
+	target_focus := if is_focused && en { f32(1.0) } else { f32(0.0) }
 	mut animating := cb.focus_anim.update(target_focus, ctx)
 
 	target_check := if cb.checked { f32(1.0) } else { f32(0.0) }
@@ -101,7 +104,7 @@ pub fn (mut cb CheckBox) draw(mut ctx RenderContext) {
 
 	// Порог 0.5 по check_anim.value: цвет фона/рамки переключается на "включён"
 	// на середине анимации галочки, а не мгновенно при смене checked.
-	bg := if !cb.enabled {
+	bg := if !en {
 		ctx.theme.button_disabled_bg
 	} else if cb.check_anim.value > 0.5 {
 		ctx.theme.eff_chk_bg_checked().blend(ctx.theme.accent_hover, if cb.hovered {
@@ -129,7 +132,7 @@ pub fn (mut cb CheckBox) draw(mut ctx RenderContext) {
 	ctx.draw_focus_ring(br.expanded(4), rad + 4, cb.focus_anim.value)
 
 	if cb.check_anim.value > 0.05 {
-		cc := if cb.enabled { ctx.theme.eff_chk_mark() } else { ctx.theme.text_disabled }
+		cc := if en { ctx.theme.eff_chk_mark() } else { ctx.theme.text_disabled }
 		cx := br.x + br.w * 0.5
 		cy := br.y + br.h * 0.5
 		s := br.w * 0.3 * cb.check_anim.value
@@ -142,7 +145,7 @@ pub fn (mut cb CheckBox) draw(mut ctx RenderContext) {
 		fh := ctx.font_height_of(font)
 		tx := br.x + br.w + cb.gap
 		ty := cb.bounds.y + (cb.bounds.h - fh) * 0.5
-		tc := if cb.enabled { ctx.theme.text_primary } else { ctx.theme.text_disabled }
+		tc := if en { ctx.theme.text_primary } else { ctx.theme.text_disabled }
 		ctx.push_clip(cb.bounds)
 		ctx.draw_text_with_font(cb.text, tx, ty, tc, font)
 		ctx.pop_clip()

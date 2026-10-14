@@ -421,6 +421,12 @@ pub fn (mut n Notification) draw(mut ctx RenderContext) {
 	}
 
 	rad := n.eff_radius(ctx)
+	// Неактивное уведомление (свой enabled или неактивный менеджер) - под вуалью
+	defer {
+		if !ctx.is_enabled(n.enabled) {
+			ctx.draw_disabled_veil(anim_bounds, rad)
+		}
+	}
 	bg := n.eff_bg_color(ctx).with_alpha(u8(int(n.eff_bg_color(ctx).a) * int(alpha) / 255))
 	bc := n.eff_border_color(ctx).with_alpha(u8(int(n.eff_border_color(ctx).a) * int(alpha) / 255))
 	accent := n.eff_accent_color(ctx).with_alpha(alpha)
@@ -643,6 +649,7 @@ pub mut:
 	bounds        Rect
 	notifications []&Notification
 	visible       bool                 = true
+	enabled       bool                 = true // false - все уведомления неактивны (enabled.v)
 	position      NotificationPosition = .top_right
 	margin        f32                  = 12
 	spacing       f32                  = 8
@@ -855,18 +862,20 @@ pub fn (mut nm NotificationManager) draw(mut ctx RenderContext) {
 	// Re-layout every frame (animations / dismissals shift positions)
 	nm.layout_notifications(mut ctx)
 
+	ctx.begin_disabled(nm.enabled)
 	for mut n in nm.notifications {
 		if n.visible {
 			n.draw(mut ctx)
 		}
 	}
+	ctx.end_disabled(nm.enabled)
 }
 
 // ─── Events ────────────────────────────────────────────
 
 // handle_event пересылает событие уведомлениям с верхнего (последнего добавленного) к нижнему; останавливается на первом поглотившем.
 pub fn (mut nm NotificationManager) handle_event(event &GuiEvent, app &App) bool {
-	if !nm.visible {
+	if !nm.visible || (!nm.enabled && is_input_event(event)) {
 		return false
 	}
 	// Forward events to notifications, top of stack first

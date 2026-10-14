@@ -107,9 +107,12 @@ pub fn (mut d WindowTitleDrag) draw(mut ctx RenderContext) {
 	}
 
 	// Register our bounds as a drag rect for the borderless hit-test.
-	ctx.pending_drag_rects << d.box.bounds
-	// Also register for double-click detection (covers the full titlebar strip).
-	ctx.pending_titlebar_rects << d.box.bounds
+	// Неактивная строка (box.enabled, enabled.v) окно не перетаскивает.
+	if ctx.is_enabled(d.box.enabled) {
+		ctx.pending_drag_rects << d.box.bounds
+		// Also register for double-click detection (covers the full titlebar strip).
+		ctx.pending_titlebar_rects << d.box.bounds
+	}
 
 	d.box.draw_impl(mut ctx)
 }

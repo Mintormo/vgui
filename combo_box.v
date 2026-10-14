@@ -765,6 +765,7 @@ fn (mut cb ComboBox) open_dropdown(mut ctx RenderContext) {
 // (или placeholder) с обрезкой по полю и стрелку-треугольник (вниз/вверх по open). Сам popup
 // рисуется оверлеем, а не здесь.
 pub fn (mut cb ComboBox) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(cb.enabled)
 	if !cb.visible {
 		return
 	}
@@ -772,8 +773,13 @@ pub fn (mut cb ComboBox) draw(mut ctx RenderContext) {
 		return
 	}
 
-	if cb.enabled {
+	if en {
 		ctx.focus.register_combo_box(&cb, cb.focus_group)
+	} else {
+		if cb.open {
+			cb.close_dropdown(mut ctx)
+		}
+		ctx.focus_block(&cb)
 	}
 
 	should_focus := ctx.focus.is_focused(unsafe { &cb })
@@ -786,14 +792,14 @@ pub fn (mut cb ComboBox) draw(mut ctx RenderContext) {
 		cb.focused = true
 	}
 
-	target_focus := if cb.focused && cb.enabled { f32(1.0) } else { f32(0.0) }
+	target_focus := if cb.focused && en { f32(1.0) } else { f32(0.0) }
 	// Кольцо фокуса и подсветка рамки — внутри bounds (+1 px свечения).
 	if cb.focus_anim.update(target_focus, ctx) {
 		ctx.mark_anim_rect('combobox', cb.bounds.expanded(1))
 	}
 
 	rad := ctx.theme.border_radius
-	bg := if cb.enabled { ctx.theme.eff_cb_bg() } else { ctx.theme.eff_cb_bg().darken(0.05) }
+	bg := if en { ctx.theme.eff_cb_bg() } else { ctx.theme.eff_cb_bg().darken(0.05) }
 	ctx.fill_rounded_rect(cb.bounds, bg, rad)
 
 	bc := ctx.theme.eff_cb_border().blend(ctx.theme.input_focus, cb.focus_anim.value)
@@ -814,16 +820,17 @@ pub fn (mut cb ComboBox) draw(mut ctx RenderContext) {
 
 	if cb.selected >= 0 && cb.selected < cb.entries.len {
 		sel := cb.entries[cb.selected]
+		stc := if en { ctx.theme.eff_cb_text() } else { ctx.theme.text_disabled }
 		mut tx := cb.bounds.x + cb.pad
 		if sel.icon.is_set() {
 			ctx.draw_item_icon(sel.icon, Rect{tx, cb.bounds.y, cb.icon_size, cb.bounds.h},
-				cb.icon_size, ctx.theme.eff_cb_text())
+				cb.icon_size, stc)
 			tx += cb.icon_size + cb.icon_gap
 		}
-		ctx.draw_text_with_font(sel.text, tx, ty, ctx.theme.eff_cb_text(), font)
+		ctx.draw_text_with_font(sel.text, tx, ty, stc, font)
 	} else {
-		ctx.draw_text_with_font(cb.eff_placeholder(), cb.bounds.x + cb.pad, ty, ctx.theme.text_secondary,
-			font)
+		ptc := if en { ctx.theme.text_secondary } else { ctx.theme.text_disabled }
+		ctx.draw_text_with_font(cb.eff_placeholder(), cb.bounds.x + cb.pad, ty, ptc, font)
 	}
 
 	ctx.pop_clip()
@@ -837,7 +844,7 @@ pub fn (mut cb ComboBox) draw(mut ctx RenderContext) {
 	cy := ay + ah * 0.5
 	aw := f32(8)
 	ahh := f32(5)
-	ac := ctx.theme.eff_cb_arrow()
+	ac := if en { ctx.theme.eff_cb_arrow() } else { ctx.theme.text_disabled }
 
 	if cb.open {
 		ctx.fill_triangle(cx, cy - ahh * 0.5, cx - aw * 0.5, cy + ahh * 0.5, cx + aw * 0.5, cy +

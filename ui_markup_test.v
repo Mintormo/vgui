@@ -134,7 +134,7 @@ fn test_errors_are_loud() {
 		'label "a"\n  label "b"\n':               't:2: у label не может быть вложенных'
 		'tabs\n  label "a"\n':                    't:2: внутри tabs допустимо только tab'
 		'split\n  label "a"\n':                   't:1: split: нужно ровно два'
-		'label "a" disabled\n':                   't:1: свойство disabled неприменимо к label'
+		'label "a" disabled=maybe\n':             't:1: disabled=maybe: ожидается true или false'
 		'':                                       't: разметка пуста'
 	}
 	for src, want in cases {

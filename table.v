@@ -1052,11 +1052,21 @@ fn tbl_draw_text_aligned(mut ctx RenderContext, text string, r Rect, align TextA
 // могло уменьшиться). Строки и колонки вне видимой области пропускаются, а
 // перебор строк прерывается при выходе за нижний край (rows упорядочены по Y).
 pub fn (mut t TableView) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(t.enabled)
 	if !t.visible || t.columns.len == 0 {
 		return
 	}
 	if !ctx.is_in_clip(t.bounds) {
 		return
+	}
+	// Встроенные виджеты (ячейки, редакторы) неактивны вместе с владельцем;
+	// всё содержимое приглушается вуалью поверх (enabled.v)
+	ctx.begin_disabled(t.enabled)
+	defer {
+		ctx.end_disabled(t.enabled)
+		if !en {
+			ctx.draw_disabled_veil(t.bounds, ctx.theme.border_radius)
+		}
 	}
 
 	t.scroll_x = clamp_f32(t.scroll_x, 0, t.max_scroll_x())
@@ -1069,7 +1079,7 @@ pub fn (mut t TableView) draw(mut ctx RenderContext) {
 	bc := ctx.theme.input_border.blend(ctx.theme.input_focus, t.focus_anim.value)
 	ctx.draw_rounded_rect(t.bounds, bc, rad)
 
-	target_focus := if t.focused && t.enabled { f32(1.0) } else { f32(0.0) }
+	target_focus := if t.focused && en { f32(1.0) } else { f32(0.0) }
 	// Кольцо фокуса и подсветка рамки — внутри bounds (+1 px свечения).
 	if t.focus_anim.update(target_focus, ctx) {
 		ctx.mark_anim_rect('table', t.bounds.expanded(1))

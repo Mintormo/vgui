@@ -135,6 +135,12 @@ mode. Масштаб рендера выставляется заново пос
 **Фокус** («Фокус-учёт»). Каждому focusable-виджету - свой элемент `FocusKind` (cast «похожим» типом = UB);
 `fm.current` - индекс, корректируется при удалении записи.
 
+**Неактивное состояние** («Неактивное состояние (enabled)»). У каждого виджета поле `enabled bool = true`
+(у HBox/VBox/WindowTitleDrag - `box.enabled`). В `draw()` - один раз `en := ctx.is_enabled(w.enabled)` и
+дальше только `en` (учитывает отключённых предков); focusable регистрируется при `en`, иначе
+`ctx.focus_block(&w)`. Контейнер рисует детей между `ctx.begin_disabled(own)`/`end_disabled(own)` и при
+`!enabled` не передаёт им ввод (`is_input_event`).
+
 **Оверлеи попапов** («Оверлеи попапов»). Один слот на окно с владельцем: только
 `ctx.set_overlay(owner, draw, ev, close)` / `ctx.clear_overlay(owner)`, никогда не присваивание
 `overlay_cb`/`overlay_ev`. `owner` - адрес самого виджета.
@@ -151,8 +157,10 @@ mode. Масштаб рендера выставляется заново пос
    `type_tag int = kind_<name>` + строка в `widget_tag_test.v`.
 2. `widget_tree.v`: `bounds_of`/`set_bounds` (+ `child_widgets`/`hit_children` для контейнеров, собственное
    поле `visible bool`) и проверка в `widget_tree_test.v`. Контейнер - ещё `arrange()`.
-3. По желанию: `measure()` в `layout_measure.v`; `FocusKind` + ветки в `focus.v` для фокусируемых.
-4. Пример `examples/NN_виджет.v`.
+3. Поле `enabled bool = true` и неактивный вид через `en := ctx.is_enabled(...)` (сложному содержимому -
+   `ctx.draw_disabled_veil`); контейнер - `begin_disabled`/`end_disabled` вокруг детей.
+4. По желанию: `measure()` в `layout_measure.v`; `FocusKind` + ветки в `focus.v` для фокусируемых.
+5. Пример `examples/NN_виджет.v`.
 
 Чтобы виджет появился в биндингах - C-ABI в `../vgui-capi` (его `CLAUDE.md`, чек-лист), затем класс в `../vguipy`.
 

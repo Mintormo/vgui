@@ -457,6 +457,7 @@ fn (iv &ImageView) image_draw_rect() Rect {
 // и полосы прокрутки. Побочный эффект - clamp_scroll() каждый кадр, чтобы смена размера окна
 // не оставила прокрутку за пределами.
 pub fn (mut iv ImageView) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(iv.enabled)
 	if !iv.visible {
 		return
 	}
@@ -464,6 +465,11 @@ pub fn (mut iv ImageView) draw(mut ctx RenderContext) {
 		return
 	}
 
+	defer {
+		if !en {
+			ctx.draw_disabled_veil(iv.bounds, ctx.theme.border_radius)
+		}
+	}
 	iv.ensure_texture_loaded(ctx)
 	iv.clamp_scroll()
 

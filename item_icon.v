@@ -94,10 +94,13 @@ pub fn (ic ItemIcon) with_color(c Color) ItemIcon {
 // прямоугольника r. fallback - цвет глифа, если у иконки свой цвет не задан.
 // Пустая иконка, неизвестное имя и непрочитанная картинка ничего не рисуют.
 pub fn (mut ctx RenderContext) draw_item_icon(ic &ItemIcon, r Rect, size f32, fallback Color) {
+	// fallback == text_disabled - признак неактивного элемента (так зовут все
+	// владельцы): тогда гасится и свой цвет иконки, и картинка (enabled.v).
+	dim := fallback == ctx.theme.text_disabled
 	if ic.name.len > 0 {
 		codepoint, found := icon_codepoint(ic.name)
 		if found {
-			c := if ic.color.a > 0 { ic.color } else { fallback }
+			c := if ic.color.a > 0 && !dim { ic.color } else { fallback }
 			ctx.draw_icon_glyph(codepoint, r, int(size), c)
 		}
 		return
@@ -112,5 +115,11 @@ pub fn (mut ctx RenderContext) draw_item_icon(ic &ItemIcon, r Rect, size f32, fa
 	if unsafe { tex == nil } {
 		return
 	}
+	if dim {
+		C.SDL_SetTextureAlphaMod(tex, disabled_image_alpha)
+	}
 	ctx.draw_icon(tex, r.x + (r.w - size) * 0.5, r.y + (r.h - size) * 0.5, size, size)
+	if dim {
+		C.SDL_SetTextureAlphaMod(tex, 255)
+	}
 }

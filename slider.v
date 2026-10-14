@@ -386,6 +386,7 @@ fn (s &Slider) draw_ticks(trk Rect, mut ctx RenderContext) {
 // bounds) -> дорожка -> закрашенная часть -> засечки -> ореол ручки -> ручка с контуром ->
 // кольцо фокуса -> подпись значения. Выключенный слайдер рисуется затемнёнными цветами.
 pub fn (mut s Slider) draw(mut ctx RenderContext) {
+	en := ctx.is_enabled(s.enabled)
 	if !s.visible {
 		return
 	}
@@ -393,12 +394,14 @@ pub fn (mut s Slider) draw(mut ctx RenderContext) {
 		return
 	}
 
-	if s.enabled {
+	if en {
 		ctx.focus.register_slider(&s, s.focus_group)
+	} else {
+		ctx.focus_block(&s)
 	}
 
-	target_hover := if s.hovered && s.enabled { f32(1.0) } else { f32(0.0) }
-	target_focus := if s.focused && s.enabled { f32(1.0) } else { f32(0.0) }
+	target_hover := if s.hovered && en { f32(1.0) } else { f32(0.0) }
+	target_focus := if s.focused && en { f32(1.0) } else { f32(0.0) }
 	mut animating := s.hover_anim.update(target_hover, ctx)
 	animating = s.focus_anim.update(target_focus, ctx) || animating
 	// mark_anim_rect — см. button.v; ручка и дорожка не выходят за bounds.
@@ -414,7 +417,7 @@ pub fn (mut s Slider) draw(mut ctx RenderContext) {
 	thumb_c := s.eff_thumb_color(ctx)
 
 	// Background track (always drawn — both for horizontal & vertical)
-	bg_c := if s.enabled { track_c } else { track_c.darken(0.1) }
+	bg_c := if en { track_c } else { ctx.disabled_color(track_c) }
 	if trk.w >= 2 && trk.h >= 2 {
 		// Если дорожка тоньше двух радиусов скругления, обычный rounded_rect даст артефакты -
 		// используем "таблетку" (pill) с полным скруглением.
@@ -432,7 +435,7 @@ pub fn (mut s Slider) draw(mut ctx RenderContext) {
 			.horizontal {
 				fill_w := cx - trk.x
 				if fill_w > 0.5 {
-					fc := if s.enabled { fill_c } else { fill_c.darken(0.2) }
+					fc := if en { fill_c } else { ctx.disabled_color(fill_c) }
 					fill_r := Rect{trk.x, trk.y, fill_w, trk.h}
 					if min_f32(fill_r.w, fill_r.h) <= track_rad * 2 {
 						ctx.fill_pill_rect(fill_r, fc, track_rad)
@@ -446,7 +449,7 @@ pub fn (mut s Slider) draw(mut ctx RenderContext) {
 				fill_top := cy
 				fill_h := trk.y + trk.h - fill_top
 				if fill_h > 0.5 {
-					fc := if s.enabled { fill_c } else { fill_c.darken(0.2) }
+					fc := if en { fill_c } else { ctx.disabled_color(fill_c) }
 					fill_r := Rect{trk.x, fill_top, trk.w, fill_h}
 					if min_f32(fill_r.w, fill_r.h) <= track_rad * 2 {
 						ctx.fill_pill_rect(fill_r, fc, track_rad)
@@ -464,7 +467,7 @@ pub fn (mut s Slider) draw(mut ctx RenderContext) {
 	// Thumb halo (hover/focus)
 	thumb_radius := s.thumb_size * 0.5
 	halo_strength := max_f32(s.hover_anim.value, s.focus_anim.value)
-	if halo_strength > 0.05 && s.enabled {
+	if halo_strength > 0.05 && en {
 		halo_r := thumb_radius + 4 + halo_strength * 2
 		// Ореол вокруг ручки: растёт и становится плотнее вместе с анимацией hover/focus.
 		halo_a := u8(60.0 * halo_strength)
@@ -472,8 +475,8 @@ pub fn (mut s Slider) draw(mut ctx RenderContext) {
 	}
 
 	// Thumb body
-	tc := if !s.enabled {
-		thumb_c.darken(0.25)
+	tc := if !en {
+		ctx.disabled_color(thumb_c)
 	} else if s.dragging {
 		thumb_c.darken(0.1)
 	} else if s.hovered {
@@ -496,7 +499,7 @@ pub fn (mut s Slider) draw(mut ctx RenderContext) {
 		fh := ctx.font_height_of(font)
 		lbl := s.label_text()
 		lw := ctx.measure_text_with_font(lbl, font).x
-		lc := if s.enabled { ctx.theme.text_primary } else { ctx.theme.text_disabled }
+		lc := if en { ctx.theme.text_primary } else { ctx.theme.text_disabled }
 
 		match s.dir {
 			.horizontal {

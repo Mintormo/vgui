@@ -192,3 +192,35 @@ fn test_snapshot_text() {
 fn test_snapshot_containers() {
 	snap('containers', 480, 380, scene_containers)!
 }
+
+// Неактивное состояние (enabled.v): те же галереи с отключённым корнем - всё
+// поддерево рисуется неактивным по наследству, без своих флагов у детей.
+fn disabled_scene(build fn () &Widget) &Widget {
+	mut w := build()
+	set_widget_enabled(mut w, false)
+	return w
+}
+
+fn test_snapshot_controls_disabled() {
+	snap('controls_disabled', 480, 360, fn () &Widget {
+		return disabled_scene(scene_controls)
+	})!
+}
+
+fn test_snapshot_lists_disabled() {
+	snap('lists_disabled', 480, 360, fn () &Widget {
+		return disabled_scene(scene_lists)
+	})!
+}
+
+fn test_snapshot_text_disabled() {
+	snap('text_disabled', 480, 420, fn () &Widget {
+		return disabled_scene(scene_text)
+	})!
+}
+
+fn test_snapshot_containers_disabled() {
+	snap('containers_disabled', 480, 380, fn () &Widget {
+		return disabled_scene(scene_containers)
+	})!
+}
