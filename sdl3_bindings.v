@@ -56,6 +56,7 @@ fn C.SDL_RenderClear(ren voidptr) bool
 fn C.SDL_RenderPresent(ren voidptr) bool
 fn C.SDL_SetRenderClipRect(ren voidptr, rect &C.SDL_Rect) bool
 fn C.SDL_RenderFillRect(ren voidptr, rect voidptr) bool
+fn C.SDL_RenderFillRects(renderer voidptr, rects &C.SDL_FRect, count int) bool
 fn C.SDL_RenderRect(ren voidptr, rect voidptr) bool
 fn C.SDL_RenderLine(ren voidptr, x1 f32, y1 f32, x2 f32, y2 f32) bool
 fn C.SDL_RenderLines(ren voidptr, points voidptr, count int) bool

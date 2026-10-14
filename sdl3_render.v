@@ -346,14 +346,38 @@ fn render_draw_rounded_rect(renderer voidptr, x f32, y f32, w f32, h f32, radius
 		vs << vi2
 		vs << vo2
 	}
-	for i in 0 .. total - 1 {
-		push_strip_quad(mut verts, outer_pts[i], inner_pts[i], outer_pts[i + 1], inner_pts[i + 1])
+	// Внутри каждого угла - геометрия (соседние точки одной дуги). Четыре соединяющих
+	// четырёхугольника (последняя точка угла -> первая следующего) - это прямые стороны:
+	// полосы шириной ровно 1 физический пиксель, выровненные по осям. Их рисуем
+	// SDL_RenderFillRects, а не геометрией: программный рендерер SDL распознаёт пару
+	// треугольников-прямоугольник и рисует его как прямоугольник, ОТБРАСЫВАЯ дробную
+	// часть размеров. Концы дуг несут погрешность float, и при дробном масштабе (1.25,
+	// 1.5) ширина выходила 0.9999 пикселя -> 0: сторона рамки пропадала (GPU-рендереры
+	// рисовали её верно). Поэтому стороны считаются, как в draw_rect: от границ,
+	// привязанных к пиксельной сетке, с шириной ровно pw = 1 физический пиксель.
+	per_corner := n + 1
+	for i in 0 .. total {
+		if (i + 1) % per_corner != 0 {
+			next := (i + 1) % total
+			push_strip_quad(mut verts, outer_pts[i], inner_pts[i], outer_pts[next], inner_pts[next])
+		}
 	}
-	// Close: last point of bottom-left corner → first point of top-left corner.
-	push_strip_quad(mut verts, outer_pts[total - 1], inner_pts[total - 1], outer_pts[0], inner_pts[0])
+	pw := f32(1.0) / s
+	x0 := f32(int(x * s + 0.5)) * pw
+	y0 := f32(int(y * s + 0.5)) * pw
+	x1 := f32(int((x + w) * s + 0.5)) * pw
+	y1 := f32(int((y + h) * s + 0.5)) * pw
+	edges := [
+		C.SDL_FRect{x0 + r, y0, x1 - x0 - 2 * r, pw}, // верх
+		C.SDL_FRect{x0 + r, y1 - pw, x1 - x0 - 2 * r, pw}, // низ
+		C.SDL_FRect{x0, y0 + r, pw, y1 - y0 - 2 * r}, // лево
+		C.SDL_FRect{x1 - pw, y0 + r, pw, y1 - y0 - 2 * r}, // право
+	]
 
 	C.SDL_SetRenderDrawBlendMode(renderer, sdl_blendmode_blend)
 	C.SDL_RenderGeometry(renderer, unsafe { nil }, verts.data, verts.len, unsafe { nil }, 0)
+	C.SDL_SetRenderDrawColor(renderer, c.r, c.g, c.b, c.a)
+	C.SDL_RenderFillRects(renderer, edges.data, edges.len)
 }
 
 // Filled circle via geometry.
