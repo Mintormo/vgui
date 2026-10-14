@@ -278,6 +278,31 @@ fn test_root_rules_and_container_fill() {
 	assert t.win.ctx.theme.bg == dark_theme().bg
 }
 
+fn test_window_nil_stylesheet_returns_to_app_stylesheet() {
+	mut t := new_test_ui(width: 200, height: 80)!
+	defer {
+		t.close()
+	}
+	app_ss := parse_stylesheet(':root { background: #ff0000; }', 'app.css')!
+	own_ss := parse_stylesheet(':root { background: #00ff00; }', 'own.css')!
+	t.app.set_stylesheet(app_ss)
+	t.win.set_stylesheet(own_ss)
+	assert t.win.ctx.theme.bg == green
+	// своя таблица: смена таблицы приложения окно не трогает, но запоминается
+	app2 := parse_stylesheet(':root { background: #0000ff; }', 'app2.css')!
+	t.app.set_stylesheet(app2)
+	assert t.win.ctx.theme.bg == green
+	// nil - назад к ТЕКУЩЕЙ таблице приложения, и окно снова ей следует
+	t.win.set_stylesheet(unsafe { nil })
+	assert t.win.ctx.stylesheet == app2
+	assert t.win.ctx.theme.bg == blue
+	t.app.set_stylesheet(app_ss)
+	assert t.win.ctx.theme.bg == red
+	// окно без стилей при стилях приложения - пустая таблица
+	t.win.set_stylesheet(parse_stylesheet('', 'none')!)
+	assert t.win.ctx.theme.bg == light_theme().bg
+}
+
 fn test_hot_reload_keeps_old_styles_on_error() {
 	mut t := new_test_ui(width: 200, height: 80)!
 	defer {

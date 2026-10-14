@@ -258,9 +258,17 @@ pub fn css_base_theme(theme Theme, ss &Stylesheet) Theme {
 
 // ─── Окно и приложение ─────────────────────────────────
 
-// set_stylesheet задаёт окну собственную таблицу стилей (nil - без стилей):
-// после этого таблица приложения (App.set_stylesheet) его больше не меняет.
+// set_stylesheet задаёт окну собственную таблицу стилей: после этого таблица
+// приложения (App.set_stylesheet) его больше не меняет. nil - снять свою таблицу
+// и вернуться к таблице приложения (w.app_stylesheet; у приложения её нет -
+// окно без стилей). Окно совсем без стилей при стилях у приложения - пустая
+// таблица: set_stylesheet(parse_stylesheet('', 'none')!).
 pub fn (mut w Window) set_stylesheet(ss &Stylesheet) {
+	if isnil(ss) {
+		w.css_explicit = false
+		w.apply_stylesheet(w.app_stylesheet)
+		return
+	}
 	w.css_explicit = true
 	w.apply_stylesheet(ss)
 }
@@ -287,17 +295,26 @@ pub fn (w &Window) stylesheet() &Stylesheet {
 
 // set_stylesheet задаёт таблицу стилей приложения: всем окнам и диалогам без
 // своей таблицы и будущим (как App.set_theme). nil - убрать стили.
+//
+// Таблица запоминается и в окнах СО своей таблицей (app_stylesheet): указателя
+// на App у окна нет, а Window.set_stylesheet(nil) должен вернуть окно именно к
+// текущей таблице приложения.
 pub fn (mut app App) set_stylesheet(ss &Stylesheet) {
 	app.stylesheet = unsafe { ss }
 	for mut w in app.windows {
-		if !w.css_explicit {
-			w.apply_stylesheet(ss)
-		}
+		w.follow_app_stylesheet(ss)
 	}
 	for mut d in app.dialogs {
-		if !d.win.css_explicit {
-			d.win.apply_stylesheet(ss)
-		}
+		d.win.follow_app_stylesheet(ss)
+	}
+}
+
+// follow_app_stylesheet - окно узнаёт таблицу приложения (add_window/add_dialog,
+// App.set_stylesheet) и применяет её, если своей таблицы у окна нет.
+fn (mut w Window) follow_app_stylesheet(ss &Stylesheet) {
+	w.app_stylesheet = unsafe { ss }
+	if !w.css_explicit {
+		w.apply_stylesheet(ss)
 	}
 }
 

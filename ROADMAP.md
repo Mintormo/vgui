@@ -164,7 +164,7 @@ Qt/GTK/WPF интегрированы с UIA (Windows), AT-SPI (Linux), NSAccess
 - [x] стилизация одного конкретного экземпляра без правки темы — `#id` / `.класс`
 - [x] hot-reload темы из файла — `App.load_stylesheet(path, true)`
 - [ ] CSS: шрифты, отступы, размеры (сейчас стили меняют только цвета и скругление)
-- [ ] CSS в C-ABI и Python (`vgui_app_set_stylesheet`, `add_css_class`)
+- [x] CSS в C-ABI и Python (`vgui_stylesheet_*`, `vguipy.Stylesheet`, `add_css_class`)
 
 ## 7. Реактивность и привязка данных
 

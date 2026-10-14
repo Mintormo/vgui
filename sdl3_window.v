@@ -249,6 +249,9 @@ pub mut:
 	// Таблица стилей задана окну явно (Window.set_stylesheet) - таблица
 	// приложения (App.set_stylesheet) его больше не меняет. Как theme_explicit.
 	css_explicit bool
+	// Таблица приложения, к которой окно вернётся после set_stylesheet(nil):
+	// указателя на App у окна нет, поэтому App запоминает её в каждом окне.
+	app_stylesheet &Stylesheet = unsafe { nil }
 	// True while this window holds its reference to ctx.fonts in g_font_cache
 	// (see font_cache.v). Guards against a double release_fonts in cleanup().
 	fonts_held bool

@@ -74,7 +74,7 @@ pub mut:
 	css_path       string
 	css_mtime      i64
 	css_next_check u64
-	trays      []&Tray
+	trays          []&Tray
 	// When a tray is active the loop must keep running even with every
 	// window hidden (hide-to-tray), so don't auto-quit on "no open windows".
 	keep_alive bool
@@ -160,8 +160,8 @@ pub fn (mut app App) add_window(w &Window) {
 	if !win.theme_explicit {
 		win.apply_theme(app.config.theme)
 	}
-	if !win.css_explicit && !isnil(app.stylesheet) {
-		win.apply_stylesheet(app.stylesheet)
+	if !isnil(app.stylesheet) {
+		win.follow_app_stylesheet(app.stylesheet)
 	}
 	app.windows << win
 }
@@ -173,8 +173,8 @@ pub fn (mut app App) add_dialog(d &Dialog) {
 	if !dlg.win.theme_explicit {
 		dlg.win.apply_theme(app.config.theme)
 	}
-	if !dlg.win.css_explicit && !isnil(app.stylesheet) {
-		dlg.win.apply_stylesheet(app.stylesheet)
+	if !isnil(app.stylesheet) {
+		dlg.win.follow_app_stylesheet(app.stylesheet)
 	}
 	app.dialogs << dlg
 }
