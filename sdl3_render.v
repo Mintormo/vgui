@@ -19,17 +19,22 @@ import math
 
 // ─── Clipping ───
 
+// clip_pad — на сколько логических пикселей реальный клип SDL шире клипа из
+// clip_stack. Одна константа для clip_sdl_rect и RenderContext.is_in_clip: что
+// очищено при частичной перерисовке, то обязано и перерисовываться.
+const clip_pad = 1
+
 // Переводит логический Rect в целочисленный SDL_Rect для SDL_SetRenderClipRect: границы
-// округляются наружу (floor/ceil) и расширяются ещё на 1 единицу со всех сторон, чтобы обводка
+// округляются наружу (floor/ceil) и расширяются ещё на clip_pad со всех сторон, чтобы обводка
 // ровно по границе области не обрезалась половиной своего пикселя.
 fn clip_sdl_rect(r Rect) C.SDL_Rect {
 	// Use floor/ceil to avoid losing fractional pixels when converting to int,
 	// then expand by 1 extra logical unit so border strokes drawn exactly on
 	// the boundary are never clipped by the half-pixel outer contour.
-	x0 := int(math.floor(f64(r.x))) - 1
-	y0 := int(math.floor(f64(r.y))) - 1
-	x1 := int(math.ceil(f64(r.x + r.w))) + 1
-	y1 := int(math.ceil(f64(r.y + r.h))) + 1
+	x0 := int(math.floor(f64(r.x))) - clip_pad
+	y0 := int(math.floor(f64(r.y))) - clip_pad
+	x1 := int(math.ceil(f64(r.x + r.w))) + clip_pad
+	y1 := int(math.ceil(f64(r.y + r.h))) + clip_pad
 	return C.SDL_Rect{x0, y0, x1 - x0, y1 - y0}
 }
 

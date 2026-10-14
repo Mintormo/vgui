@@ -378,13 +378,22 @@ pub fn (mut ctx RenderContext) draw_icon(texture voidptr, x f32, y f32, w f32, h
 	C.SDL_RenderTexture(ctx.renderer, texture, unsafe { nil }, &dst)
 }
 
-// Returns true if r intersects the topmost clip rect (or no clipping active).
+// is_in_clip — стоит ли рисовать виджет с прямоугольником r: пересекает ли он
+// верхний клип (без клипа - всегда да).
+//
+// Сравнивается с клипом, РАСШИРЕННЫМ на clip_pad - ровно таким, какой на самом
+// деле ставится в SDL (clip_sdl_rect раздвигает его на 1 логический пиксель, чтобы
+// не срезать рамки на краю). При частичной перерисовке окно очищает именно эту
+// расширенную область. Раньше проверка шла по нерасширенному клипу со строгим
+// пересечением: виджет, лишь касающийся dirty-области краем, пропускался, а его
+// крайняя строка пикселей уже была стёрта. Так при наведении на переключатель,
+// стоящий вплотную под полем ввода, пропадала нижняя рамка поля (пример 56).
 pub fn (ctx &RenderContext) is_in_clip(r Rect) bool {
 	if ctx.clip_stack.len == 0 {
 		return true
 	}
 	last := ctx.clip_stack[ctx.clip_stack.len - 1]
-	return r.intersects(last)
+	return r.intersects(last.expanded(clip_pad))
 }
 
 pub fn (mut ctx RenderContext) mark_anim(reason string) {
