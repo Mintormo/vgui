@@ -166,3 +166,31 @@ fn test_markup_disabled_on_any_element() {
 	h := ui.widget('h') or { panic('нет элемента') }
 	assert widget_enabled(h)
 }
+
+// Пассивный холст (Canvas.passive) - не то же, что неактивный: рисуется как
+// обычно, а щелчок отдаёт виджету под ним (раньше для этого ставили
+// enabled = false, и холст теперь накрывался бы вуалью).
+fn test_passive_canvas_lets_clicks_through() {
+	mut t := new_test_ui(width: 200, height: 100)!
+	defer {
+		t.close()
+	}
+	mut c := &EnCounter{}
+	mut b := button('OK')
+	b.on_click = fn [mut c] () {
+		c.n++
+	}
+	mut cv := canvas(20, 10)
+	mut st := stack()
+	st.add(b)
+	st.add(cv)
+	t.add(st)
+	t.redraw()
+	t.click_widget(b)
+	assert c.n == 0, 'активный холст сверху должен забирать щелчок'
+	cv.passive = true
+	t.redraw()
+	t.click_widget(b)
+	assert c.n == 1, 'щелчок не прошёл сквозь пассивный холст'
+	assert cv.enabled
+}

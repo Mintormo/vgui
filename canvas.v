@@ -128,6 +128,10 @@ pub mut:
 	pixels   []u8
 	visible  bool = true
 	enabled  bool = true
+	// passive - холст только рисует: события не берёт и в фокус-учёт не
+	// встаёт, ввод идёт виджету под ним (как у Icon/ImageBackground). Не
+	// путать с enabled = false - тот рисует холст неактивным (вуаль).
+	passive  bool
 	stretch  bool // false = fit (preserve aspect), true = stretch to bounds
 	// ── Zoom / pan / scroll (image navigation) ──
 	// auto_fit = whole buffer scaled to fit bounds (the original behaviour). Once
@@ -927,7 +931,7 @@ pub fn (mut c Canvas) draw(mut ctx RenderContext) {
 		}
 	}
 
-	if en {
+	if en && !c.passive {
 		ctx.focus.register_canvas(&c, c.focus_group)
 	} else {
 		ctx.focus_block(&c)
@@ -1126,7 +1130,7 @@ fn (mut c Canvas) emit_pointer(kind CanvasEventKind, ev &GuiEvent) {
 //                (полоса > панорама > инструмент), колесо, клавиши.
 // Клавиши принимаются только при focused и take_keys; Tab отдаётся фокус-менеджеру.
 pub fn (mut c Canvas) handle_event(event &GuiEvent, app &App) bool {
-	if !c.visible || !c.enabled {
+	if !c.visible || !c.enabled || c.passive {
 		return false
 	}
 
