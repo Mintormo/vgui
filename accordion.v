@@ -84,6 +84,7 @@ mut:
 pub struct Accordion {
 pub mut:
 	type_tag int = kind_accordion // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	// Колесо мыши: false - виджет его не берёт (прокрутка уходит
 	// контейнеру, например панели в ScrollBox)
 	wheel    bool = true
@@ -103,12 +104,12 @@ pub mut:
 	header_pad    f32 = 8
 	spacing       f32 = 1 // gap between sections
 	pad           f32 // outer padding
-	icon_size     f32       = 8 // arrow triangle size
+	icon_size     f32 = 8 // arrow triangle size
 	// размер иконки секции в заголовке и зазор до текста (не путать с icon_size - стрелкой)
-	title_icon_size f32 = 16
-	title_icon_gap  f32 = 6
-	font_style    FontStyle = .bold
-	font_size     int
+	title_icon_size f32       = 16
+	title_icon_gap  f32       = 6
+	font_style      FontStyle = .bold
+	font_size       int
 	// Colors (0 = theme defaults)
 	header_bg       Color = Color{0, 0, 0, 0}
 	header_hover_bg Color = Color{0, 0, 0, 0}
@@ -560,7 +561,7 @@ pub fn (mut a Accordion) draw(mut ctx RenderContext) {
 			// Bounds (full child_h, not animated) were set in arrange()
 			mut w := unsafe { sec.widget }
 			ctx.begin_disabled(a.enabled)
-			w.draw(mut ctx)
+			ctx.draw_child(mut w)
 			ctx.end_disabled(a.enabled)
 
 			ctx.pop_clip()

@@ -126,6 +126,11 @@ pub mut:
 	anim_fixed_dt f32
 	// Текущая глубина рекурсии arrange_widget (защита от циклов в дереве).
 	arrange_depth int
+	// Таблица стилей окна (css_apply.v; nil - стилей нет) и цепочка предков
+	// рисуемого сейчас виджета для селекторов вида `.sidebar button` -
+	// её наполняет draw_child по ходу обхода дерева сверху вниз.
+	stylesheet &Stylesheet = unsafe { nil }
+	css_stack  []CssNode
 	// Сколько отключённых контейнеров-предков у рисуемого сейчас виджета
 	// (enabled.v): > 0 - виджет неактивен по наследству. Меняют только
 	// begin_disabled/end_disabled, обнуляет Window.render() в начале кадра.

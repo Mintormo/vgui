@@ -46,6 +46,7 @@ import math
 pub struct ColorPicker {
 pub mut:
 	type_tag   int = kind_color_picker // тег типа, см. widget_tag.v
+	css        CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds     Rect
 	color      Color = Color{255, 0, 0, 255}
 	visible    bool  = true

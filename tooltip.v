@@ -29,9 +29,10 @@ const tt_offset_x = f32(4) // slight right offset from cursor
 @[heap]
 pub struct Tooltip {
 pub mut:
-	type_tag     int = kind_tooltip // тег типа, см. widget_tag.v
-	text         string
-	visible      bool    = true
+	type_tag int = kind_tooltip // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
+	text     string
+	visible  bool = true
 	// enabled = false - подсказка не показывается. Неактивность цели подсказку
 	// НЕ гасит: объяснить, почему элемент недоступен, - её обычная работа.
 	enabled      bool    = true

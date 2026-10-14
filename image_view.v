@@ -61,6 +61,7 @@ const iv_max_zoom = f32(20.0)
 pub struct ImageView {
 pub mut:
 	type_tag int = kind_image_view // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	// Колесо мыши: false - виджет его не берёт (прокрутка уходит
 	// контейнеру, например панели в ScrollBox)
 	wheel        bool = true

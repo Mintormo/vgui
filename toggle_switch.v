@@ -18,6 +18,7 @@ module vgui
 pub struct ToggleSwitch {
 pub mut:
 	type_tag    int = kind_toggle_switch // тег типа, см. widget_tag.v
+	css         CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds      Rect
 	text        string
 	on          bool

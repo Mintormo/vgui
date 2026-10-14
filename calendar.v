@@ -37,6 +37,7 @@ pub enum CalendarView {
 pub struct Calendar {
 pub mut:
 	type_tag    int = kind_calendar // тег типа, см. widget_tag.v
+	css         CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds      Rect
 	visible     bool = true
 	enabled     bool = true

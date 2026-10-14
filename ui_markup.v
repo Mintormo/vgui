@@ -23,6 +23,7 @@ import os
 //                элементов их несколько (ячейки строки list);
 //   @ключ      - текст из перевода: tr('ключ');
 //   #id        - имя, по которому код находит элемент: ui.get[Button]('save');
+//   .класс     - класс для селекторов CSS (css.v); у виджета их может быть несколько;
 //   ключ=знач  - свойство; значение - слово до пробела или "строка";
 //   слово      - флаг, то же что слово=true (checked, bold, vertical...).
 // Комментарий - // до конца строки (вне кавычек). Пустые строки пропускаются.
@@ -135,14 +136,19 @@ pub fn ui_load(path string) !&Ui {
 @[heap]
 struct UiNode {
 mut:
-	typ      string
-	texts    []string
-	id       string
-	props    map[string]string
-	used     map[string]bool
-	line     int
-	indent   int
-	children []&UiNode
+	typ   string
+	texts []string
+	id    string
+	// classes — `.класс` для селекторов CSS (css.v); classes_used - их забрал
+	// виджет (build). Иначе finish() - ошибка: у пунктов меню, вкладок, ячеек
+	// классов нет, как и #id.
+	classes      []string
+	classes_used bool
+	props        map[string]string
+	used         map[string]bool
+	line         int
+	indent       int
+	children     []&UiNode
 }
 
 // ui_markup_tree разбирает текст в дерево узлов (ровно один корень).
@@ -307,6 +313,14 @@ fn ui_parse_line(s string, name string, ln int) !&UiNode {
 				return error('${name}:${ln}: у элемента два #id')
 			}
 			n.id = word[1..]
+		} else if word.starts_with('.') {
+			if word.len == 1 || !word[1..].bytes().all(css_is_ident_char(it)) {
+				return error('${name}:${ln}: ${word}: имя класса - буквы, цифры, - и _')
+			}
+			if word[1..] in n.classes {
+				return error('${name}:${ln}: класс ${word} указан дважды')
+			}
+			n.classes << word[1..]
 		} else if word.starts_with('@') {
 			n.texts << tr(word[1..])
 		} else {
@@ -425,6 +439,9 @@ fn (b &UiBuilder) no_children(n &UiNode) ! {
 
 // finish - проверка после сборки элемента: все свойства применены.
 fn (b &UiBuilder) finish(n &UiNode) ! {
+	if n.classes.len > 0 && !n.classes_used {
+		return b.fail(n, '.${n.classes[0]}: класс неприменим к ${n.typ} - классы CSS бывают только у виджетов')
+	}
 	mut keys := n.props.keys()
 	keys.sort()
 	for k in keys {
@@ -474,6 +491,14 @@ fn (mut b UiBuilder) build(mut n UiNode) !&Widget {
 		set_widget_enabled(mut w, false)
 	}
 	b.register_id(n, w)!
+	// #id и .классы - ещё и метки для селекторов CSS (css_apply.v)
+	if n.id.len > 0 {
+		set_css_id(mut w, n.id)
+	}
+	for cls in n.classes {
+		add_css_class(mut w, cls)
+	}
+	n.classes_used = true
 	return w
 }
 

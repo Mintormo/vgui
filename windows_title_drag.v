@@ -29,6 +29,7 @@ module vgui
 pub struct WindowTitleDrag {
 pub mut:
 	type_tag int = kind_window_title_drag // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	box      BoxLayout
 	visible  bool = true
 }

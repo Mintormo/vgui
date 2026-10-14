@@ -49,6 +49,7 @@ pub enum SeparatorDir {
 pub struct Separator {
 pub mut:
 	type_tag  int = kind_separator // тег типа, см. widget_tag.v
+	css       CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds    Rect
 	dir       SeparatorDir = .auto
 	thickness f32          = 1

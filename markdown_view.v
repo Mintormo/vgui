@@ -248,6 +248,7 @@ const md_checkbox_size = f32(13)
 pub struct MarkdownView {
 pub mut:
 	type_tag int = kind_markdown_view // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	// Колесо мыши: false - виджет его не берёт (прокрутка уходит
 	// контейнеру, например панели в ScrollBox)
 	wheel                 bool = true

@@ -122,6 +122,7 @@ fn mouse_btn_to_int(b MouseButton) int {
 pub struct Canvas {
 pub mut:
 	type_tag int = kind_canvas // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds   Rect
 	width    int
 	height   int
@@ -131,8 +132,8 @@ pub mut:
 	// passive - холст только рисует: события не берёт и в фокус-учёт не
 	// встаёт, ввод идёт виджету под ним (как у Icon/ImageBackground). Не
 	// путать с enabled = false - тот рисует холст неактивным (вуаль).
-	passive  bool
-	stretch  bool // false = fit (preserve aspect), true = stretch to bounds
+	passive bool
+	stretch bool // false = fit (preserve aspect), true = stretch to bounds
 	// ── Zoom / pan / scroll (image navigation) ──
 	// auto_fit = whole buffer scaled to fit bounds (the original behaviour). Once
 	// the user zooms or pans it turns off and zoom + scroll take over, with

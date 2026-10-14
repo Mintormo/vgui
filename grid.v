@@ -30,6 +30,7 @@ pub mut:
 pub struct GridLayout {
 pub mut:
 	type_tag    int = kind_grid // тег типа, см. widget_tag.v
+	css         CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds      Rect
 	cols        int = 1
 	rows        int = 1
@@ -310,7 +311,7 @@ pub fn (mut g GridLayout) draw(mut ctx RenderContext) {
 	}
 	ctx.begin_disabled(g.enabled)
 	for mut c in g.cells {
-		c.widget.draw(mut ctx)
+		ctx.draw_child(mut c.widget)
 	}
 	ctx.end_disabled(g.enabled)
 	if g.clip {

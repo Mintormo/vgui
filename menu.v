@@ -23,8 +23,9 @@ pub enum MenuItemKind {
 @[heap]
 pub struct MenuItem {
 pub mut:
-	type_tag  int = kind_menu_item // тег типа, см. widget_tag.v
-	text      string
+	type_tag int = kind_menu_item // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
+	text     string
 	// иконка слева от текста (Lucide, файл или байты, см. item_icon.v); у пункта-флажка
 	// на её месте галочка
 	icon ItemIcon
@@ -966,6 +967,7 @@ fn menu_install_overlay(mut ms MenuState, mut ctx RenderContext) {
 pub struct ContextMenu {
 pub mut:
 	type_tag int = kind_context_menu // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds   Rect
 	items    []&MenuItem
 	state    MenuState
@@ -1125,6 +1127,7 @@ mut:
 pub struct MenuBar {
 pub mut:
 	type_tag   int = kind_menu_bar // тег типа, см. widget_tag.v
+	css        CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds     Rect
 	entries    []MenuBarEntry
 	visible    bool = true

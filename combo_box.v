@@ -23,7 +23,7 @@ pub struct ComboItem {
 pub mut:
 	text      string
 	widget    &Widget = unsafe { nil } // if set, drawn instead of text
-	height    f32 // 0 = use ComboBox.item_height
+	height    f32      // 0 = use ComboBox.item_height
 	icon      ItemIcon // иконка слева от текста (item_icon.v); у пункта-виджета не рисуется
 	user_data voidptr = unsafe { nil }
 }
@@ -38,6 +38,7 @@ pub mut:
 pub struct ComboBox {
 pub mut:
 	type_tag int = kind_combo_box // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds   Rect
 	entries  []ComboItem
 	// Legacy mirror — kept in sync with entries for back-compat
@@ -473,7 +474,7 @@ fn (mut cb ComboBox) open_dropdown(mut ctx RenderContext) {
 				mut w := unsafe { entry.widget }
 				set_widget_bounds(mut w, item_r)
 				ctx.push_clip(item_r)
-				w.draw(mut ctx)
+				ctx.draw_child(mut w)
 				ctx.pop_clip()
 			} else {
 				tc := if i == cb.selected {

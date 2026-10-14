@@ -83,6 +83,7 @@ const tab_scroll_btn_sz = f32(22)
 pub struct TabBox {
 pub mut:
 	type_tag int = kind_tab_box // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	// Колесо мыши: false - виджет его не берёт (прокрутка уходит
 	// контейнеру, например панели в ScrollBox)
 	wheel       bool = true
@@ -752,7 +753,7 @@ pub fn (mut tb TabBox) draw(mut ctx RenderContext) {
 		cr := tb.content_rect(ctx)
 		ctx.push_clip(cr)
 		ctx.begin_disabled(tb.enabled)
-		tb.tabs[tb.active].widget.draw(mut ctx)
+		ctx.draw_child(mut tb.tabs[tb.active].widget)
 		ctx.end_disabled(tb.enabled)
 		ctx.pop_clip()
 	}

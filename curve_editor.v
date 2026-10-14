@@ -54,6 +54,7 @@ const ce_min_gap = f32(0.01) // минимальный зазор по x меж�
 pub struct CurveEditor {
 pub mut:
 	type_tag int = kind_curve_editor // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds   Rect
 	visible  bool         = true
 	enabled  bool         = true

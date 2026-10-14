@@ -28,6 +28,7 @@ module vgui
 pub struct DropZone {
 pub mut:
 	type_tag     int = kind_drop_zone // тег типа, см. widget_tag.v
+	css          CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds       Rect
 	text         string = 'Перетащите файлы сюда'
 	visible      bool   = true

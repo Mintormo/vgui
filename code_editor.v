@@ -107,6 +107,7 @@ fn ce_pos_max(a CePos, b CePos) CePos {
 pub struct CodeEditor {
 pub mut:
 	type_tag int = kind_code_editor // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	// text_rev - ревизия текста: растёт при каждой правке (save_undo, fire_change,
 	// set_text). По ней кэшируется ширина самой длинной строки (width_cache_*):
 	// раньше max_content_width мерила все строки каждый кадр и на каждое событие мыши.

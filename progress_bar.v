@@ -25,6 +25,7 @@ pub enum ProgressStyle {
 pub struct ProgressBar {
 pub mut:
 	type_tag      int = kind_progress_bar // тег типа, см. widget_tag.v
+	css           CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds        Rect
 	value         f32
 	visible       bool          = true

@@ -81,6 +81,7 @@ pub enum InputFilterMode {
 pub struct TextInput {
 pub mut:
 	type_tag    int = kind_text_input // тег типа, см. widget_tag.v
+	css         CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds      Rect
 	pad         f32 = 6
 	buf         []rune

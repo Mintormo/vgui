@@ -94,6 +94,7 @@ const lb_item_width_default = f32(120)
 pub struct ListBox {
 pub mut:
 	type_tag int = kind_list_box // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	// Колесо мыши: false - виджет его не берёт (прокрутка уходит
 	// контейнеру, например панели в ScrollBox)
 	wheel   bool = true
@@ -104,10 +105,10 @@ pub mut:
 	items       []string
 	selected    int = -1
 	scroll_y    f32
-	item_height f32  = 24
+	item_height f32 = 24
 	// размер иконки строки и зазор до текста (если у строк есть иконки)
-	icon_size f32 = 16
-	icon_gap  f32 = 6
+	icon_size   f32  = 16
+	icon_gap    f32  = 6
 	pad         f32  = 4
 	visible     bool = true
 	enabled     bool = true
@@ -1382,7 +1383,7 @@ pub fn (mut lb ListBox) draw(mut ctx RenderContext) {
 				if unsafe { cell.widget != nil } {
 					// Bounds set in arrange()
 					mut w := unsafe { cell.widget }
-					w.draw(mut ctx)
+					ctx.draw_child(mut w)
 				} else if cell.text.len > 0 {
 					ty := vp.y + (ih - fh) * 0.5
 					dx := lb.draw_row_icon(mut ctx, i, ix + lb_cell_pad, vp.y, ih, tc)
@@ -1434,7 +1435,7 @@ pub fn (mut lb ListBox) draw(mut ctx RenderContext) {
 							if unsafe { cell.widget != nil } {
 								// Custom widget — bounds set in arrange()
 								mut w := unsafe { cell.widget }
-								w.draw(mut ctx)
+								ctx.draw_child(mut w)
 							} else if cell.text.len > 0 {
 								// Text cell; иконка строки - в первой колонке слева,
 								// текст выравнивается в оставшейся части клетки

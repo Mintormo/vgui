@@ -58,6 +58,7 @@ vgui - самостоятельная библиотека, ничего не з
 - Иконки элементов (`ItemIcon`, `item_icon.v`)
 - Тестовый инструмент (`testkit.v`) и снапшоты рендера
 - Разметка интерфейса (.vui)
+- Стили CSS (`css.v`, `css_props.v`, `css_apply.v`)
 - Мост из фоновых потоков (`App.post`) и свой цикл событий
 - Глобальное изменяемое состояние — контракт «единственного главного потока»
 - Добавление нового виджета (часть библиотеки)
@@ -1091,7 +1092,8 @@ vbox pad=12 gap=8
 ```
 
 **Строка** — тип, затем в любом порядке: `"текст"` (экранирование `\" \\ \n \t`),
-`@ключ` — текст из перевода `tr('ключ')`, `#id`, `ключ=значение` (слово до пробела или
+`@ключ` — текст из перевода `tr('ключ')`, `#id`, `.класс` (для CSS, их может быть несколько; только
+у виджетов — у `tab`, `item`, `node`... ошибка; см. «Стили CSS»), `ключ=значение` (слово до пробела или
 `"строка"`), голое `слово` — флаг (`слово=true`; `true|false|yes|no|1|0`). Комментарий `//`
 до конца строки вне кавычек. Отступ — только пробелы (таб — ошибка); ребёнок правее родителя,
 соседи — строго на одном уровне. Корень один.
@@ -1159,6 +1161,126 @@ lang=`): **держите `Ui` живым**, пока жив интерфейс.
 ветка в `build_widget`/`build_leaf`, свойства — через `prop_*` (тогда «неприменимо» работает
 само), строка в таблице выше и в `ui_markup_test.v`.
 
+## Стили CSS (`css.v`, `css_props.v`, `css_apply.v`)
+
+С 14.10.2026. Таблица стилей в синтаксисе CSS поверх темы: по типу элемента, `#id`, `.классу`,
+с предками и состояниями. Пример — `examples/56_css_styles.v` + `56_styles.css` (hot-reload).
+
+```css
+:root            { --brand: #7c3aed; accent-color: var(--brand); border-radius: 10; }
+.sidebar         { background: #1f1b2e; color: #e9e4ff; }   /* vbox: заливка + текст всего поддерева */
+.sidebar list:selected { background: var(--brand); color: #fff; }
+.danger          { background: #dc2626; color: #fff; }
+#save:hover      { background: #8b5cf6; }
+menu             { background: #222; }                     /* попап - корневое правило */
+```
+
+**Главная идея: CSS не вводит второго способа рисовать.** Каждое свойство сводится к полям `Theme`
+(`button:hover background` → `button_hover`), а правило, подошедшее к виджету, рисует **его поддерево**
+с изменённой копией темы (`RenderContext.draw_child`). Почему так: все виджеты уже берут цвета из
+`ctx.theme` (сотни мест), и подмена темы сразу работает для всех ~50 типов без правки их `draw()`.
+Следствия, которые важно помнить:
+
+- **Состояния** (`:hover`, `:pressed`/`:active`, `:selected`, `:checked`, `:focus`, `:disabled`) — не
+  проверка состояния при отрисовке, а **выбор другого поля темы**. Когда каким цветом рисоваться, виджет
+  решает сам, как и без CSS. Поэтому состояние — только у последнего звена селектора (`.a:hover b` —
+  ошибка), и у свойства без поля темы для этого состояния (`button:hover { color }`) — ошибка.
+- **Наследование** получается само: тема действует на поддерево. `.sidebar { color }` красит весь текст
+  внутри. Обратная сторона: правило на контейнере меняет и потомков, читающих то же поле.
+- **Раскладку стили не трогают**: в CSS нет отступов, размеров, шрифтов. `measure()` от таблицы не
+  зависит, смена таблицы — только перерисовка. Исключение — `--control-height`: влияет на `measure()`,
+  поэтому разрешено только в `:root` (тема окна целиком; `apply_stylesheet` зовёт `invalidate_all`,
+  а он взводит и `layout_dirty`); в обычном правиле — ошибка.
+- Одно свойство может писать в несколько полей: `button { background }` пишет `button_bg`, `accent`,
+  `error_color`, `success` — иначе на кнопке `style=accent`/`danger` оно не сработало бы. Побочного эффекта
+  нет: копия темы живёт только на время отрисовки поддерева самой кнопки (но кольцо фокуса этой кнопки,
+  выводимое из `accent`, тоже сменит цвет).
+
+**Каскад.** Специфичность как в CSS (id > классы и состояние > типы), при равной — порядок в файле.
+Правила сортируются **один раз при разборе** (`css_sort_rules`), отрисовка применяет подошедшие подряд.
+Поля для каждого вида виджета тоже считаются при разборе (`CssDecl.fields_by_kind`), так что в кадре
+нет поиска по таблице свойств — только сопоставление селекторов и запись полей.
+
+**`draw_child` — контейнеры обязаны рисовать детей через неё**, не `w.draw(mut ctx)`. Указателя на
+родителя у виджета нет («Дерево виджетов»), поэтому цепочка предков для селекторов вида
+`.sidebar button` копится в `ctx.css_stack` по ходу обхода сверху вниз. Ребёнок, нарисованный мимо
+`draw_child`, не получает своих правил (тема предка до него всё равно доходит) и не виден как предок для
+своих детей. Через `draw_child` идут: корневые виджеты окна, `BoxLayout`, `Panel`, `Stack`, `Centered`,
+`ScrollBox`, `GridLayout`, `Splitter`, `TabBox`, `Accordion`, ячейки-виджеты `ListBox` и `ComboBox`.
+Внутренние части виджетов (поле ввода `Spinbox`, редактор `PropertyGrid`/`MarkdownView`) — намеренно
+мимо: это детали реализации, селектор `input` не должен их задевать. Без таблицы стилей `draw_child` —
+просто `w.draw()`; с таблицей, если ни одно правило не подошло, — без копии темы.
+
+**Заливка контейнеров.** У `vbox`, `hbox`, `grid`, `scroll`, `stack`, `centered` нет своего цвета фона
+в теме, поэтому `background` у них — не поле `Theme`, а заливка прямоугольника в `draw_child` перед
+`draw()` (особое «поле» `@fill`); скругление — только если правило задало `border-radius`. У `panel`
+`background` — это `panel_bg`.
+
+**Корневые правила** — `:root` и голые `menu`, `tooltip`, `notification`, `dropdown` (выпадающий список
+`ComboBox`). Они вшиваются в саму тему окна (`css_base_theme`), а не подменяются на время поддерева:
+попапы и уведомления рисуются **после** дерева, через оверлей, когда подменённой темы уже нет. Поэтому
+`menu`/`tooltip`/... с классами или предками — ошибка с подсказкой. `Window.config.theme` — тема без
+стилей, `ctx.theme` — с корневыми правилами; `apply_theme` и `apply_stylesheet` всегда пересобирают
+`ctx.theme` из `config.theme`, иначе корневые правила старой таблицы остались бы навсегда.
+
+**Метки виджетов.** У каждой структуры виджета **вторым полем** (после `type_tag`) — `css CssTags`
+(`id`, `classes`). Доступ без знания типа — интерфейс по полю `CssTagged`. **Менять через интерфейс —
+только присваиванием поля целиком** (`w.css = tags`): `w.css.classes << x` через интерфейс компилируется,
+но пишет во временную копию, и изменение молча теряется (V 0137eb5). Функции: `set_css_id`,
+`add_css_class`, `remove_css_class`, `has_css_class`, `css_tags_of`; .vui заполняет метки из `#id` и
+`.класс`. Как и все сеттеры, кадр не инвалидируют. Полноту поля проверяет `css_test.v` при компиляции.
+
+**Окно и приложение** — как темы: `App.set_stylesheet(ss)` — всем окнам и диалогам без своей таблицы
+и будущим; `Window.set_stylesheet(ss)` — своя (`css_explicit`); `nil` — без стилей.
+`App.load_stylesheet(path, watch)`: при `watch` файл опрашивается в `pump_events` раз в 500 мс
+(`poll_stylesheet`, по `mtime`), цикл `run()` просыпается минимум раз в 100 мс, так что опрос идёт и в
+простое. **Ошибка в изменённом файле не роняет приложение**: печатается в stderr, стили остаются
+прежними. Первая загрузка с ошибкой — ошибка `load_stylesheet`.
+
+**Значения и ошибки.** Цвета `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba()` (альфа 0..1),
+несколько имён; числа `8`/`8px`. `transparent` и альфа 0 — ошибка: тема читает альфу 0 как «не задано».
+Переменные — только в `:root`, подставляются текстом при разборе (одна область на файл, не каскадом
+по дереву). `--имя-поля: значение` — прямой доступ к любому полю `Theme` (`--lb-row-alt-bg`), без
+состояния. Ошибки громкие, с местом: неизвестный тип/свойство/состояние (с перечнем допустимых свойств),
+неверный тип значения, `!important`, `@media`, незакрытый блок, дубль свойства в блоке.
+
+**Ограничения (намеренно, пока):** нет шрифтов, отступов, размеров; нет состояний предков
+(`.panel:hover button`), `:not()`, `+`/`~`, атрибутов; переменные не каскадируются; попапы стилизуются
+только корневыми правилами. C-ABI и Python — пока нет.
+
+**Свойства** (`css_prop_table`; общие строки действуют для всех типов, своя строка типа перекрывает
+общую):
+
+| Тип | Свойства (`:состояние свойство` — поле для состояния) |
+|---|---|
+| любой | `color`, `:disabled color`, `secondary-color`, `placeholder-color`, `accent-color` (+ `:hover`, `:pressed`), `accent-text-color`, `border-radius`, `focus-ring-color`, `focus-ring-width`, `scrollbar-color` (+ `:hover`, `:pressed`), `scrollbar-track-color`, `success-/warning-/error-/info-color`, `shadow-color` |
+| `:root` | всё общее + `background`, `surface-color`, `panel-background`, `border-color`, `input-background`, `input-border-color`, `modal-backdrop-color` |
+| `button`, `menubutton` | `background` (+ `:hover`, `:pressed`, `:disabled`), `color`, `border-color` (+ `:disabled`) |
+| `input`, `textarea` | `background`, `border-color`, `:focus border-color` |
+| `spinbox` | `background`, `border-color`, `color`, `button-background` (+ `:hover`) |
+| `code` | `background`, `border-color`, `color`, `gutter-background`, `gutter-color`, `current-line-background`, `selection-background`, `caret-color` |
+| `combo` | `background`, `border-color`, `color`, `arrow-color` (список — `dropdown`) |
+| `checkbox`, `radio`, `toggle` | `background` (+ `:checked` у checkbox/toggle), `border-color`, `mark-color`; у toggle — `thumb-color` |
+| `slider`, `progress`, `spinner` | `track-color`/`background`, `fill-color`, `thumb-color`, `tick-color`; progress — `color`; spinner — `color`, `background` |
+| `list`, `table`, `propertygrid` | `background`, `alt-row-background`, `border-color`, `color`, `grid-color`, `header-background`, `header-color`, `:hover background`, `:selected background`, `:selected color`; list/table — `header-border-color`; table — `rownum-*`, `current-line-background`; propertygrid — `group-*`, `splitter-color` |
+| `tree` | `background`, `border-color`, `color`, `guide-color`, `arrow-color`, `:hover`/`:selected background`, `:selected color` |
+| `panel` | `background`, `border-color` |
+| `vbox`, `hbox`, `grid`, `scroll`, `stack`, `centered` | `background` (заливка) |
+| `tabs` | `background`, `strip-background`, `tab-background` (+ `:hover`, `:selected`), `color` (+ `:selected`, `:disabled`), `border-color`, `indicator-color` |
+| `accordion` | `background`, `header-background` (+ `:hover`), `header-color`, `border-color`, `arrow-color` |
+| `split` | `handle-color` (+ `:hover`) |
+| `menubar` | `background` (+ `:hover`, `:pressed`), `color` |
+| `separator`, `breadcrumbs`, `plot`, `markdown` | см. `css_prop_table` |
+| `menu`, `tooltip`, `notification`, `dropdown` | только корневые: `background`, `border-color`, `color`, …; menu — `:hover`, `separator-color`, `shortcut-color`; dropdown — `:hover`/`:selected` |
+
+Имена типов — как в .vui; кроме того `image`, `colorpicker`, `datepicker`, `badge`, `calendar`, `dropzone`,
+`canvas`, `icon`, `curve` (у них только общие свойства). Новое свойство — строка в `css_prop_table` (тест
+проверяет, что поле есть в `Theme`) и строка в этой таблице.
+
+Тесты — `css_test.v`: разбор и ~20 видов ошибок, полнота таблицы, каскад, сопоставление селекторов
+(включая возврат при `>`), метки и .vui, живая отрисовка (цвет пикселей, восстановление темы, заливка,
+корневые правила при смене темы), hot-reload с ошибкой в файле.
+
 ## Мост из фоновых потоков (`App.post`) и свой цикл событий
 
 Вся vgui однопоточна (см. «Глобальное изменяемое состояние» ниже).
@@ -1186,7 +1308,8 @@ vgui построена на десятках `__global`-слайсов/map и �
 
 Полный чек-лист с C-ABI - vgui-capi/PROJECT.md, «Добавление нового виджета»; Python-класс - vguipy/PROJECT.md. В самой библиотеке:
 
-- **первым полем** структуры - `type_tag int = kind_<name>`, константа - в `widget_kinds.v`, строка - в `widget_tag_test.v` («Тег типа виджета»);
+- **первым полем** структуры - `type_tag int = kind_<name>`, константа - в `widget_kinds.v`, строка - в `widget_tag_test.v` («Тег типа виджета»); **вторым** - `css CssTags` (метки для CSS) и строка в `css_test.v` (`test_every_widget_type_has_css_tags`); имя типа для селекторов - в `css_kind_by_name` («Стили CSS»);
+- контейнер рисует детей через `ctx.draw_child(mut w)`, а не `w.draw(mut ctx)` - иначе правила CSS с предками его не видят («Стили CSS»);
 - реализовать `bounds_of()`/`set_bounds()` для нового типа в `widget_tree.v` (интерфейс `Layouted`) — **критично**: без этого `get_widget_bounds`/`set_widget_bounds` не узнают тип, поле `bounds` виджета никогда не выставляется движком компоновки, и он рендерится в (0,0) с нулевым размером, то есть невидим. Плюс, если новый тип — контейнер, реально держащий детей-`Widget`: `child_widgets()` (`HasChildren`); `arrange()` (`Arrangeable`) — bounds детям выставляются только там, не в `draw()` (см. «Фаза arrange»); `hit_children()` (`HitTestable`) — если `arrange()` выставляет `bounds` не всем детям, а только части (активная вкладка, развёрнутая секция, видимый диапазон строк); и собственное топ-уровневое поле `visible bool`, а не спрятанное во вложенной структуре (иначе `HasVisibility` его не увидит и `widget_at` будет попадать в скрытый виджет — та же ловушка, что у `HBox`/`VBox`). Добавьте заодно проверку в `widget_tree_test.v` — тест не самопроверяющийся, забытый тип он молча пропустит. См. раздел «Дерево виджетов» выше
 - по желанию — `measure()` в `layout_measure.v`: без него виджет в `add(w)` занимает свободное место, а в окно по содержимому, `fit_to_content` и дорожки сетки входит своими текущими `bounds`. **Внутренний вспомогательный виджет без `measure()` в окне по содержимому ломает раскладку** (так было с `CpPreview` палитры: «растягивающийся во все стороны» ряд съедал высоту) — давайте `measure()` и им
 - поле `enabled bool = true` и неактивный вид: в `draw()` - `en := ctx.is_enabled(w.enabled)` и дальше только `en`; focusable при `!en` зовёт `ctx.focus_block(&w)` вместо регистрации; сложному содержимому - `ctx.draw_disabled_veil`; контейнер рисует детей между `begin_disabled`/`end_disabled` и при `!enabled` не отдаёт им ввод (`is_input_event`). Без этого `set_enabled` на новом виджете молча ничего не делает. См. «Неактивное состояние (enabled)»

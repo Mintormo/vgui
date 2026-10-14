@@ -50,6 +50,7 @@ struct TaUndoEntry {
 pub struct TextArea {
 pub mut:
 	type_tag int = kind_text_area // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	// Колесо мыши: false - виджет его не берёт (прокрутка уходит
 	// контейнеру, например панели в ScrollBox)
 	wheel       bool = true

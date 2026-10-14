@@ -47,6 +47,7 @@ pub enum PropertyKind {
 pub struct Property {
 pub mut:
 	type_tag   int = kind_property // тег типа, см. widget_tag.v
+	css        CssTags // #id и классы для селекторов CSS (css_apply.v)
 	name       string
 	kind       PropertyKind
 	str_val    string
@@ -257,6 +258,7 @@ const pg_sb_w = f32(12)
 pub struct PropertyGrid {
 pub mut:
 	type_tag int = kind_property_grid // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	// Колесо мыши: false - виджет его не берёт (прокрутка уходит
 	// контейнеру, например панели в ScrollBox)
 	wheel       bool = true

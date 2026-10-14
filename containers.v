@@ -307,7 +307,7 @@ fn (mut b BoxLayout) draw_impl(mut ctx RenderContext) {
 	}
 	ctx.begin_disabled(b.enabled)
 	for mut c in b.children {
-		c.widget.draw(mut ctx)
+		ctx.draw_child(mut c.widget)
 	}
 	ctx.end_disabled(b.enabled)
 	if b.clip {
@@ -370,6 +370,7 @@ fn is_bounds_unset(b Rect) bool {
 pub struct HBox {
 pub mut:
 	type_tag int = kind_hbox // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	box      BoxLayout
 }
 
@@ -459,6 +460,7 @@ pub fn (mut h HBox) handle_event(event &GuiEvent, app &App) bool {
 pub struct VBox {
 pub mut:
 	type_tag int = kind_vbox // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	box      BoxLayout
 }
 
@@ -547,6 +549,7 @@ pub fn (mut v VBox) handle_event(event &GuiEvent, app &App) bool {
 pub struct Panel {
 pub mut:
 	type_tag int = kind_panel // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds   Rect
 	bg       Color   = Color{0, 0, 0, 0}
 	border   Color   = Color{0, 0, 0, 0}
@@ -596,7 +599,7 @@ pub fn (mut p Panel) draw(mut ctx RenderContext) {
 		// панелью: за её рамку тень содержимого выходить не должна.
 		ctx.push_clip(inner.expanded(ctx.visual_margin()).intersection(p.bounds))
 		ctx.begin_disabled(p.enabled)
-		p.child.draw(mut ctx)
+		ctx.draw_child(mut p.child)
 		ctx.end_disabled(p.enabled)
 		ctx.pop_clip()
 	}
@@ -620,6 +623,7 @@ pub fn (mut p Panel) handle_event(event &GuiEvent, app &App) bool {
 pub struct Stack {
 pub mut:
 	type_tag int = kind_stack // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds   Rect
 	children []&Widget
 	visible  bool  = true
@@ -671,7 +675,7 @@ pub fn (mut s Stack) draw(mut ctx RenderContext) {
 	}
 	ctx.begin_disabled(s.enabled)
 	for mut c in s.children {
-		c.draw(mut ctx)
+		ctx.draw_child(mut c)
 	}
 	ctx.end_disabled(s.enabled)
 }
@@ -696,6 +700,7 @@ pub fn (mut s Stack) handle_event(event &GuiEvent, app &App) bool {
 pub struct Spacer {
 pub mut:
 	type_tag int = kind_spacer // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds   Rect
 	visible  bool = true
 	enabled  bool = true // ни на что не влияет: флаг для единообразия set_enabled
@@ -724,6 +729,7 @@ pub fn (mut s Spacer) handle_event(event &GuiEvent, app &App) bool {
 pub struct Centered {
 pub mut:
 	type_tag int = kind_centered // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds   Rect
 	child_w  f32     = 200
 	child_h  f32     = 40
@@ -782,7 +788,7 @@ pub fn (mut c Centered) draw(mut ctx RenderContext) {
 	}
 	if unsafe { c.child != nil } {
 		ctx.begin_disabled(c.enabled)
-		c.child.draw(mut ctx)
+		ctx.draw_child(mut c.child)
 		ctx.end_disabled(c.enabled)
 	}
 }
@@ -830,6 +836,7 @@ pub enum ScrollDir {
 pub struct ScrollBox {
 pub mut:
 	type_tag int = kind_scroll_box // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	// Колесо мыши: false - виджет его не берёт (прокрутка уходит
 	// контейнеру, например панели в ScrollBox)
 	// wheel        bool = true
@@ -1146,7 +1153,7 @@ pub fn (mut s ScrollBox) draw(mut ctx RenderContext) {
 
 	ctx.begin_disabled(s.enabled)
 	for mut c in s.children {
-		c.draw(mut ctx)
+		ctx.draw_child(mut c)
 	}
 	ctx.end_disabled(s.enabled)
 

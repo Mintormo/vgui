@@ -74,6 +74,7 @@ mut:
 pub struct Breadcrumbs {
 pub mut:
 	type_tag int = kind_breadcrumbs // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds   Rect
 	items    []string
 	visible  bool = true

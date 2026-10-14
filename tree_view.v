@@ -37,6 +37,7 @@ module vgui
 pub struct TreeNode {
 pub mut:
 	type_tag int = kind_tree_node // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	text     string
 	icon     ItemIcon // иконка слева от текста (item_icon.v); ItemIcon{} - нет
 	expanded bool = true
@@ -197,6 +198,7 @@ const tv_max_edit_undo = 50
 pub struct TreeView {
 pub mut:
 	type_tag int = kind_tree_view // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	// Кэш плоского списка и размера содержимого (build_flat/content_size зовутся из
 	// draw, hit-test, has_vsb, max_scroll_* - раньше каждый раз заново, с измерением
 	// текста всех видимых узлов). Ключ - отпечаток видимой части дерева (tree_fingerprint),

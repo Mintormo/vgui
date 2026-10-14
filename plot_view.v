@@ -85,6 +85,7 @@ const plot_max_span = f32(1_000_000.0)
 pub struct PlotView {
 pub mut:
 	type_tag int = kind_plot_view // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	// Колесо мыши: false - виджет его не берёт (прокрутка уходит
 	// контейнеру, например панели в ScrollBox)
 	wheel   bool = true

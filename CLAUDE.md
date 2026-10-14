@@ -145,6 +145,10 @@ mode. Масштаб рендера выставляется заново пос
 `ctx.set_overlay(owner, draw, ev, close)` / `ctx.clear_overlay(owner)`, никогда не присваивание
 `overlay_cb`/`overlay_ev`. `owner` - адрес самого виджета.
 
+**Стили CSS** («Стили CSS»). Контейнер рисует детей через `ctx.draw_child(mut w)`, не `w.draw(mut ctx)` -
+иначе правила с предками (`.bar button`) его не видят. Стиль = подмена `ctx.theme` на время поддерева;
+раскладку стили не меняют. Метки - поле `css CssTags`; через интерфейс менять только присваиванием целиком.
+
 **Нативные диалоги, трей, drag-and-drop** - соответствующие разделы PROJECT.md. Коротко: `message_box`
 кастомный (не `SDL_ShowMessageBox`); нативного диалога цвета/даты нет; трей - не виджет, клика по иконке
 в SDL3 нет.
@@ -154,7 +158,8 @@ mode. Масштаб рендера выставляется заново пос
 В библиотеке (подробно - PROJECT.md, «Добавление нового виджета (часть библиотеки)»):
 
 1. Константа `kind_<name>` в `widget_kinds.v` (следующий свободный номер); структура виджета **первым полем**
-   `type_tag int = kind_<name>` + строка в `widget_tag_test.v`.
+   `type_tag int = kind_<name>` + строка в `widget_tag_test.v`; вторым - `css CssTags` + строка в `css_test.v`,
+   имя для селекторов - в `css_kind_by_name` (`css_props.v`).
 2. `widget_tree.v`: `bounds_of`/`set_bounds` (+ `child_widgets`/`hit_children` для контейнеров, собственное
    поле `visible bool`) и проверка в `widget_tree_test.v`. Контейнер - ещё `arrange()`.
 3. Поле `enabled bool = true` и неактивный вид через `en := ctx.is_enabled(...)` (сложному содержимому -

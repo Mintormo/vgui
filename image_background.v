@@ -38,6 +38,7 @@ pub enum BgMode {
 pub struct ImageBackground {
 pub mut:
 	type_tag      int = kind_image_background // тег типа, см. widget_tag.v
+	css           CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds        Rect
 	path          string
 	mode          BgMode = .fill

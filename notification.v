@@ -47,6 +47,7 @@ pub enum NotificationAnim {
 pub struct Notification {
 pub mut:
 	type_tag int = kind_notification // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds   Rect
 	// Область, перерисованная по анимации в прошлом кадре (anim_area): если менеджер
 	// сдвинул уведомление, старое место тоже нужно стереть.
@@ -646,6 +647,7 @@ pub enum NotificationPosition {
 pub struct NotificationManager {
 pub mut:
 	type_tag      int = kind_notification_manager // тег типа, см. widget_tag.v
+	css           CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds        Rect
 	notifications []&Notification
 	visible       bool                 = true

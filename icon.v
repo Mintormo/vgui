@@ -20,6 +20,7 @@ module vgui
 pub struct Icon {
 pub mut:
 	type_tag int = kind_icon // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds   Rect
 	name     string // имя глифа Lucide (например "save"), см. icon_names.v
 	size     int = 16 // размер глифа в логических пикселях (до умножения на ui_scale)

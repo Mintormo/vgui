@@ -120,3 +120,4 @@ v -enable-globals run examples/01_label.v
 | `53_animation.v` | Анимации своего виджета — `Anim`: `.tween` + `Easing` (8 кривых), `.smooth` для hover, `mark_anim_rect` |
 | `54_item_icons.v` | Иконки элементов — `ItemIcon` (Lucide, файл, байты) в меню, дереве, списке, вкладках, ComboBox, MenuButton, Accordion |
 | `55_disabled_state.v` | Неактивное состояние — `enabled = false` у виджета, у контейнера (гасит всё содержимое, флаги детей не трогает) и у пункта меню |
+| `56_css_styles.v` | Стили CSS (`56_styles.css`) — селекторы по типу, `.классу`, `#id`, предкам, состояния `:hover`/`:selected`, `:root` и переменные; файл перечитывается при сохранении |

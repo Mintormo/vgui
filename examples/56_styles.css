@@ -1,0 +1,48 @@
+/* Стили примера 56_css_styles.v.
+   Пока пример запущен, правьте этот файл и сохраняйте - окно перерисуется само.
+   Ошибка в файле не роняет пример: она печатается в терминал, стили остаются прежними. */
+
+:root {
+	--brand: #7c3aed;
+	--brand-hover: #8b5cf6;
+	accent-color: var(--brand);
+	border-radius: 10;
+}
+
+/* Боковая панель: свой фон, и всё внутри неё - светлым текстом */
+.sidebar {
+	background: #1f1b2e;
+	color: #e9e4ff;
+}
+.sidebar list {
+	background: #1f1b2e;
+	border-color: #3b3355;
+	color: #e9e4ff;
+	header-background: #2d2742;
+	header-color: #e9e4ff;
+}
+.sidebar list:hover { background: #2d2742; }
+.sidebar list:selected { background: var(--brand); color: #ffffff; }
+
+/* Карточка с полями формы. Полупрозрачный фон - подкрашивает любую тему,
+   светлую и тёмную (переключатель «Тёмная тема» в примере) */
+.card {
+	background: rgba(124, 58, 237, 0.08);
+	border-radius: 14;
+}
+.card input { border-color: #c9bfe6; }
+.card input:focus { border-color: var(--brand); }
+
+/* Кнопки по классам и по #id */
+button { border-color: #c9bfe6; }
+button:hover { background: rgba(124, 58, 237, 0.18); }
+.danger { background: #dc2626; color: #ffffff; border-color: #b91c1c; }
+.danger:hover { background: #ef4444; }
+#save { background: var(--brand); color: #ffffff; }
+#save:hover { background: var(--brand-hover); }
+
+toggle:checked { background: var(--brand); }
+progress { fill-color: #16a34a; }
+
+/* Попапы - только корневыми правилами: они рисуются вне дерева окна */
+tooltip { background: #1f1b2e; color: #e9e4ff; border-color: #3b3355; }

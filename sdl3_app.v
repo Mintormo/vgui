@@ -68,6 +68,12 @@ pub mut:
 	active_ctx &RenderContext = unsafe { nil }
 	hotkeys    HotkeyManager
 	cleaned    bool
+	// Таблица стилей приложения (css_apply.v; nil - нет) и слежение за её
+	// файлом: css_path непуст при load_stylesheet(path, true).
+	stylesheet     &Stylesheet = unsafe { nil }
+	css_path       string
+	css_mtime      i64
+	css_next_check u64
 	trays      []&Tray
 	// When a tray is active the loop must keep running even with every
 	// window hidden (hide-to-tray), so don't auto-quit on "no open windows".
@@ -154,6 +160,9 @@ pub fn (mut app App) add_window(w &Window) {
 	if !win.theme_explicit {
 		win.apply_theme(app.config.theme)
 	}
+	if !win.css_explicit && !isnil(app.stylesheet) {
+		win.apply_stylesheet(app.stylesheet)
+	}
 	app.windows << win
 }
 
@@ -163,6 +172,9 @@ pub fn (mut app App) add_dialog(d &Dialog) {
 	mut dlg := unsafe { d }
 	if !dlg.win.theme_explicit {
 		dlg.win.apply_theme(app.config.theme)
+	}
+	if !dlg.win.css_explicit && !isnil(app.stylesheet) {
+		dlg.win.apply_stylesheet(app.stylesheet)
 	}
 	app.dialogs << dlg
 }
@@ -276,6 +288,12 @@ pub fn (mut app App) pump_events() bool {
 	// rendering, so they may touch widgets freely.
 	posted := app.drain_posted()
 
+	// Файл стилей изменился (load_stylesheet(path, true)) - перечитать.
+	// set_stylesheet сам инвалидирует окна; true - нужен кадр. Цикл run()
+	// просыпается минимум раз в 100 мс (SDL_WaitEventTimeout), так что
+	// опрос идёт и в простое.
+	restyled := app.poll_stylesheet()
+
 	// Pump tray menus — required on some platforms (notably macOS)
 	// for entry state changes to take effect. A tray click is delivered
 	// here (via DBus on Linux) and fires its callback synchronously, but
@@ -299,7 +317,7 @@ pub fn (mut app App) pump_events() bool {
 		app.invalidate_all_windows()
 	}
 
-	return had_events || posted || tray_acted
+	return had_events || posted || tray_acted || restyled
 }
 
 // update_running гасит running, когда не осталось ни одного открытого окна.

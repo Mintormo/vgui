@@ -20,6 +20,7 @@ import time
 pub struct DatePicker {
 pub mut:
 	type_tag  int = kind_date_picker // тег типа, см. widget_tag.v
+	css       CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds    Rect
 	year      int
 	month     int // 1-12

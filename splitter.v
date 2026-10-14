@@ -53,6 +53,7 @@ pub enum SplitDir {
 pub struct Splitter {
 pub mut:
 	type_tag   int = kind_splitter // тег типа, см. widget_tag.v
+	css        CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds     Rect
 	dir        SplitDir = .horizontal
 	ratio      f32      = 0.5               // 0..1, fraction of space for first pane
@@ -278,7 +279,7 @@ pub fn (mut s Splitter) draw(mut ctx RenderContext) {
 	if unsafe { s.first != nil } {
 		fr := s.first_rect()
 		ctx.push_clip(fr)
-		s.first.draw(mut ctx)
+		ctx.draw_child(mut s.first)
 		ctx.pop_clip()
 	}
 
@@ -286,7 +287,7 @@ pub fn (mut s Splitter) draw(mut ctx RenderContext) {
 	if unsafe { s.second != nil } {
 		sr := s.second_rect()
 		ctx.push_clip(sr)
-		s.second.draw(mut ctx)
+		ctx.draw_child(mut s.second)
 		ctx.pop_clip()
 	}
 	ctx.end_disabled(s.enabled)

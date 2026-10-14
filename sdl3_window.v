@@ -246,6 +246,9 @@ pub mut:
 	// Тема задана явно (WindowConfig.theme или set_theme). Иначе окно
 	// следует теме приложения: add_window и App.set_theme её применяют.
 	theme_explicit bool
+	// Таблица стилей задана окну явно (Window.set_stylesheet) - таблица
+	// приложения (App.set_stylesheet) его больше не меняет. Как theme_explicit.
+	css_explicit bool
 	// True while this window holds its reference to ctx.fonts in g_font_cache
 	// (see font_cache.v). Guards against a double release_fonts in cleanup().
 	fonts_held bool
@@ -736,7 +739,8 @@ pub fn (mut w Window) set_theme(theme Theme) {
 
 // apply_theme меняет тему, не делая её явной - путь темы приложения.
 fn (mut w Window) apply_theme(theme Theme) {
-	w.ctx.theme = theme
+	// config.theme - тема без стилей; ctx.theme - с корневыми правилами CSS (css_apply.v)
+	w.ctx.theme = css_base_theme(theme, w.ctx.stylesheet)
 	w.config.theme = theme
 	w.ctx.clear_text_cache()
 }
@@ -1170,8 +1174,11 @@ fn (mut w Window) render() {
 			w.bg_image.bounds = screen_rect
 			w.bg_image.draw(mut w.ctx)
 		}
+		// через draw_child - чтобы корневые виджеты тоже получали стили CSS;
+		// стек предков на всякий случай пуст в начале кадра
+		w.ctx.css_stack.clear()
 		for mut widget in w.widgets {
-			widget.draw(mut w.ctx)
+			w.ctx.draw_child(mut widget)
 		}
 
 		if !full {

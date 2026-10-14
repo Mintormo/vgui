@@ -48,6 +48,7 @@ pub enum ButtonStyle {
 pub struct Button {
 pub mut:
 	type_tag int = kind_button // тег типа, см. widget_tag.v
+	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds   Rect
 	text     string
 	style    ButtonStyle = .normal
