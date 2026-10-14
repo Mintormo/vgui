@@ -11,6 +11,9 @@ import os
 // Изменение намеренное - перезаписать эталоны и закоммитить их вместе с правкой:
 //   VGUI_UPDATE_SNAPSHOTS=1 v -enable-globals test snapshot_test.v
 //
+// Сцены с действиями (наведение, нажатие, фокус, открытые попапы, CSS) - в
+// snapshot_ui_test.v.
+//
 // В сценах нет ничего, что зависит от времени или даты (спиннер, мигающий
 // курсор, «сегодня» календаря): кадр обязан быть одинаковым при каждом запуске.
 //
@@ -21,11 +24,18 @@ const snapshot_dir = os.join_path(@VMODROOT, 'testdata', 'snapshots')
 // snap рисует сцену build в окне w×h в обеих темах и сверяет с эталонами
 // <name>_light.png / <name>_dark.png.
 fn snap(name string, w int, h int, build fn () &Widget) ! {
+	snap_scaled(name, w, h, 1, build)!
+}
+
+// snap_scaled - то же при ui_scale окна (HiDPI): кадр снимается в физических
+// пикселях, то есть w*scale × h*scale. Дробный масштаб (1.25) - отдельный риск:
+// привязка глифов к пиксельной сетке (PROJECT.md, «Архитектура рендеринга»).
+fn snap_scaled(name string, w int, h int, scale f32, build fn () &Widget) ! {
 	for theme_name, theme in {
 		'light': light_theme()
 		'dark':  dark_theme()
 	} {
-		mut t := new_test_ui(width: w, height: h, theme: theme)!
+		mut t := new_test_ui(width: w, height: h, theme: theme, ui_scale: scale)!
 		t.add(build())
 		t.redraw()
 		t.match_snapshot(os.join_path(snapshot_dir, '${name}_${theme_name}.png')) or {
@@ -191,6 +201,18 @@ fn test_snapshot_text() {
 
 fn test_snapshot_containers() {
 	snap('containers', 480, 380, scene_containers)!
+}
+
+// HiDPI: те же галереи при ui_scale 1.25 (дробный - самый капризный для
+// текста) и 2. Размер окна в логических единицах тот же.
+fn test_snapshot_controls_hidpi() {
+	snap_scaled('controls_x125', 480, 360, 1.25, scene_controls)!
+	snap_scaled('controls_x2', 480, 360, 2, scene_controls)!
+}
+
+fn test_snapshot_lists_hidpi() {
+	snap_scaled('lists_x125', 480, 360, 1.25, scene_lists)!
+	snap_scaled('lists_x2', 480, 360, 2, scene_lists)!
 }
 
 // Неактивное состояние (enabled.v): те же галереи с отключённым корнем - всё
