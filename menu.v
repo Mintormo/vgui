@@ -424,19 +424,18 @@ fn menu_shortcut_matches(shortcut string, event &GuiEvent) bool {
 		return false
 	}
 
-	// ── Single character keys (a-z, 0-9) ──
+	// ── Single character keys (a-z, 0-9, - = [ ] ; ' , . / …) ──
+	// Сначала по символу (keycode зависит от раскладки), затем по физической
+	// клавише — scancode той же клавиши в раскладке US. Без второго шага
+	// сочетания вроде «[» не работали в русской раскладке: там эта клавиша даёт
+	// «х» (SDL3 по умолчанию переводит в латиницу только буквенные клавиши).
 	if key_part.len == 1 {
 		ch := key_part[0]
-		// Letters a-z → SDLK codes 97-122
-		if ch >= `a` && ch <= `z` {
-			return event.keycode == int(ch)
+		if event.keycode == int(ch) {
+			return true
 		}
-		// Digits 0-9 → SDLK codes 48-57
-		if ch >= `0` && ch <= `9` {
-			return event.keycode == int(ch)
-		}
-		// Other single chars (-, =, [, ], etc.)
-		return event.keycode == int(ch)
+		sc := us_scancode(ch)
+		return sc > 0 && event.scancode == sc
 	}
 
 	// ── Named keys ──
@@ -1555,4 +1554,31 @@ pub fn (mut mb MenuBar) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	return false
+}
+
+// us_scancode — SDL-scancode клавиши, которая в раскладке US печатает символ ch
+// (строчные буквы, цифры, пунктуация основного ряда); 0 — нет такой клавиши.
+// Значения — из SDL_scancode.h (USB HID usage page 0x07).
+fn us_scancode(ch u8) int {
+	if ch >= `a` && ch <= `z` {
+		return 4 + int(ch - `a`)
+	}
+	if ch >= `1` && ch <= `9` {
+		return 30 + int(ch - `1`)
+	}
+	return match ch {
+		`0` { 39 }
+		`-` { 45 }
+		`=` { 46 }
+		`[` { 47 }
+		`]` { 48 }
+		`\\` { 49 }
+		`;` { 51 }
+		`'` { 52 }
+		`\`` { 53 }
+		`,` { 54 }
+		`.` { 55 }
+		`/` { 56 }
+		else { 0 }
+	}
 }
