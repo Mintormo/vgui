@@ -1,5 +1,6 @@
 module vgui
 
+import math
 import strconv
 
 // ═══════════════════════════════════════════════════════
@@ -30,11 +31,14 @@ import strconv
 //   * раскладка/отрисовка: measure() - layout_measure.v (константный scrollable_hint); виджетам
 //     в ячейках bounds раздаёт arrange() (только для видимых строк), draw() их лишь рисует;
 //     hit_children - widget_tree.v; фокус - focus.v (register_list_box/focus_list_box);
-//   * события: handle_event (ниже) - единый обработчик с приоритетом активных перетаскиваний.
+//   * события: handle_event (ниже) - единый обработчик с приоритетом активных перетаскиваний;
+//   * виртуальный режим (set_virtual, раздел «Виртуальный режим» ниже): строк в rows нет,
+//     число строк и текст ячеек - от приложения (колбэк для видимых строк). Код, которому
+//     всё равно, откуда данные, ходит через row_total/cell_text/item_text/row_icon/cell_widget.
 //
-// Header is always read-only. Sort buttons are optional
-// per-column (show_sort flag). Clicking sort reorders rows
-// (auto_sort) and fires on_sort.
+// Шапка только для чтения. Сортировка - по колонкам с show_sort: щелчок по всему
+// заголовку колонки (не только по стрелке) переключает направление, при auto_sort
+// переставляет строки и зовёт on_sort. Вид шапки - draw_header.
 // ═══════════════════════════════════════════════════════
 
 // Направление сортировки колонки: none_ (не сортируется, имя с подчёркиванием - none зарезервировано), по возрастанию, по убыванию.
@@ -181,9 +185,21 @@ pub mut:
 	// Множественный выбор (multi_select): sel_multi - выбор задан
 	// sel_marks (иначе выбрана одна строка selected), sel_anchor - начало
 	// диапазона для Shift
+	// Инвариант: sel_marks отсортирован по возрастанию и без повторов - тогда
+	// is_row_selected (зовётся на каждую видимую строку каждого кадра) ищет двоичным
+	// поиском, а Shift-диапазон на сотни тысяч строк строится без квадратичных проверок
+	// «уже есть ли».
 	sel_multi  bool
 	sel_marks  []int
 	sel_anchor int = -1
+	// Виртуальный режим (set_virtual): строки не хранятся, ListBox знает только их
+	// число virtual_count и спрашивает текст ячейки (row, col) у virtual_text, а
+	// иконку строки - у virtual_icon (nil - без иконок). Менять через set_virtual/
+	// set_virtual_count/set_virtual_icons/clear_virtual.
+	is_virtual    bool
+	virtual_count int
+	virtual_text  fn (row int, col int) string = unsafe { nil }
+	virtual_icon  fn (row int) ItemIcon        = unsafe { nil }
 }
 
 // ─── Constructors ──────────────────────────────────────
@@ -423,10 +439,11 @@ fn (lb &ListBox) row_cmp(a &LbRow, b &LbRow, col int) int {
 }
 
 // resort переставляет строки по текущему индикатору сортировки (без него -
-// исходный порядок добавления); выбор следует за строками.
+// исходный порядок добавления); выбор следует за строками. В виртуальном режиме
+// строк в ListBox нет - порядок задаёт приложение (on_sort), здесь ничего не делается.
 pub fn (mut lb ListBox) resort() {
 	n := lb.rows.len
-	if n < 2 {
+	if n < 2 || lb.is_virtual {
 		return
 	}
 	col := lb.sorted_col()
@@ -460,7 +477,10 @@ pub fn (mut lb ListBox) resort() {
 	}
 	lb.selected = remap(lb.selected)
 	lb.sel_anchor = remap(lb.sel_anchor)
-	lb.sel_marks = lb.sel_marks.map(remap(it))
+	// после перестановки отметки снова сортируем (инвариант sel_marks)
+	mut marks := lb.sel_marks.map(remap(it))
+	marks.sort()
+	lb.sel_marks = marks
 	lb.hover_index = -1
 }
 
@@ -562,11 +582,10 @@ pub fn (mut lb ListBox) set_row_cell_widget(row int, col int, widget &Widget) {
 	}
 }
 
+// get_row_cell_text - текст ячейки (row, col); в виртуальном режиме - от колбэка
+// virtual_text. Неверные индексы - ''.
 pub fn (lb &ListBox) get_row_cell_text(row int, col int) string {
-	if row >= 0 && row < lb.rows.len && col >= 0 && col < lb.rows[row].cells.len {
-		return lb.rows[row].cells[col].text
-	}
-	return ''
+	return lb.cell_text(row, col)
 }
 
 pub fn (mut lb ListBox) set_row_data(row int, data voidptr) {
@@ -599,10 +618,11 @@ pub fn (mut lb ListBox) add_item_icon(text string, ic ItemIcon) {
 // draw_row_icon рисует иконку строки i у левого края клетки (x, y, h) и возвращает,
 // на сколько сдвинуть текст вправо (0 - иконки нет).
 fn (lb &ListBox) draw_row_icon(mut ctx RenderContext, i int, x f32, y f32, h f32, tc Color) f32 {
-	if i < 0 || i >= lb.rows.len || !lb.rows[i].icon.is_set() {
+	ic := lb.row_icon(i)
+	if !ic.is_set() {
 		return 0
 	}
-	ctx.draw_item_icon(lb.rows[i].icon, Rect{x, y, lb.icon_size, h}, lb.icon_size, tc)
+	ctx.draw_item_icon(ic, Rect{x, y, lb.icon_size, h}, lb.icon_size, tc)
 	return lb.icon_size + lb.icon_gap
 }
 
@@ -636,9 +656,14 @@ pub fn (mut lb ListBox) add_items(items []string) {
 }
 
 // clear удаляет все строки, сбрасывает выбор, прокрутку и hover; колонки остаются.
+// Виртуальный режим тоже выключается: после clear список обычный и пустой.
 pub fn (mut lb ListBox) clear() {
 	lb.items.clear()
 	lb.rows.clear()
+	lb.is_virtual = false
+	lb.virtual_count = 0
+	lb.virtual_text = unsafe { nil }
+	lb.virtual_icon = unsafe { nil }
 	lb.selected = -1
 	lb.scroll_y = 0
 	lb.scroll_x = 0
@@ -656,7 +681,7 @@ pub fn (mut lb ListBox) set_items(items []string) {
 // возвращал бы мусорный индекс, которого нет в списке.
 // Во множественном выборе set_selected оставляет выбранной одну строку.
 pub fn (mut lb ListBox) set_selected(idx int) {
-	if idx >= -1 && idx < lb.rows.len {
+	if idx >= -1 && idx < lb.row_total() {
 		lb.selected = idx
 		lb.reset_marks()
 	}
@@ -664,44 +689,108 @@ pub fn (mut lb ListBox) set_selected(idx int) {
 
 // ─── Множественный выбор (multi_select) ────────────────
 
+// Помощники отсортированного списка отметок (инвариант sel_marks - см. поля).
+
+// lb_marks_find - двоичный поиск i в отсортированном marks: (найден ли, позиция -
+// где лежит или куда вставить, чтобы порядок сохранился).
+fn lb_marks_find(marks []int, i int) (bool, int) {
+	mut lo, mut hi := 0, marks.len
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if marks[mid] < i {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	return lo < marks.len && marks[lo] == i, lo
+}
+
+// lb_range - отсортированный диапазон a..b включительно (a и b в любом порядке).
+fn lb_range(a int, b int) []int {
+	lo, hi := min_int(a, b), max_int(a, b)
+	mut out := []int{cap: hi - lo + 1}
+	for i in lo .. hi + 1 {
+		out << i
+	}
+	return out
+}
+
+// lb_merge_marks - слияние двух отсортированных списков без повторов в один такой же,
+// за один линейный проход (вместо «для каждого проверить, нет ли уже»).
+fn lb_merge_marks(a []int, b []int) []int {
+	mut out := []int{cap: a.len + b.len}
+	mut i, mut j := 0, 0
+	for i < a.len || j < b.len {
+		// берём меньший из двух голов; равные - один раз
+		v := if j >= b.len || (i < a.len && a[i] <= b[j]) { a[i] } else { b[j] }
+		if i < a.len && a[i] == v {
+			i++
+		}
+		if j < b.len && b[j] == v {
+			j++
+		}
+		out << v
+	}
+	return out
+}
+
 // is_row_selected - строка подсвечена как выбранная: при множественном
-// выборе - одна из get_selection(), иначе - selected.
+// выборе - одна из get_selection() (двоичный поиск), иначе - selected.
 pub fn (lb &ListBox) is_row_selected(i int) bool {
 	if lb.sel_multi {
-		return i in lb.sel_marks
+		found, _ := lb_marks_find(lb.sel_marks, i)
+		return found
 	}
 	return i >= 0 && i == lb.selected
 }
 
-// get_selection - индексы выбранных строк по возрастанию. Без
+// get_selection - индексы выбранных строк по возрастанию (копия). Без
 // множественного выбора - [selected] или пусто.
 pub fn (lb &ListBox) get_selection() []int {
 	if lb.sel_multi {
-		mut s := lb.sel_marks.filter(it < lb.rows.len)
-		s.sort()
-		return s
+		// sel_marks уже отсортирован; отметки за концом списка не отдаём
+		return lb.sel_marks.filter(it < lb.row_total())
 	}
-	if lb.selected >= 0 && lb.selected < lb.rows.len {
+	if lb.selected >= 0 && lb.selected < lb.row_total() {
 		return [lb.selected]
 	}
 	return []int{}
 }
 
 // set_selection выбирает строки idxs (индексы вне списка и повторы
-// пропускаются); текущей строкой становится последняя из них. Без
-// multi_select - как set_selected последней строки (пусто - снять выбор).
+// пропускаются); текущей строкой становится последняя из них в порядке idxs. Без
+// multi_select (или если осталась одна строка) - как set_selected первой (пусто -
+// снять выбор).
 pub fn (mut lb ListBox) set_selection(idxs []int) {
-	mut marks := []int{}
-	for i in idxs {
-		if i >= 0 && i < lb.rows.len && i !in marks {
-			marks << i
-		}
-	}
-	if !lb.multi_select || marks.len <= 1 {
-		lb.set_selected(if marks.len > 0 { marks[0] } else { -1 })
+	n := lb.row_total()
+	mut valid := idxs.filter(it >= 0 && it < n)
+	if !lb.multi_select || valid.len == 0 {
+		lb.set_selected(if valid.len > 0 { valid[0] } else { -1 })
 		return
 	}
-	lb.selected = marks.last()
+	// текущая строка - последняя из ПЕРВЫХ вхождений: повтор уже выбранной строки
+	// ([3, 0, 3]) текущую не меняет, как и раньше
+	mut seen := map[int]bool{}
+	mut current := -1
+	for v in valid {
+		if v !in seen {
+			seen[v] = true
+			current = v
+		}
+	}
+	valid.sort()
+	mut marks := []int{cap: valid.len}
+	for v in valid {
+		if marks.len == 0 || marks.last() != v {
+			marks << v
+		}
+	}
+	if marks.len == 1 {
+		lb.set_selected(marks[0])
+		return
+	}
+	lb.selected = current
 	lb.sel_marks = marks
 	lb.sel_multi = true
 	lb.sel_anchor = lb.selected
@@ -716,35 +805,31 @@ fn (mut lb ListBox) reset_marks() {
 
 // click_select - щелчок по строке idx: без модификаторов (или без
 // multi_select) - одна строка; Ctrl - добавить/убрать; Shift - диапазон
-// от якоря (Ctrl+Shift - добавить диапазон к выбранным).
+// от якоря (Ctrl+Shift - добавить диапазон к выбранным). Все ветки сохраняют
+// sel_marks отсортированным.
 fn (mut lb ListBox) click_select(idx int, event &GuiEvent) {
 	ctrl := lb.multi_select && event.ctrl()
 	shift := lb.multi_select && event.shift()
 	if shift {
-		a := if lb.sel_anchor >= 0 && lb.sel_anchor < lb.rows.len {
+		a := if lb.sel_anchor >= 0 && lb.sel_anchor < lb.row_total() {
 			lb.sel_anchor
 		} else if lb.selected >= 0 {
 			lb.selected
 		} else {
 			idx
 		}
-		mut marks := if ctrl { lb.get_selection() } else { []int{} }
-		for i in min_int(a, idx) .. max_int(a, idx) + 1 {
-			if i !in marks {
-				marks << i
-			}
-		}
+		rng := lb_range(a, idx)
+		lb.sel_marks = if ctrl { lb_merge_marks(lb.get_selection(), rng) } else { rng }
 		lb.selected = idx
-		lb.sel_marks = marks
 		lb.sel_multi = true
 		lb.sel_anchor = a
 	} else if ctrl {
 		mut marks := lb.get_selection()
-		p := marks.index(idx)
-		if p >= 0 {
-			marks.delete(p)
+		found, pos := lb_marks_find(marks, idx)
+		if found {
+			marks.delete(pos)
 		} else {
-			marks << idx
+			marks.insert(pos, idx)
 		}
 		lb.selected = idx
 		lb.sel_marks = marks
@@ -759,12 +844,8 @@ fn (mut lb ListBox) click_select(idx int, event &GuiEvent) {
 // key_select - после перехода клавишами: Shift (multi_select) - диапазон
 // от якоря до новой строки, иначе одна строка.
 fn (mut lb ListBox) key_select(event &GuiEvent) {
-	if lb.multi_select && event.shift() && lb.sel_anchor >= 0 && lb.sel_anchor < lb.rows.len {
-		mut marks := []int{}
-		for i in min_int(lb.sel_anchor, lb.selected) .. max_int(lb.sel_anchor, lb.selected) + 1 {
-			marks << i
-		}
-		lb.sel_marks = marks
+	if lb.multi_select && event.shift() && lb.sel_anchor >= 0 && lb.sel_anchor < lb.row_total() {
+		lb.sel_marks = lb_range(lb.sel_anchor, lb.selected)
 		lb.sel_multi = true
 	} else {
 		lb.reset_marks()
@@ -772,8 +853,8 @@ fn (mut lb ListBox) key_select(event &GuiEvent) {
 }
 
 pub fn (lb &ListBox) get_selected_text() string {
-	if lb.selected >= 0 && lb.selected < lb.items.len {
-		return lb.items[lb.selected]
+	if lb.selected >= 0 && lb.selected < lb.row_total() {
+		return lb.item_text(lb.selected)
 	}
 	return ''
 }
@@ -782,8 +863,133 @@ pub fn (lb &ListBox) get_selected_row_text(col int) string {
 	return lb.get_row_cell_text(lb.selected, col)
 }
 
+// row_count - число строк: в виртуальном режиме - virtual_count, иначе - rows.len.
 pub fn (lb &ListBox) row_count() int {
-	return lb.rows.len
+	return lb.row_total()
+}
+
+// ─── Виртуальный режим ─────────────────────────────────
+// В обычном режиме каждая строка - LbRow с копией текста ячеек внутри ListBox. Для
+// десятков тысяч строк это нормально, для миллиона (лог, выборка из БД, каталог с
+// файлами) - лишняя копия данных и долгое заполнение. В виртуальном режиме ListBox
+// хранит только число строк, а текст спрашивает у приложения колбэком - и только для
+// строк, видимых в этом кадре (visible_row_range_*). Всё остальное работает как
+// обычно: колонки, шапка, выбор (в том числе множественный), клавиатура, колесо,
+// горизонтальный режим.
+//
+// Чего в виртуальном режиме нет: виджетов в ячейках (add_row_widgets и т.п.),
+// user_data и своих иконок строк через set_row_icon (иконки - колбэком
+// set_virtual_icons), auto_sort (сортирует приложение в on_sort и перерисовывает
+// окно). Добавление строк через add_* в этом режиме не показывается.
+
+// set_virtual включает виртуальный режим: count строк, текст ячейки (row, col)
+// возвращает text_fn (col = 0 - первая колонка, она же текст однострочного списка и
+// второй аргумент on_select/on_dbl_click). Строки, добавленные раньше, удаляются;
+// выбор и прокрутка сбрасываются, колонки остаются. Данные поменялись при том же
+// числе строк - достаточно перерисовать окно (Window.invalidate*), изменилось число
+// строк - set_virtual_count. text_fn = nil - то же, что clear_virtual().
+//
+// Колбэк зовётся из draw() главного потока для видимых строк каждого кадра (и из
+// get_selected_text, on_select, Enter): должен быть быстрым и не менять ListBox.
+// Индексы приходят только из 0..count-1.
+pub fn (mut lb ListBox) set_virtual(count int, text_fn fn (row int, col int) string) {
+	lb.clear()
+	if text_fn == unsafe { nil } {
+		return
+	}
+	lb.is_virtual = true
+	lb.virtual_count = max_int(count, 0)
+	lb.virtual_text = text_fn
+}
+
+// set_virtual_icons задаёт колбэк иконки строки для виртуального режима
+// (ItemIcon{} - без иконки; nil - иконок нет вовсе). Как и текст, спрашивается
+// только для видимых строк.
+pub fn (mut lb ListBox) set_virtual_icons(icon_fn fn (row int) ItemIcon) {
+	lb.virtual_icon = icon_fn
+}
+
+// set_virtual_count меняет число строк виртуального списка, не трогая прокрутку
+// (типичный случай - в лог дописали строки). Выбор за новым концом списка
+// переезжает на последнюю строку, отметки множественного выбора за концом
+// снимаются. В обычном режиме ничего не делает.
+pub fn (mut lb ListBox) set_virtual_count(count int) {
+	if !lb.is_virtual {
+		return
+	}
+	lb.virtual_count = max_int(count, 0)
+	n := lb.virtual_count
+	if lb.selected >= n {
+		lb.selected = n - 1
+	}
+	if lb.sel_anchor >= n {
+		lb.sel_anchor = n - 1
+	}
+	// sel_marks отсортирован - отрезаем хвост, не нарушая порядка
+	for lb.sel_marks.len > 0 && lb.sel_marks.last() >= n {
+		lb.sel_marks.delete_last()
+	}
+	if lb.hover_index >= n {
+		lb.hover_index = -1
+	}
+	lb.scroll_y = clamp_f32(lb.scroll_y, 0, lb.max_scroll())
+	lb.scroll_x = clamp_f32(lb.scroll_x, 0, lb.max_scroll_x())
+}
+
+// clear_virtual выключает виртуальный режим: список снова обычный и пустой.
+pub fn (mut lb ListBox) clear_virtual() {
+	lb.clear()
+}
+
+// row_total - число строк в любом режиме. Всё, что считает строки, проверяет индекс
+// или перебирает видимый диапазон, зовёт его, а не rows.len.
+fn (lb &ListBox) row_total() int {
+	return if lb.is_virtual { lb.virtual_count } else { lb.rows.len }
+}
+
+// cell_text - текст ячейки (row, col) в любом режиме ('' вне диапазона). В обычном
+// режиме без колонок текст строки лежит в cells[0] (add_item кладёт его туда).
+fn (lb &ListBox) cell_text(row int, col int) string {
+	if row < 0 || row >= lb.row_total() || col < 0 {
+		return ''
+	}
+	if lb.is_virtual {
+		return lb.virtual_text(row, col)
+	}
+	if col < lb.rows[row].cells.len {
+		return lb.rows[row].cells[col].text
+	}
+	return ''
+}
+
+// item_text - текст строки для старого однострочного API и колбэков
+// (on_select, on_dbl_click, get_selected_text): первая колонка. В обычном режиме -
+// зеркало items (у строки из виджетов там '').
+fn (lb &ListBox) item_text(row int) string {
+	if lb.is_virtual {
+		return lb.cell_text(row, 0)
+	}
+	return if row >= 0 && row < lb.items.len { lb.items[row] } else { '' }
+}
+
+// row_icon - иконка строки в любом режиме (ItemIcon{} - нет иконки).
+fn (lb &ListBox) row_icon(row int) ItemIcon {
+	if row < 0 || row >= lb.row_total() {
+		return ItemIcon{}
+	}
+	if lb.is_virtual {
+		return if lb.virtual_icon != unsafe { nil } { lb.virtual_icon(row) } else { ItemIcon{} }
+	}
+	return lb.rows[row].icon
+}
+
+// cell_widget - виджет в ячейке (row, col) или nil (текстовая ячейка, виртуальный
+// режим, индекс вне диапазона).
+fn (lb &ListBox) cell_widget(row int, col int) &Widget {
+	if lb.is_virtual || row < 0 || row >= lb.rows.len || col < 0 || col >= lb.rows[row].cells.len {
+		return unsafe { nil }
+	}
+	return unsafe { lb.rows[row].cells[col].widget }
 }
 
 // ─── Geometry ──────────────────────────────────────────
@@ -806,13 +1012,13 @@ pub fn (lb &ListBox) content_height() f32 {
 	if lb.horizontal {
 		return 0
 	}
-	return f32(lb.rows.len) * lb.item_height
+	return f32(f64(lb.row_total()) * f64(lb.item_height))
 }
 
 // content_width - полная ширина содержимого: горизонтальный режим - все элементы подряд; таблица - сумма ширин колонок; однострочный режим - 0 (текст по ширине окна).
 fn (lb &ListBox) content_width() f32 {
 	if lb.horizontal {
-		return f32(lb.rows.len) * lb.eff_item_width()
+		return f32(f64(lb.row_total()) * f64(lb.eff_item_width()))
 	}
 	// Single-column legacy mode: text fills viewport, no horizontal scroll
 	if lb.columns.len == 0 {
@@ -874,16 +1080,29 @@ fn (lb &ListBox) visible_row_range_v(vp Rect) (int, int) {
 		// covers direct field assignment from V code.
 		return 0, -1
 	}
-	first := max_int(0, int(lb.scroll_y / lb.item_height))
-	last := min_int(lb.rows.len - 1, int((lb.scroll_y + vp.h) / lb.item_height) + 1)
+	ih := f64(lb.item_height)
+	first := max_int(0, int(f64(lb.scroll_y) / ih))
+	last := min_int(lb.row_total() - 1, int((f64(lb.scroll_y) + f64(vp.h)) / ih) + 1)
 	return first, last
+}
+
+// row_screen_y / item_screen_x - экранная Y строки i (вертикальный режим) / X
+// элемента i (горизонтальный) с учётом прокрутки. Произведение и разность считаются
+// в f64: в виртуальном списке на миллионы строк i*item_height выходит за 24 бита
+// мантиссы f32, и соседние строки рисовались бы с ошибкой в пиксель-другой.
+fn (lb &ListBox) row_screen_y(i int, vp Rect) f32 {
+	return vp.y + f32(f64(i) * f64(lb.item_height) - f64(lb.scroll_y))
+}
+
+fn (lb &ListBox) item_screen_x(i int, vp Rect, iw f32) f32 {
+	return vp.x + f32(f64(i) * f64(iw) - f64(lb.scroll_x))
 }
 
 // row_visible_v reports whether row i is actually painted by draw() at
 // the current scroll offset — draw()'s vertical-mode loop filters on
 // this directly (see below), so this is not just a mirror.
 fn (lb &ListBox) row_visible_v(i int, vp Rect) bool {
-	iy := vp.y + f32(i) * lb.item_height - lb.scroll_y
+	iy := lb.row_screen_y(i, vp)
 	return !(iy + lb.item_height < vp.y || iy > vp.y + vp.h)
 }
 
@@ -891,7 +1110,7 @@ fn (lb &ListBox) row_visible_v(i int, vp Rect) bool {
 // visible_row_range_v. Same caveat: still needs row_visible_h() per index.
 fn (lb &ListBox) visible_row_range_h(vp Rect, iw f32) (int, int) {
 	first := max_int(0, int(lb.scroll_x / iw))
-	last := min_int(lb.rows.len - 1, int((lb.scroll_x + vp.w) / iw) + 1)
+	last := min_int(lb.row_total() - 1, int((lb.scroll_x + vp.w) / iw) + 1)
 	return first, last
 }
 
@@ -899,7 +1118,7 @@ fn (lb &ListBox) visible_row_range_h(vp Rect, iw f32) (int, int) {
 // horizontal mode at the current scroll offset — draw()'s
 // horizontal-mode loop filters on this directly (see below).
 fn (lb &ListBox) row_visible_h(i int, vp Rect, iw f32) bool {
-	ix := vp.x + f32(i) * iw - lb.scroll_x
+	ix := lb.item_screen_x(i, vp, iw)
 	return !(ix + iw < vp.x || ix > vp.x + vp.w)
 }
 
@@ -1026,13 +1245,13 @@ fn (lb &ListBox) hsb_rects() (Rect, Rect) {
 
 // ensure_visible прокручивает минимально необходимо, чтобы строка selected целиком попала в viewport (после перехода с клавиатуры).
 fn (mut lb ListBox) ensure_visible() {
-	if lb.selected < 0 || lb.rows.len == 0 {
+	if lb.selected < 0 || lb.row_total() == 0 {
 		return
 	}
 	vp := lb.viewport_rect()
 	if lb.horizontal {
 		iw := lb.eff_item_width()
-		item_left := f32(lb.selected) * iw
+		item_left := f32(f64(lb.selected) * f64(iw))
 		item_right := item_left + iw
 		if item_left < lb.scroll_x {
 			lb.scroll_x = item_left
@@ -1043,7 +1262,7 @@ fn (mut lb ListBox) ensure_visible() {
 		lb.scroll_x = clamp_f32(lb.scroll_x, 0, lb.max_scroll_x())
 		return
 	}
-	item_top := f32(lb.selected) * lb.item_height
+	item_top := f32(f64(lb.selected) * f64(lb.item_height))
 	item_bot := item_top + lb.item_height
 	if item_top < lb.scroll_y {
 		lb.scroll_y = item_top
@@ -1067,9 +1286,10 @@ pub fn (lb &ListBox) row_at(y f32) int {
 // hit_item/hit_item_h - индекс строки под y (вертикальный) / x (горизонтальный режим) с учётом прокрутки, либо -1.
 fn (lb &ListBox) hit_item(my f32) int {
 	vp := lb.viewport_rect()
-	rel_y := my - vp.y + lb.scroll_y
-	idx := int(rel_y / lb.item_height)
-	if idx >= 0 && idx < lb.rows.len {
+	// f64 - как в row_screen_y: на миллионах строк f32 ошибся бы с номером строки
+	rel_y := f64(my) - f64(vp.y) + f64(lb.scroll_y)
+	idx := int(math.floor(rel_y / f64(lb.item_height)))
+	if idx >= 0 && idx < lb.row_total() {
 		return idx
 	}
 	return -1
@@ -1077,15 +1297,19 @@ fn (lb &ListBox) hit_item(my f32) int {
 
 fn (lb &ListBox) hit_item_h(mx f32) int {
 	vp := lb.viewport_rect()
-	rel_x := mx - vp.x + lb.scroll_x
-	idx := int(rel_x / lb.eff_item_width())
-	if idx >= 0 && idx < lb.rows.len {
+	rel_x := f64(mx) - f64(vp.x) + f64(lb.scroll_x)
+	idx := int(math.floor(rel_x / f64(lb.eff_item_width())))
+	if idx >= 0 && idx < lb.row_total() {
 		return idx
 	}
 	return -1
 }
 
-// hit_sort_col - индекс колонки, у которой курсор над кнопкой сортировки в шапке, либо -1.
+// hit_sort_col - индекс сортируемой колонки (show_sort), над заголовком которой
+// курсор, либо -1. Щёлкнуть для сортировки можно по всему заголовку, а не только по
+// стрелке (как в проводниках и таблицах ОС); границы колонок для изменения ширины
+// вызывающий проверяет раньше (hit_col_border), так что они сюда не доходят.
+// Заголовки правее видимой области (над вертикальной полосой прокрутки) не в счёт.
 fn (lb &ListBox) hit_sort_col(mx f32, my f32) int {
 	if !lb.show_header || lb.columns.len == 0 {
 		return -1
@@ -1094,15 +1318,15 @@ fn (lb &ListBox) hit_sort_col(mx f32, my f32) int {
 	if my < hdr_y || my > hdr_y + lb.header_height {
 		return -1
 	}
-	mut cx := lb.bounds.x + lb.pad - lb.scroll_x
+	vp := lb.viewport_rect()
+	if mx < vp.x || mx >= vp.x + vp.w {
+		return -1
+	}
+	mut cx := vp.x - lb.scroll_x
 	for ci in 0 .. lb.columns.len {
 		col := lb.columns[ci]
-		if col.show_sort {
-			sort_x := cx + col.width - lb_sort_btn_w - 2
-			if mx >= sort_x && mx <= sort_x + lb_sort_btn_w && my >= hdr_y
-				&& my <= hdr_y + lb.header_height {
-				return ci
-			}
+		if mx >= cx && mx < cx + col.width {
+			return if col.show_sort { ci } else { -1 }
 		}
 		cx += col.width
 	}
@@ -1130,8 +1354,8 @@ fn (lb &ListBox) hit_col_border(mx f32, my f32) int {
 
 // fire_select вызывает on_select(selected, текст), если выбор корректен.
 fn (mut lb ListBox) fire_select() {
-	if lb.on_select != unsafe { nil } && lb.selected >= 0 && lb.selected < lb.rows.len {
-		text := if lb.selected < lb.items.len { lb.items[lb.selected] } else { '' }
+	if lb.on_select != unsafe { nil } && lb.selected >= 0 && lb.selected < lb.row_total() {
+		text := lb.item_text(lb.selected)
 		lb.on_select(lb.selected, text)
 	}
 }
@@ -1160,6 +1384,99 @@ fn (mut lb ListBox) toggle_sort(col int) {
 	}
 }
 
+// ─── Header ────────────────────────────────────────────
+
+// draw_header рисует шапку колонок (тот же вид, что у TableView.draw_header):
+//   - полоса фона на всю внутреннюю ширину (и над вертикальной полосой прокрутки) со
+//     скруглёнными верхними углами (tbl_fill_header_band) и линией header_border снизу;
+//   - заголовок колонки - обычным шрифтом (синтезированный SDL «жирный» грубо
+//     утолщает и расширяет буквы), с выравниванием, как у данных колонки;
+//   - сортируемая колонка под курсором подсвечивается целиком - щёлкнуть можно по
+//     всему заголовку (hit_sort_col);
+//   - индикатор сортировки справа: треугольник по направлению у отсортированной
+//     колонки; у неотсортированной - бледный ромб только при наведении (подсказка,
+//     что колонку можно отсортировать), а не постоянно, чтобы шапка не пестрела;
+//   - между колонками - короткие чёрточки цвета сетки (tbl_header_sep_inset сверху и
+//     снизу): видно, где граница, которую можно тянуть;
+//   - при наведении на границу или её перетаскивании - акцентная полоса.
+fn (lb &ListBox) draw_header(mut ctx RenderContext, vp Rect, font voidptr) {
+	hdr_y := lb.bounds.y + lb.pad
+	band := Rect{lb.bounds.x + lb.pad, hdr_y, lb.bounds.w - lb.pad * 2, lb.header_height}
+	hdr_tc := ctx.theme.eff_lb_header_text()
+	tbl_fill_header_band(mut ctx, band, ctx.theme.eff_lb_header_bg(), tbl_header_radius(ctx,
+		lb.pad))
+	ctx.fill_rect(Rect{band.x, band.y + band.h - 1, band.w, 1}, ctx.theme.eff_lb_header_border())
+
+	sep_h := max_f32(lb.header_height - tbl_header_sep_inset * 2, 1)
+	sep_y := hdr_y + (lb.header_height - sep_h) * 0.5
+	titles_r := Rect{vp.x, hdr_y, vp.w, lb.header_height}
+	ctx.push_clip(titles_r)
+	mut hx := vp.x - lb.scroll_x
+	for ci in 0 .. lb.columns.len {
+		col := lb.columns[ci]
+		if hx + col.width > titles_r.x && hx < titles_r.x + titles_r.w {
+			hovered := ci == lb.sort_hover_col
+			if hovered {
+				// лёгкая подсветка цветом текста шапки: видна и на светлой, и на тёмной теме
+				ctx.fill_rect(Rect{hx, hdr_y, col.width, lb.header_height - 1}, hdr_tc.with_alpha(18))
+			}
+
+			// заголовок: у сортируемой колонки справа место под индикатор
+			sort_w := if col.show_sort { lb_sort_btn_w } else { f32(0) }
+			title_r := Rect{hx, hdr_y, col.width - sort_w, lb.header_height}
+			tbl_draw_text_aligned(mut ctx, col.title, title_r, col.align, hdr_tc, font)
+
+			if col.show_sort {
+				lb.draw_sort_indicator(mut ctx, col.sort_dir, hx + col.width - lb_sort_btn_w - 2,
+					hdr_y + lb.header_height * 0.5, hovered)
+			}
+
+			// чёрточка-разделитель у правой границы колонки
+			ctx.fill_rect(Rect{hx + col.width - 1, sep_y, 1, sep_h}, ctx.theme.eff_lb_grid())
+		}
+		hx += col.width
+	}
+	ctx.pop_clip()
+
+	// ── Column resize indicator ──
+	mark_col := if lb.col_resizing { lb.resize_col } else { lb.resize_hover_col }
+	if mark_col >= 0 && mark_col < lb.columns.len {
+		mut rx := vp.x - lb.scroll_x
+		for ci in 0 .. mark_col + 1 {
+			rx += lb.columns[ci].width
+		}
+		c := if lb.col_resizing { ctx.theme.accent } else { ctx.theme.accent.with_alpha(120) }
+		ctx.fill_rect(Rect{rx - 1, hdr_y, 2, lb.header_height}, c)
+	}
+}
+
+// draw_sort_indicator рисует индикатор сортировки в квадрате шириной lb_sort_btn_w
+// с левым краем x и центром по вертикали y: треугольник вверх (asc) или вниз (desc);
+// для none_ - бледный ромб, но только при наведении (hovered). Отсортированная
+// колонка под курсором - акцентным цветом.
+fn (lb &ListBox) draw_sort_indicator(mut ctx RenderContext, dir LbSortDir, x f32, y f32, hovered bool) {
+	mid_x := x + lb_sort_btn_w * 0.5
+	as_ := f32(3) // полувысота треугольника
+	arrow_c := if hovered { ctx.theme.accent } else { ctx.theme.text_secondary }
+	match dir {
+		.asc {
+			ctx.fill_triangle(mid_x, y - as_, mid_x - as_, y + as_, mid_x + as_, y + as_, arrow_c)
+		}
+		.desc {
+			ctx.fill_triangle(mid_x, y + as_, mid_x - as_, y - as_, mid_x + as_, y - as_, arrow_c)
+		}
+		.none_ {
+			if hovered {
+				faint := ctx.theme.text_secondary.with_alpha(120)
+				ctx.fill_triangle(mid_x, y - as_, mid_x - as_ * 0.6, y, mid_x + as_ * 0.6, y,
+					faint)
+				ctx.fill_triangle(mid_x, y + as_, mid_x - as_ * 0.6, y, mid_x + as_ * 0.6, y,
+					faint)
+			}
+		}
+	}
+}
+
 // ─── Drawing ───────────────────────────────────────────
 
 // arrange выставляет bounds виджетам-ячейкам строк видимого диапазона — ровно
@@ -1185,7 +1502,7 @@ pub fn (mut lb ListBox) arrange(mut ctx RenderContext) {
 			if unsafe { w == nil } {
 				continue
 			}
-			ix := vp.x + f32(i) * iw - lb.scroll_x
+			ix := lb.item_screen_x(i, vp, iw)
 			arrange_child(mut w, Rect{ix + lb_cell_pad, vp.y + lb_cell_pad, iw - lb_cell_pad * 2, ih - lb_cell_pad * 2}, mut
 				ctx)
 		}
@@ -1200,7 +1517,7 @@ pub fn (mut lb ListBox) arrange(mut ctx RenderContext) {
 		if i < 0 || i >= lb.rows.len || !lb.row_visible_v(i, vp) {
 			continue
 		}
-		iy := vp.y + f32(i) * lb.item_height - lb.scroll_y
+		iy := lb.row_screen_y(i, vp)
 		mut cx := vp.x - lb.scroll_x
 		for ci in 0 .. lb.columns.len {
 			col_w := lb.columns[ci].width
@@ -1271,103 +1588,32 @@ pub fn (mut lb ListBox) draw(mut ctx RenderContext) {
 	ctx.draw_focus_ring(lb.bounds, rad, lb.focus_anim.value)
 
 	font := ctx.get_font(.regular, 0)
-	font_b := ctx.get_font(.bold, 0)
 	fh := ctx.font_height_of(font)
 	vp := lb.viewport_rect()
 
 	// ── Header ──
 	if lb.show_header && lb.columns.len > 0 {
-		hdr_y := lb.bounds.y + lb.pad
-		hdr_r := Rect{lb.bounds.x + lb.pad, hdr_y, vp.w, lb.header_height}
-		ctx.fill_rect(hdr_r, ctx.theme.eff_lb_header_bg())
-		ctx.fill_rect(Rect{hdr_r.x, hdr_r.y + hdr_r.h - 1, hdr_r.w, 1},
-			ctx.theme.eff_lb_header_border())
-
-		ctx.push_clip(hdr_r)
-		mut hx := hdr_r.x - lb.scroll_x
-		for ci in 0 .. lb.columns.len {
-			col := lb.columns[ci]
-			if hx + col.width > hdr_r.x && hx < hdr_r.x + hdr_r.w {
-				// Title
-				avail_w := col.width - lb_cell_pad * 2 -
-					(if col.show_sort { lb_sort_btn_w } else { f32(0) })
-				title_clip := tbl_clip_text(ctx, col.title, avail_w, font_b)
-				ty := hdr_y + (lb.header_height - fh) * 0.5
-				ctx.draw_text_with_font(title_clip, hx + lb_cell_pad, ty,
-					ctx.theme.eff_lb_header_text(), font_b)
-
-				// Sort button
-				if col.show_sort {
-					sx := hx + col.width - lb_sort_btn_w - 2
-					sy := hdr_y + lb.header_height * 0.5
-					arrow_c := if ci == lb.sort_hover_col {
-						ctx.theme.accent
-					} else {
-						ctx.theme.text_secondary
-					}
-					as_ := f32(3)
-					match col.sort_dir {
-						.asc {
-							ctx.fill_triangle(sx + lb_sort_btn_w * 0.5, sy - as_, sx +
-								lb_sort_btn_w * 0.5 - as_, sy + as_,
-								sx + lb_sort_btn_w * 0.5 + as_, sy + as_, arrow_c)
-						}
-						.desc {
-							ctx.fill_triangle(sx + lb_sort_btn_w * 0.5, sy + as_, sx +
-								lb_sort_btn_w * 0.5 - as_, sy - as_,
-								sx + lb_sort_btn_w * 0.5 + as_, sy - as_, arrow_c)
-						}
-						.none_ {
-							// Diamond shape (unsorted)
-							mid_x := sx + lb_sort_btn_w * 0.5
-							ctx.fill_triangle(mid_x, sy - as_, mid_x - as_ * 0.6, sy, mid_x +
-								as_ * 0.6, sy, arrow_c.with_alpha(120))
-							ctx.fill_triangle(mid_x, sy + as_, mid_x - as_ * 0.6, sy, mid_x +
-								as_ * 0.6, sy, arrow_c.with_alpha(120))
-						}
-					}
-				}
-
-				// Grid line
-				if lb.show_grid && ci < lb.columns.len - 1 {
-					ctx.fill_rect(Rect{hx + col.width - 1, hdr_y, 1, lb.header_height},
-						ctx.theme.eff_lb_grid())
-				}
-			}
-			hx += col.width
-		}
-		ctx.pop_clip()
-
-		// ── Column resize indicator ──
-		if lb.col_resizing && lb.resize_col >= 0 && lb.resize_col < lb.columns.len {
-			mut rx := lb.bounds.x + lb.pad - lb.scroll_x
-			for ci in 0 .. lb.resize_col + 1 {
-				rx += lb.columns[ci].width
-			}
-			ctx.fill_rect(Rect{rx - 1, hdr_y, 2, lb.header_height}, ctx.theme.accent)
-		} else if lb.resize_hover_col >= 0 && lb.resize_hover_col < lb.columns.len {
-			mut rx := lb.bounds.x + lb.pad - lb.scroll_x
-			for ci in 0 .. lb.resize_hover_col + 1 {
-				rx += lb.columns[ci].width
-			}
-			ctx.fill_rect(Rect{rx - 1, hdr_y, 2, lb.header_height},
-				ctx.theme.accent.with_alpha(120))
-		}
+		lb.draw_header(mut ctx, vp, font)
 	}
 
 	// ── Rows / Items ──
 	ctx.push_clip(vp)
 
+	// В обоих режимах перебираются только строки видимого диапазона, поэтому
+	// виртуальный список на миллион строк рисуется так же быстро, как на десять.
+	// Строка/ячейка берётся через row_total/cell_widget/cell_text/item_text - они
+	// одинаково работают в обычном и виртуальном режиме.
+	total := lb.row_total()
 	if lb.horizontal {
 		// Horizontal (filmstrip) mode — items laid out left to right
 		iw := lb.eff_item_width()
 		ih := vp.h
 		h_first, h_last := lb.visible_row_range_h(vp, iw)
 		for i := h_first; i <= h_last; i++ {
-			if i < 0 || i >= lb.rows.len || !lb.row_visible_h(i, vp, iw) {
+			if i < 0 || i >= total || !lb.row_visible_h(i, vp, iw) {
 				continue
 			}
-			ix := vp.x + f32(i) * iw - lb.scroll_x
+			ix := lb.item_screen_x(i, vp, iw)
 			is_sel := lb.is_row_selected(i)
 			is_hov := i == lb.hover_index && lb.hovered
 			item_r := Rect{ix, vp.y, iw, ih}
@@ -1377,25 +1623,24 @@ pub fn (mut lb ListBox) draw(mut ctx RenderContext) {
 				ctx.fill_rect(item_r, ctx.theme.eff_lb_row_hover().with_alpha(100))
 			}
 			tc := if is_sel { ctx.theme.eff_lb_row_sel_text() } else { ctx.theme.eff_lb_row_text() }
-			// Draw widget or text from first cell
-			if lb.rows[i].cells.len > 0 {
-				cell := lb.rows[i].cells[0]
-				if unsafe { cell.widget != nil } {
-					// Bounds set in arrange()
-					mut w := unsafe { cell.widget }
-					ctx.draw_child(mut w)
-				} else if cell.text.len > 0 {
+			// Виджет первой ячейки (bounds ему выставил arrange()) или текст элемента.
+			// Текст: у первой ячейки, а у строк без ячеек - зеркало items (item_text).
+			mut w := lb.cell_widget(i, 0)
+			if unsafe { w != nil } {
+				ctx.draw_child(mut w)
+			} else {
+				mut text := lb.cell_text(i, 0)
+				if text.len == 0 && !lb.is_virtual && lb.rows[i].cells.len == 0 {
+					text = lb.item_text(i)
+				}
+				if text.len > 0 {
 					ty := vp.y + (ih - fh) * 0.5
 					dx := lb.draw_row_icon(mut ctx, i, ix + lb_cell_pad, vp.y, ih, tc)
-					ctx.draw_text_with_font(cell.text, ix + lb_cell_pad + dx, ty, tc, font)
+					ctx.draw_text_with_font(text, ix + lb_cell_pad + dx, ty, tc, font)
 				}
-			} else if i < lb.items.len {
-				ty := vp.y + (ih - fh) * 0.5
-				dx := lb.draw_row_icon(mut ctx, i, ix + lb_cell_pad, vp.y, ih, tc)
-				ctx.draw_text_with_font(lb.items[i], ix + lb_cell_pad + dx, ty, tc, font)
 			}
 			// Separator between items
-			if i < lb.rows.len - 1 {
+			if i < total - 1 {
 				ctx.fill_rect(Rect{ix + iw - 1, vp.y, 1, ih},
 					ctx.theme.eff_lb_grid().with_alpha(lb_grid_color_a))
 			}
@@ -1403,10 +1648,10 @@ pub fn (mut lb ListBox) draw(mut ctx RenderContext) {
 	} else {
 		v_first, v_last := lb.visible_row_range_v(vp)
 		for i := v_first; i <= v_last; i++ {
-			if i < 0 || i >= lb.rows.len || !lb.row_visible_v(i, vp) {
+			if i < 0 || i >= total || !lb.row_visible_v(i, vp) {
 				continue
 			}
-			iy := vp.y + f32(i) * lb.item_height - lb.scroll_y
+			iy := lb.row_screen_y(i, vp)
 
 			is_sel := lb.is_row_selected(i)
 			is_hov := i == lb.hover_index && lb.hovered
@@ -1423,50 +1668,47 @@ pub fn (mut lb ListBox) draw(mut ctx RenderContext) {
 			tc := if is_sel { ctx.theme.eff_lb_row_sel_text() } else { ctx.theme.eff_lb_row_text() }
 
 			if lb.columns.len > 0 {
-				// Multi-column: draw each cell
-				row := lb.rows[i]
+				// Multi-column: draw each cell. У обычной строки ячеек может быть
+				// меньше колонок (строка из widget_tree_test и т.п.) - лишние колонки
+				// у неё пустые.
+				n_cells := if lb.is_virtual { lb.columns.len } else { lb.rows[i].cells.len }
 				mut cx := vp.x - lb.scroll_x
 				for ci in 0 .. lb.columns.len {
 					col_w := lb.columns[ci].width
-					if ci < row.cells.len {
-						cell := row.cells[ci]
+					if ci < n_cells && cx + col_w > vp.x && cx < vp.x + vp.w {
 						cell_r := Rect{cx, iy, col_w, lb.item_height}
-						if cx + col_w > vp.x && cx < vp.x + vp.w {
-							if unsafe { cell.widget != nil } {
-								// Custom widget — bounds set in arrange()
-								mut w := unsafe { cell.widget }
-								ctx.draw_child(mut w)
-							} else if cell.text.len > 0 {
-								// Text cell; иконка строки - в первой колонке слева,
-								// текст выравнивается в оставшейся части клетки
-								align := if ci < lb.columns.len {
-									lb.columns[ci].align
-								} else {
-									TextAlign.left
-								}
-								mut text_r := cell_r
-								if ci == 0 {
-									dx := lb.draw_row_icon(mut ctx, i, cx + lb_cell_pad, iy,
-										lb.item_height, tc)
-									text_r = Rect{cx + dx, iy, col_w - dx, lb.item_height}
-								}
-								tbl_draw_text_aligned(mut ctx, cell.text, text_r, align, tc, font)
+						mut w := lb.cell_widget(i, ci)
+						text := if unsafe { w == nil } { lb.cell_text(i, ci) } else { '' }
+						if unsafe { w != nil } {
+							// Custom widget — bounds set in arrange()
+							ctx.draw_child(mut w)
+						} else if text.len > 0 {
+							// Text cell; иконка строки - в первой колонке слева,
+							// текст выравнивается в оставшейся части клетки
+							align := lb.columns[ci].align
+							mut text_r := cell_r
+							if ci == 0 {
+								dx := lb.draw_row_icon(mut ctx, i, cx + lb_cell_pad, iy,
+									lb.item_height, tc)
+								text_r = Rect{cx + dx, iy, col_w - dx, lb.item_height}
 							}
-							// Grid line
-							if lb.show_grid && ci < lb.columns.len - 1 {
-								ctx.fill_rect(Rect{cx + col_w - 1, iy, 1, lb.item_height},
-									ctx.theme.eff_lb_grid().with_alpha(lb_grid_color_a))
-							}
+							tbl_draw_text_aligned(mut ctx, text, text_r, align, tc, font)
+						}
+						// Grid line
+						if lb.show_grid && ci < lb.columns.len - 1 {
+							ctx.fill_rect(Rect{cx + col_w - 1, iy, 1, lb.item_height},
+								ctx.theme.eff_lb_grid().with_alpha(lb_grid_color_a))
 						}
 					}
 					cx += col_w
 				}
 			} else {
-				// Single-column legacy
-				if i < lb.items.len {
+				// Single-column: текст строки - item_text (зеркало items или колбэк)
+				if lb.is_virtual || i < lb.items.len {
+					text := lb.item_text(i)
 					ty := iy + (lb.item_height - fh) * 0.5
 					dx := lb.draw_row_icon(mut ctx, i, vp.x + 6, iy, lb.item_height, tc)
-					ctx.draw_text_with_font(lb.items[i], vp.x + 6 + dx, ty, tc, font)
+					ctx.draw_text_with_font(text, vp.x + 6 + dx, ty, tc, font)
 				}
 			}
 		}
@@ -1821,7 +2063,7 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 						if idx >= 0 {
 							lb.selected = idx
 							if lb.on_dbl_click != unsafe { nil } {
-								text := if idx < lb.items.len { lb.items[idx] } else { '' }
+								text := lb.item_text(idx)
 								lb.on_dbl_click(idx, text)
 							}
 						}
@@ -1832,7 +2074,7 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 					if idx >= 0 {
 						lb.selected = idx
 						if lb.on_dbl_click != unsafe { nil } {
-							text := if idx < lb.items.len { lb.items[idx] } else { '' }
+							text := lb.item_text(idx)
 							lb.on_dbl_click(idx, text)
 						}
 					}
@@ -1892,7 +2134,7 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 
 			// // Home/End/PageUp/PageDown: выбор прыгает, затем ensure_visible (прокрутка) и key_select (Shift - диапазон).
 			if is_home_key(event.keycode, event.scancode) {
-				if lb.rows.len > 0 {
+				if lb.row_total() > 0 {
 					lb.selected = 0
 					lb.ensure_visible()
 					lb.key_select(event)
@@ -1901,8 +2143,8 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 				return true
 			}
 			if is_end_key(event.keycode, event.scancode) {
-				if lb.rows.len > 0 {
-					lb.selected = lb.rows.len - 1
+				if lb.row_total() > 0 {
+					lb.selected = lb.row_total() - 1
 					lb.ensure_visible()
 					lb.key_select(event)
 					lb.fire_select()
@@ -1910,7 +2152,7 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 				return true
 			}
 			if tv_is_pageup_key(event.keycode, event.scancode) {
-				if lb.rows.len > 0 {
+				if lb.row_total() > 0 {
 					visible_count := max_int(1, int(lb.viewport_rect().h / lb.item_height))
 					lb.selected = max_int(0, lb.selected - visible_count)
 					lb.ensure_visible()
@@ -1920,9 +2162,9 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 				return true
 			}
 			if tv_is_pagedown_key(event.keycode, event.scancode) {
-				if lb.rows.len > 0 {
+				if lb.row_total() > 0 {
 					visible_count := max_int(1, int(lb.viewport_rect().h / lb.item_height))
-					lb.selected = min_int(lb.rows.len - 1, lb.selected + visible_count)
+					lb.selected = min_int(lb.row_total() - 1, lb.selected + visible_count)
 					lb.ensure_visible()
 					lb.key_select(event)
 					lb.fire_select()
@@ -1933,9 +2175,9 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 			match event.keycode {
 				// // Стрелки зацикливают список (с первой на последнюю и обратно). В горизонтальном режиме работают Left/Right.
 				sdl_k_up {
-					if !lb.horizontal && lb.rows.len > 0 {
+					if !lb.horizontal && lb.row_total() > 0 {
 						lb.selected = if lb.selected <= 0 {
-							lb.rows.len - 1
+							lb.row_total() - 1
 						} else {
 							lb.selected - 1
 						}
@@ -1946,8 +2188,8 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 					return true
 				}
 				sdl_k_down {
-					if !lb.horizontal && lb.rows.len > 0 {
-						lb.selected = if lb.selected >= lb.rows.len - 1 {
+					if !lb.horizontal && lb.row_total() > 0 {
+						lb.selected = if lb.selected >= lb.row_total() - 1 {
 							0
 						} else {
 							lb.selected + 1
@@ -1959,9 +2201,9 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 					return true
 				}
 				sdl_k_left {
-					if lb.horizontal && lb.rows.len > 0 {
+					if lb.horizontal && lb.row_total() > 0 {
 						lb.selected = if lb.selected <= 0 {
-							lb.rows.len - 1
+							lb.row_total() - 1
 						} else {
 							lb.selected - 1
 						}
@@ -1972,8 +2214,8 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 					return true
 				}
 				sdl_k_right {
-					if lb.horizontal && lb.rows.len > 0 {
-						lb.selected = if lb.selected >= lb.rows.len - 1 {
+					if lb.horizontal && lb.row_total() > 0 {
+						lb.selected = if lb.selected >= lb.row_total() - 1 {
 							0
 						} else {
 							lb.selected + 1
@@ -1985,13 +2227,9 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 					return true
 				}
 				sdl_k_return {
-					if lb.selected >= 0 && lb.selected < lb.rows.len {
+					if lb.selected >= 0 && lb.selected < lb.row_total() {
 						if lb.on_dbl_click != unsafe { nil } {
-							text := if lb.selected < lb.items.len {
-								lb.items[lb.selected]
-							} else {
-								''
-							}
+							text := lb.item_text(lb.selected)
 							lb.on_dbl_click(lb.selected, text)
 						}
 					}
@@ -2049,7 +2287,7 @@ fn (mut lb ListBox) dispatch_to_row_widgets(event &GuiEvent, app &App) bool {
 			continue
 		}
 		// Update widget bounds to current position (needed for hit-testing)
-		iy := vp.y + f32(i) * lb.item_height - lb.scroll_y
+		iy := lb.row_screen_y(i, vp)
 		for ci in 0 .. min_int(lb.rows[i].cells.len, lb.columns.len) {
 			mut cell := lb.rows[i].cells[ci]
 			if unsafe { cell.widget == nil } {
@@ -2096,7 +2334,7 @@ fn (mut lb ListBox) dispatch_to_row_widgets_h(event &GuiEvent, app &App) bool {
 		if unsafe { cell.widget == nil } {
 			continue
 		}
-		ix := vp.x + f32(i) * iw - lb.scroll_x
+		ix := lb.item_screen_x(i, vp, iw)
 		inner :=
 			Rect{ix + lb_cell_pad, vp.y + lb_cell_pad, iw - lb_cell_pad * 2, ih - lb_cell_pad * 2}
 		mut w := unsafe { cell.widget }

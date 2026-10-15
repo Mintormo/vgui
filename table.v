@@ -22,6 +22,20 @@ module vgui
 // (данных) относительно viewport'а в логических пикселях. Позиция колонки/строки в
 // «пространстве данных» считается суммой ширин/высот предыдущих (col_x/row_y), на
 // экран переводится вычитанием scroll_* и прибавлением data_origin_x/y.
+//
+// Два режима данных:
+//   - обычный - строки хранятся в самом виджете (rows: add_row/set_cell*), у каждой
+//     ячейки свои цвет, выравнивание и флаг редактирования, у строки - своя высота;
+//   - виртуальный (set_virtual) - виджет хранит только ЧИСЛО строк, а текст ячейки
+//     спрашивает у приложения колбэком virtual_text(row, col) и только для строк,
+//     видимых в этом кадре. Так показываются миллионы строк (лог, выборка из БД) без
+//     копии данных в памяти. Все строки одной высоты (row_height), поэтому номер
+//     строки по координате и обратно считается делением/умножением за O(1), а не
+//     суммированием высот. Своих цветов/выравнивания у ячеек нет (только у колонки),
+//     правка ячейки не сохраняется в виджете - её текст приходит в on_change, и
+//     приложение само обновляет свои данные.
+// Код, которому всё равно, откуда данные, ходит через row_total()/cell_at()/
+// cell_text(), а не напрямую в rows.
 import os
 
 // ═══════════════════════════════════════════════════════
@@ -77,6 +91,11 @@ const tbl_sb_w = f32(12)
 const tbl_resize_zone = f32(5)
 const tbl_cell_pad = f32(6)
 const tbl_max_edit_undo = 50
+// tbl_autofit_max_rows - сколько строк виртуальной таблицы меряет auto_fit_columns.
+const tbl_autofit_max_rows = 1000
+// tbl_header_sep_inset - на сколько разделители колонок в шапке короче её высоты
+// сверху и снизу: короткая чёрточка между заголовками легче полной линии сетки.
+const tbl_header_sep_inset = f32(6)
 
 // TableView - сама таблица. Все поля pub mut, но обычно их меняют методами ниже.
 // Примечания к полям:
@@ -173,6 +192,13 @@ pub mut:
 	// Callbacks
 	on_select fn (int, int)         = unsafe { nil } // (row, col)
 	on_change fn (int, int, string) = unsafe { nil } // (row, col, new_text)
+	// Виртуальный режим (см. шапку файла и set_virtual): is_virtual - включён ли,
+	// virtual_count - сколько строк у приложения, virtual_text - колбэк «текст
+	// ячейки (row, col)». Менять через set_virtual/set_virtual_count/clear_virtual,
+	// не напрямую: они ещё поправляют выделение и правку ячейки.
+	is_virtual    bool
+	virtual_count int
+	virtual_text  fn (row int, col int) string = unsafe { nil }
 }
 
 // ─── Constructors ──────────────────────────────────────
@@ -256,7 +282,9 @@ pub fn (t &TableView) get_min_row_height() f32 {
 }
 
 // Добавляет строку: на каждую существующую колонку создаётся ячейка; недостающие
-// тексты заменяются пустой строкой, лишние отбрасываются.
+// тексты заменяются пустой строкой, лишние отбрасываются. Только для обычного
+// режима: в виртуальном строки берутся у колбэка, и добавленная так строка не
+// покажется (add_row и set_cell*/set_row_* там не нужны и ничего не меняют на экране).
 pub fn (mut t TableView) add_row(texts []string) {
 	mut cells := []TableCell{cap: t.columns.len}
 	for i in 0 .. t.columns.len {
@@ -280,11 +308,9 @@ pub fn (mut t TableView) set_cell(row int, col int, text string) {
 	}
 }
 
+// get_cell - текст ячейки; в виртуальном режиме спрашивается у virtual_text.
 pub fn (t &TableView) get_cell(row int, col int) string {
-	if row >= 0 && row < t.rows.len && col >= 0 && col < t.columns.len {
-		return t.rows[row].cells[col].text
-	}
-	return ''
+	return t.cell_text(row, col)
 }
 
 pub fn (mut t TableView) set_cell_editable(row int, col int, val bool) {
@@ -351,18 +377,104 @@ pub fn (mut t TableView) set_row_height_at(row int, h f32) {
 }
 
 // Удаляет все строки, отменяет редактирование (без commit и без on_change), сбрасывает
-// выделение и прокрутку. Колонки остаются.
+// выделение и прокрутку. Колонки остаются. Виртуальный режим тоже выключается:
+// после clear_rows таблица - обычная и пустая.
 pub fn (mut t TableView) clear_rows() {
 	t.cancel_edit()
 	t.rows.clear()
+	t.is_virtual = false
+	t.virtual_count = 0
+	t.virtual_text = unsafe { nil }
 	t.sel_row = -1
 	t.sel_col = -1
+	t.hover_row = -1
 	t.scroll_x = 0
 	t.scroll_y = 0
 }
 
+// row_count - число строк: в виртуальном режиме - virtual_count, иначе - rows.len.
 pub fn (t &TableView) row_count() int {
-	return t.rows.len
+	return t.row_total()
+}
+
+// ─── Virtual mode ──────────────────────────────────────
+
+// set_virtual включает виртуальный режим (см. шапку файла): в таблице count строк,
+// текст ячейки (row, col) она спрашивает у text_fn в момент отрисовки, и только для
+// видимых строк. Строки, добавленные раньше через add_row, удаляются; выделение,
+// правка и прокрутка сбрасываются. Колонки задаются как обычно (add_column).
+// Данные поменялись, а число строк то же - достаточно перерисовать окно
+// (Window.invalidate*): колбэк вызывается заново на каждом кадре. Число строк
+// изменилось - set_virtual_count. text_fn = nil - то же, что clear_virtual().
+//
+// Колбэк зовётся из draw() главного потока, должен быть быстрым и не менять
+// таблицу. Индексы ему приходят только в диапазоне 0..count-1 и 0..колонки-1.
+pub fn (mut t TableView) set_virtual(count int, text_fn fn (row int, col int) string) {
+	t.clear_rows()
+	if text_fn == unsafe { nil } {
+		return
+	}
+	t.is_virtual = true
+	t.virtual_count = max_int(count, 0)
+	t.virtual_text = text_fn
+}
+
+// set_virtual_count меняет число строк виртуальной таблицы (данные приложения
+// выросли или уменьшились), не трогая прокрутку. Выделение за новым концом
+// переезжает на последнюю строку, правка ушедшей строки отменяется (без on_change).
+// В обычном режиме ничего не делает.
+pub fn (mut t TableView) set_virtual_count(count int) {
+	if !t.is_virtual {
+		return
+	}
+	t.virtual_count = max_int(count, 0)
+	if t.editing && t.edit_row >= t.virtual_count {
+		t.cancel_edit()
+	}
+	if t.sel_row >= t.virtual_count {
+		t.sel_row = t.virtual_count - 1
+		if t.sel_row < 0 {
+			t.sel_col = -1
+		}
+	}
+	if t.hover_row >= t.virtual_count {
+		t.hover_row = -1
+	}
+	// прокрутку не сбрасываем (приложение дописывает строки в конец лога), но
+	// обрезаем по новой высоте: draw() сделает то же, а до кадра её может прочитать
+	// приложение
+	t.scroll_y = clamp_f32(t.scroll_y, 0, t.max_scroll_y())
+}
+
+// clear_virtual выключает виртуальный режим: таблица становится обычной и пустой.
+pub fn (mut t TableView) clear_virtual() {
+	t.clear_rows()
+}
+
+// row_total - число строк в любом режиме. Всё, что перебирает строки или проверяет
+// индекс, зовёт его, а не rows.len (в виртуальном режиме rows пуст).
+fn (t &TableView) row_total() int {
+	return if t.is_virtual { t.virtual_count } else { t.rows.len }
+}
+
+// cell_at - ячейка (row, col) в любом режиме. В виртуальном она собирается на лету:
+// текст от колбэка, остальное по умолчанию (редактируемая, без своих цветов и
+// выравнивания). Индексы вне диапазона - пустая ячейка.
+fn (t &TableView) cell_at(row int, col int) TableCell {
+	if row < 0 || row >= t.row_total() || col < 0 || col >= t.columns.len {
+		return TableCell{}
+	}
+	if t.is_virtual {
+		return TableCell{
+			text: t.virtual_text(row, col)
+		}
+	}
+	return t.rows[row].cells[col]
+}
+
+// cell_text - только текст ячейки (row, col) в любом режиме; '' вне диапазона.
+fn (t &TableView) cell_text(row int, col int) string {
+	return t.cell_at(row, col).text
 }
 
 pub fn (t &TableView) col_count() int {
@@ -393,7 +505,7 @@ pub fn (t &TableView) has_selection() bool {
 // Программно выделяет ячейку (не вызывает on_select и не прокручивает к ней).
 // Некорректные индексы игнорируются.
 pub fn (mut t TableView) set_selected(row int, col int) {
-	if row >= 0 && row < t.rows.len && col >= 0 && col < t.columns.len {
+	if row >= 0 && row < t.row_total() && col >= 0 && col < t.columns.len {
 		t.sel_row = row
 		t.sel_col = col
 	}
@@ -405,15 +517,22 @@ pub fn (mut t TableView) clear_selection() {
 }
 
 // Подгоняет ширину каждой колонки под самый широкий текст (заголовок или ячейка) плюс
-// отступы и 4 px запаса, но не меньше min_w. Заголовок измеряется обычным, а не
-// жирным шрифтом, поэтому для жирного заголовка запас может оказаться тесноват.
+// отступы и 4 px запаса, но не меньше min_w. Заголовок рисуется тем же обычным
+// шрифтом, что и ячейки, поэтому измеряется им же.
 // Нужен ctx, так как ширина текста известна только отрисовщику (шрифты).
+// В виртуальном режиме меряются только первые tbl_autofit_max_rows строк: обойти
+// миллион строк через колбэк ради ширины колонки - секунды на ровном месте.
 pub fn (mut t TableView) auto_fit_columns(ctx &RenderContext) {
 	font := ctx.get_font_immut(.regular, 0)
+	n_rows := if t.is_virtual {
+		min_int(t.virtual_count, tbl_autofit_max_rows)
+	} else {
+		t.rows.len
+	}
 	for ci in 0 .. t.columns.len {
 		mut max_w := ctx.measure_text_with_font(t.columns[ci].title, font).x + tbl_cell_pad * 2
-		for ri in 0 .. t.rows.len {
-			cw := ctx.measure_text_with_font(t.rows[ri].cells[ci].text, font).x + tbl_cell_pad * 2
+		for ri in 0 .. n_rows {
+			cw := ctx.measure_text_with_font(t.cell_text(ri, ci), font).x + tbl_cell_pad * 2
 			if cw > max_w {
 				max_w = cw
 			}
@@ -426,8 +545,9 @@ pub fn (mut t TableView) auto_fit_columns(ctx &RenderContext) {
 
 // Эффективная высота строки: своя (если задана > 0) или общая row_height, но
 // всегда не меньше min_row_height.
+// В виртуальном режиме своих высот нет - все строки высотой row_height.
 fn (t &TableView) eff_row_height(row int) f32 {
-	if row >= 0 && row < t.rows.len && t.rows[row].height > 0 {
+	if !t.is_virtual && row >= 0 && row < t.rows.len && t.rows[row].height > 0 {
 		return max_f32(t.rows[row].height, t.min_row_height)
 	}
 	return max_f32(t.row_height, t.min_row_height)
@@ -455,7 +575,12 @@ fn (t &TableView) total_cols_width() f32 {
 	return w
 }
 
+// Высота всех строк. Виртуальный режим - умножение (строки одной высоты), обычный -
+// сумма своих высот, O(n).
 fn (t &TableView) total_rows_height() f32 {
+	if t.is_virtual {
+		return f32(f64(t.virtual_count) * f64(t.eff_row_height(0)))
+	}
 	mut h := f32(0)
 	for ri in 0 .. t.rows.len {
 		h += t.eff_row_height(ri)
@@ -519,7 +644,8 @@ fn (t &TableView) has_hsb() bool {
 }
 
 // Смещение левого края колонки / верхнего края строки внутри данных (сумма
-// размеров предыдущих; без прокрутки). Сложность O(n) на вызов.
+// размеров предыдущих; без прокрутки). Колонка - O(n); строка в виртуальном режиме -
+// O(1) (умножение), в обычном - O(n).
 fn (t &TableView) col_x(col int) f32 {
 	mut x := f32(0)
 	for i in 0 .. col {
@@ -529,11 +655,42 @@ fn (t &TableView) col_x(col int) f32 {
 }
 
 fn (t &TableView) row_y(row int) f32 {
+	if t.is_virtual {
+		// f64: на миллионах строк произведение не помещается в 24 бита мантиссы f32,
+		// и соседние строки «гуляли» бы на пиксель-другой
+		return f32(f64(row) * f64(t.eff_row_height(0)))
+	}
 	mut y := f32(0)
 	for i in 0 .. row {
 		y += t.eff_row_height(i)
 	}
 	return y
+}
+
+// first_row_from - первая строка, нижний край которой ниже data_y (координата внутри
+// данных, обычно scroll_y), и её верхний край. С неё отрисовка и поиск начинают
+// перебор вместо строки 0. Виртуальный режим - O(1) делением; обычный - проход по
+// высотам, как раньше (строки там бывают разной высоты). Если data_y за последней
+// строкой - (row_total(), высота всех строк).
+fn (t &TableView) first_row_from(data_y f32) (int, f32) {
+	total := t.row_total()
+	if total == 0 || data_y <= 0 {
+		return 0, f32(0)
+	}
+	if t.is_virtual {
+		rh := f64(t.eff_row_height(0))
+		idx := min_int(int(f64(data_y) / rh), total)
+		return idx, t.row_y(idx)
+	}
+	mut y := f32(0)
+	for i in 0 .. total {
+		rh := t.eff_row_height(i)
+		if y + rh > data_y {
+			return i, y
+		}
+		y += rh
+	}
+	return total, y
 }
 
 // ─── Effective alignment ───────────────────────────────
@@ -681,16 +838,9 @@ fn (t &TableView) hit_cell(mx f32, my f32) (int, int) {
 		}
 		cx += t.columns[ci].width
 	}
-	mut row := -1
-	mut ry := f32(0)
-	for ri in 0 .. t.rows.len {
-		rh := t.eff_row_height(ri)
-		if rel_y >= ry && rel_y < ry + rh {
-			row = ri
-			break
-		}
-		ry += rh
-	}
+	// строка, чей нижний край ниже rel_y; за последней строкой - -1
+	ri, _ := t.first_row_from(rel_y)
+	row := if ri < t.row_total() { ri } else { -1 }
 	return row, col
 }
 
@@ -713,9 +863,10 @@ fn (t &TableView) hit_col_border(mx f32, my f32) int {
 }
 
 // Попадание в нижнюю границу строки в колонке номеров. Работает только если
-// показаны номера строк (за границу строки без номеров тянуть нельзя).
+// показаны номера строк (за границу строки без номеров тянуть нельзя). В
+// виртуальном режиме строки одной высоты, менять её мышью нельзя.
 fn (t &TableView) hit_row_border(mx f32, my f32) int {
-	if !t.show_row_numbers {
+	if !t.show_row_numbers || t.is_virtual {
 		return -1
 	}
 	rn_x := t.bounds.x + t.pad
@@ -793,10 +944,11 @@ fn (t &TableView) is_cell_editable(row int, col int) bool {
 	if !t.editable {
 		return false
 	}
-	if row < 0 || row >= t.rows.len || col < 0 || col >= t.columns.len {
+	if row < 0 || row >= t.row_total() || col < 0 || col >= t.columns.len {
 		return false
 	}
-	return t.rows[row].cells[col].editable
+	// у виртуальных ячеек своего флага нет - решает только t.editable
+	return t.cell_at(row, col).editable
 }
 
 // Входит в режим редактирования: загружает текст ячейки в буфер рун, ставит курсор
@@ -809,7 +961,7 @@ fn (mut t TableView) begin_edit(row int, col int) {
 	t.editing = true
 	t.edit_row = row
 	t.edit_col = col
-	t.edit_buf = t.rows[row].cells[col].text.runes()
+	t.edit_buf = t.cell_text(row, col).runes()
 	t.edit_cur = t.edit_buf.len
 	t.edit_scroll_x = 0
 	t.edit_sel_a = 0
@@ -820,14 +972,17 @@ fn (mut t TableView) begin_edit(row int, col int) {
 // Завершает редактирование с сохранением: пишет буфер в ячейку, зовёт on_change
 // (row, col, новый текст), только если текст изменился, и выходит из режима. Сначала
 // вызывается колбэк, потом сбрасывается состояние: из колбэка edit_row/edit_col ещё
-// доступны.
+// доступны. В виртуальном режиме хранить текст негде: он только уходит в on_change,
+// и приложение само кладёт его в свои данные (иначе ячейка покажет старый текст).
 fn (mut t TableView) commit_edit() {
 	if !t.editing {
 		return
 	}
 	new_text := if t.edit_buf.len > 0 { t.edit_buf.string() } else { '' }
-	changed := t.rows[t.edit_row].cells[t.edit_col].text != new_text
-	t.rows[t.edit_row].cells[t.edit_col].text = new_text
+	changed := t.cell_text(t.edit_row, t.edit_col) != new_text
+	if !t.is_virtual {
+		t.rows[t.edit_row].cells[t.edit_col].text = new_text
+	}
 	if changed && t.on_change != unsafe { nil } {
 		t.on_change(t.edit_row, t.edit_col, new_text)
 	}
@@ -1044,6 +1199,71 @@ fn tbl_draw_text_aligned(mut ctx RenderContext, text string, r Rect, align TextA
 	ctx.draw_text_with_font(display, tx, ty, tc, font)
 }
 
+// ─── Header ────────────────────────────────────────────
+
+// tbl_fill_header_band заливает полосу шапки r со скруглёнными ВЕРХНИМИ углами
+// радиуса radius (нижние - прямые: под шапкой идут строки). Шапка лежит внутри
+// скруглённой рамки виджета, и прямоугольная заливка вылезала бы углами за рамку.
+// SDL-рендерер умеет только «все четыре угла», поэтому: скруглённый прямоугольник
+// целиком + обычный поверх его нижней части. Общая для TableView и ListBox.
+fn tbl_fill_header_band(mut ctx RenderContext, r Rect, bg Color, radius f32) {
+	if radius <= 0 || r.h <= radius {
+		ctx.fill_rect(r, bg)
+		return
+	}
+	ctx.fill_rounded_rect(r, bg, radius)
+	ctx.fill_rect(Rect{r.x, r.y + radius, r.w, r.h - radius}, bg)
+}
+
+// tbl_header_radius - радиус верхних углов полосы шапки: шапка отступает от рамки
+// на pad, значит её угол - это угол рамки, уменьшенный на pad (концентричные дуги).
+fn tbl_header_radius(ctx &RenderContext, pad f32) f32 {
+	return max_f32(ctx.theme.border_radius - pad, 0)
+}
+
+// draw_header рисует шапку таблицы:
+//   - одна полоса фона на всю внутреннюю ширину (вместе с углом над номерами строк и
+//     местом над вертикальной полосой прокрутки) со скруглёнными верхними углами и
+//     линией header_border снизу;
+//   - заголовки колонок - обычным шрифтом, выровненные как данные колонки
+//     (eff_cell_align без строки: колонка, иначе влево), и сдвигаются по X вместе с
+//     колонками (клип по области данных не даёт им заехать на номера строк);
+//   - между колонками - короткие вертикальные чёрточки цвета сетки (с отступом
+//     tbl_header_sep_inset сверху и снизу), а не линии на всю высоту.
+// Синтезированный SDL «жирный» здесь намеренно не используется: в наборе шрифтов нет
+// настоящего Roboto Bold, а синтез утолщает буквы грубо и расширяет их.
+fn (t &TableView) draw_header(mut ctx RenderContext, vp Rect, hdr_bg Color, hdr_tc Color, grid_c Color, font voidptr) {
+	if t.header_height <= 0 {
+		return
+	}
+	band := Rect{t.bounds.x + t.pad, t.bounds.y + t.pad, t.bounds.w - t.pad * 2, t.header_height}
+	tbl_fill_header_band(mut ctx, band, hdr_bg, tbl_header_radius(ctx, t.pad))
+	ctx.fill_rect(Rect{band.x, band.y + band.h - 1, band.w, 1}, ctx.theme.eff_tv_header_border())
+
+	sep_h := max_f32(t.header_height - tbl_header_sep_inset * 2, 1)
+	sep_y := band.y + (t.header_height - sep_h) * 0.5
+	// чёрточка между углом номеров строк и первой колонкой
+	if t.show_row_numbers {
+		ctx.fill_rect(Rect{band.x + t.row_num_width - 1, sep_y, 1, sep_h}, grid_c)
+	}
+
+	ox := t.data_origin_x()
+	titles_r := Rect{ox, band.y, vp.w, t.header_height}
+	ctx.push_clip(titles_r)
+	mut hx := ox - t.scroll_x
+	for ci in 0 .. t.columns.len {
+		col := t.columns[ci]
+		if hx + col.width >= ox && hx <= ox + vp.w {
+			cell_r := Rect{hx, band.y, col.width, t.header_height}
+			tbl_draw_text_aligned(mut ctx, col.title, cell_r, t.eff_cell_align(-1, ci), hdr_tc,
+				font)
+			ctx.fill_rect(Rect{hx + col.width - 1, sep_y, 1, sep_h}, grid_c)
+		}
+		hx += col.width
+	}
+	ctx.pop_clip()
+}
+
 // ─── Drawing ───────────────────────────────────────────
 
 // Отрисовка таблицы. Порядок слоёв: фон и рамка (цвет рамки плавно смешивается с
@@ -1087,7 +1307,6 @@ pub fn (mut t TableView) draw(mut ctx RenderContext) {
 	}
 
 	font := ctx.get_font(.regular, 0)
-	font_b := ctx.get_font(.bold, 0)
 	fh := ctx.font_height_of(font)
 
 	vp := t.viewport_rect()
@@ -1102,58 +1321,43 @@ pub fn (mut t TableView) draw(mut ctx RenderContext) {
 	ro_bg := t.eff_readonly_bg(ctx)
 	ro_tc := t.eff_readonly_text(ctx)
 
+	// Перебор строк и в колонке номеров, и в данных начинается с первой видимой
+	// (first_row_from), а не с нулевой: в виртуальной таблице на миллион строк
+	// пропуск невидимых по одной стоил бы миллион итераций на кадр. ry0 - Y её верхнего
+	// края на экране; разность считается в f64 по той же причине, что и в row_y.
+	first_row, first_top := t.first_row_from(t.scroll_y)
+	ry0 := oy + f32(f64(first_top) - f64(t.scroll_y))
+	total_rows := t.row_total()
+
 	// Колонка номеров строк рисуется отдельно от данных: она не прокручивается по X, но
 	// прокручивается по Y вместе со строками (поэтому свой клип по высоте viewport'а).
+	// Угол над ней - часть общей полосы шапки (draw_header ниже).
 	// ── Row numbers column ──
 	if t.show_row_numbers {
 		rn_x := t.bounds.x + t.pad
 		rn_bg := t.eff_row_num_bg(ctx)
 		rn_tc := t.eff_row_num_text(ctx)
 
-		ctx.fill_rect(Rect{rn_x, t.bounds.y + t.pad, t.row_num_width, t.header_height}, hdr_bg)
-		ctx.fill_rect(Rect{rn_x, t.bounds.y + t.pad + t.header_height - 1, t.row_num_width, 1},
-			grid_c)
-		ctx.fill_rect(Rect{rn_x + t.row_num_width - 1, t.bounds.y + t.pad, 1, t.header_height},
-			grid_c)
-
 		ctx.push_clip(Rect{rn_x, oy, t.row_num_width, vp.h})
-		mut rn_ry := oy - t.scroll_y
-		for ri in 0 .. t.rows.len {
+		mut rn_ry := ry0
+		for ri := first_row; ri < total_rows && rn_ry <= oy + vp.h; ri++ {
 			rh := t.eff_row_height(ri)
-			if rn_ry + rh >= oy && rn_ry <= oy + vp.h {
-				ctx.fill_rect(Rect{rn_x, rn_ry, t.row_num_width, rh}, rn_bg)
-				ctx.fill_rect(Rect{rn_x, rn_ry + rh - 1, t.row_num_width, 1}, grid_c)
-				num_str := '${ri + 1}'
-				nw := ctx.measure_text_with_font(num_str, font).x
-				nx := rn_x + (t.row_num_width - nw) * 0.5
-				ny := rn_ry + (rh - fh) * 0.5
-				ctx.draw_text_with_font(num_str, nx, ny, rn_tc, font)
-			}
+			ctx.fill_rect(Rect{rn_x, rn_ry, t.row_num_width, rh}, rn_bg)
+			ctx.fill_rect(Rect{rn_x, rn_ry + rh - 1, t.row_num_width, 1}, grid_c)
+			num_str := '${ri + 1}'
+			nw := ctx.measure_text_with_font(num_str, font).x
+			nx := rn_x + (t.row_num_width - nw) * 0.5
+			ny := rn_ry + (rh - fh) * 0.5
+			ctx.draw_text_with_font(num_str, nx, ny, rn_tc, font)
 			rn_ry += rh
 		}
 		ctx.pop_clip()
+		// правая граница колонки номеров - на всю высоту данных
+		ctx.fill_rect(Rect{rn_x + t.row_num_width - 1, oy, 1, vp.h}, grid_c)
 	}
 
-	// Заголовок не прокручивается по Y, но по X идёт вместе с колонками (hx начинается с
-	// ox - scroll_x); клип hdr_r не даёт ему залезть на колонку номеров.
 	// ── Header row ──
-	hdr_r := Rect{ox, t.bounds.y + t.pad, vp.w, t.header_height}
-	ctx.fill_rect(hdr_r, hdr_bg)
-	ctx.fill_rect(Rect{hdr_r.x, hdr_r.y + hdr_r.h - 1, hdr_r.w, 1}, grid_c)
-
-	ctx.push_clip(hdr_r)
-	mut hx := ox - t.scroll_x
-	for ci in 0 .. t.columns.len {
-		col := t.columns[ci]
-		cell_r := Rect{hx, hdr_r.y, col.width, t.header_height}
-		if hx + col.width >= ox && hx <= ox + vp.w {
-			// Header text also clipped to column width
-			tbl_draw_text_aligned(mut ctx, col.title, cell_r, .center, hdr_tc, font_b)
-			ctx.fill_rect(Rect{hx + col.width - 1, hdr_r.y, 1, t.header_height}, grid_c)
-		}
-		hx += col.width
-	}
-	ctx.pop_clip()
+	t.draw_header(mut ctx, vp, hdr_bg, hdr_tc, grid_c, font)
 
 	// ── Data cells ──
 	ctx.push_clip(vp)
@@ -1161,13 +1365,9 @@ pub fn (mut t TableView) draw(mut ctx RenderContext) {
 	// Основной цикл по строкам. ry - Y верхнего края строки на экране (с учётом прокрутки).
 	// Приоритет слоёв фона: подсветка наведённой строки -> выделение всей строки ->
 	// фон ячейки / readonly-фон / выделение одной ячейки -> текст.
-	mut ry := oy - t.scroll_y
-	for ri in 0 .. t.rows.len {
+	mut ry := ry0
+	for ri := first_row; ri < total_rows; ri++ {
 		rh := t.eff_row_height(ri)
-		if ry + rh < oy {
-			ry += rh
-			continue
-		}
 		if ry > oy + vp.h {
 			break
 		}
@@ -1188,7 +1388,8 @@ pub fn (mut t TableView) draw(mut ctx RenderContext) {
 			cell_r := Rect{cx, ry, col_w, rh}
 
 			if cx + col_w >= ox && cx <= ox + vp.w {
-				cell := t.rows[ri].cells[ci]
+				// в виртуальном режиме ячейка собирается из колбэка (cell_at)
+				cell := t.cell_at(ri, ci)
 				is_sel_cell := ri == t.sel_row && ci == t.sel_col && !t.select_full_row
 				is_editing_cell := t.editing && ri == t.edit_row && ci == t.edit_col
 				is_readonly := t.editable && !cell.editable
@@ -1614,12 +1815,13 @@ pub fn (mut t TableView) handle_event(event &GuiEvent, app &App) bool {
 // ─── Navigation keys ───────────────────────────────────
 
 // Клавиатурная навигация по выделению: стрелки, Tab/Shift+Tab (по ячейкам с
-// переходом на соседнюю строку), Enter/F2 (начать правку), Home/End (первая/последняя
-// строка, а без select_full_row ещё и колонка), Escape (снять фокус). Любое
+// переходом на соседнюю строку), Enter/F2 (начать правку), PageUp/PageDown (на
+// страницу строк), Home/End (первая/последняя строка, а без select_full_row ещё и
+// колонка), Escape (снять фокус). Любое
 // перемещение прокручивает к ячейке и вызывает on_select. Стрелки и Tab поглощают
 // событие (true) даже на границе, чтобы фокус не ушёл дальше.
 fn (mut t TableView) handle_nav_key(event &GuiEvent) bool {
-	if t.rows.len == 0 || t.columns.len == 0 {
+	if t.row_total() == 0 || t.columns.len == 0 {
 		return false
 	}
 
@@ -1633,7 +1835,7 @@ fn (mut t TableView) handle_nav_key(event &GuiEvent) bool {
 			return true
 		}
 		sdl_k_down {
-			if t.sel_row < t.rows.len - 1 {
+			if t.sel_row < t.row_total() - 1 {
 				t.sel_row += 1
 				t.ensure_sel_visible()
 				t.fire_select()
@@ -1667,7 +1869,7 @@ fn (mut t TableView) handle_nav_key(event &GuiEvent) bool {
 			} else {
 				if t.sel_col < t.columns.len - 1 {
 					t.sel_col += 1
-				} else if t.sel_row < t.rows.len - 1 {
+				} else if t.sel_row < t.row_total() - 1 {
 					t.sel_row += 1
 					t.sel_col = 0
 				}
@@ -1689,6 +1891,20 @@ fn (mut t TableView) handle_nav_key(event &GuiEvent) bool {
 		else {}
 	}
 
+	// PageUp/PageDown - на столько строк, сколько помещается в области данных (по
+	// высоте row_height; у строк своей высоты шаг приблизительный). Колонка не меняется.
+	if tv_is_pageup_key(event.keycode, event.scancode)
+		|| tv_is_pagedown_key(event.keycode, event.scancode) {
+		page := max_int(1, int(t.viewport_rect().h / max_f32(t.eff_row_height(-1), 1)))
+		step := if tv_is_pageup_key(event.keycode, event.scancode) { -page } else { page }
+		t.sel_row = clamp_int(t.sel_row + step, 0, t.row_total() - 1)
+		if t.sel_col < 0 {
+			t.sel_col = 0
+		}
+		t.ensure_sel_visible()
+		t.fire_select()
+		return true
+	}
 	if is_home_key(event.keycode, event.scancode) {
 		t.sel_row = 0
 		if !t.select_full_row {
@@ -1699,7 +1915,7 @@ fn (mut t TableView) handle_nav_key(event &GuiEvent) bool {
 		return true
 	}
 	if is_end_key(event.keycode, event.scancode) {
-		t.sel_row = t.rows.len - 1
+		t.sel_row = t.row_total() - 1
 		if !t.select_full_row {
 			t.sel_col = t.columns.len - 1
 		}
@@ -1738,7 +1954,7 @@ fn (mut t TableView) handle_edit_event(event &GuiEvent, app &App, _ &RenderConte
 			match event.keycode {
 				sdl_k_return {
 					t.commit_edit()
-					if t.sel_row < t.rows.len - 1 {
+					if t.sel_row < t.row_total() - 1 {
 						t.sel_row += 1
 						t.ensure_sel_visible()
 					}
@@ -1760,7 +1976,7 @@ fn (mut t TableView) handle_edit_event(event &GuiEvent, app &App, _ &RenderConte
 					} else {
 						if t.sel_col < t.columns.len - 1 {
 							t.sel_col += 1
-						} else if t.sel_row < t.rows.len - 1 {
+						} else if t.sel_row < t.row_total() - 1 {
 							t.sel_row += 1
 							t.sel_col = 0
 						}
