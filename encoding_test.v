@@ -3,7 +3,7 @@ module vgui
 // Кодировки (аудит 2026-10, 5.1): битый UTF-8 при чтении заменяется на U+FFFD, строгое
 // кодирование не теряет символы молча, имена кодировок с дефисами разбираются.
 //
-// Запуск (из корня vgui): v -enable-globals test encoding_test.v
+// Запуск (из корня vgui): v test encoding_test.v
 
 fn test_utf8_decode_sanitizes() {
 	assert decode_bytes('привет'.bytes(), .utf8) == 'привет'

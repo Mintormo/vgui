@@ -3,7 +3,7 @@ module main
 // Пример 02. Button: стили кнопок (.style), отключённая кнопка и toggle-кнопка с колбэком on_toggle.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/02_button.v
+//   ~/soft/v/v run examples/02_button.v
 
 import vgui
 

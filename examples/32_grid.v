@@ -3,7 +3,7 @@ module main
 // Пример 32. GridLayout: сетка с объединением ячеек (add_span) и весами дорожек.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/32_grid.v
+//   ~/soft/v/v run examples/32_grid.v
 
 import vgui
 

@@ -5,7 +5,7 @@ import os
 // Тесты самого testkit.v: синтетический ввод проходит настоящий путь событий
 // (очередь SDL -> process_events -> виджет), снимок кадра и снапшоты.
 //
-// Запуск: v -enable-globals test testkit_test.v
+// Запуск: v test testkit_test.v
 
 @[heap]
 struct TkCounter {

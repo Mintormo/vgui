@@ -3,7 +3,7 @@ module main
 // Пример 33. Stack: наложение детей друг на друга (оверлеи, бейдж поверх контента).
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/33_stack.v
+//   ~/soft/v/v run examples/33_stack.v
 
 import vgui
 

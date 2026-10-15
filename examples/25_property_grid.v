@@ -3,7 +3,7 @@ module main
 // Пример 25. PropertyGrid: сетка свойств "имя - редактор" разных типов, сгруппированная.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/25_property_grid.v
+//   ~/soft/v/v run examples/25_property_grid.v
 
 import vgui
 

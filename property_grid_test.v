@@ -5,7 +5,7 @@ import os
 // PropertyGrid (аудит 2026-10, 2.6): выбор варианта свойства .choice, readonly для
 // bool, set_* зовут on_change только при реальном изменении.
 //
-// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v -enable-globals test property_grid_test.v
+// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v test property_grid_test.v
 
 struct PgChangeLog {
 mut:

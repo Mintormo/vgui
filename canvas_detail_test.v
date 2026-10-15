@@ -8,7 +8,7 @@ import os
 // убирает её; visible_buf_rect - видимая часть буфера. Проверка - по
 // настоящим пикселям кадра (SDL_RenderReadPixels).
 //
-// Запуск: v -enable-globals test vgui/canvas_detail_test.v (из v/, SDL_VIDEODRIVER=dummy)
+// Запуск: v test vgui/canvas_detail_test.v (из v/, SDL_VIDEODRIVER=dummy)
 // ═══════════════════════════════════════════════════════
 
 // detail_capture - кадр окна (testkit.v, capture_frame): пиксели и pitch

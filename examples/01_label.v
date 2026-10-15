@@ -3,7 +3,7 @@ module main
 // Пример 01. Label: текстовая метка - обычный, цветной, курсивный, моноширинный текст, выравнивание и перенос строк (label_wrap).
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/01_label.v
+//   ~/soft/v/v run examples/01_label.v
 
 import vgui
 

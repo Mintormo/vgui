@@ -3,7 +3,7 @@ module main
 // Пример 29. ContextMenu: контекстное меню по правому клику, привязанное к виджету через attach().
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/29_context_menu.v
+//   ~/soft/v/v run examples/29_context_menu.v
 
 import vgui
 

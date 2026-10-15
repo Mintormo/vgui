@@ -3,7 +3,7 @@ module main
 // Пример 19. MarkdownView: отображение Markdown-текста.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/19_markdown_view.v
+//   ~/soft/v/v run examples/19_markdown_view.v
 
 import vgui
 

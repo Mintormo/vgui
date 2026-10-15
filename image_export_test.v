@@ -5,7 +5,7 @@ import os
 // Экспорт кадра (аудит 2026-10, 2.18): неизвестное расширение - ошибка, а не PNG под
 // чужим именем; обрезка области - по физическому размеру цели рендеринга.
 //
-// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v -enable-globals test image_export_test.v
+// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v test image_export_test.v
 
 fn test_format_from_path() {
 	assert image_format_from_path('a.PNG')? == .png

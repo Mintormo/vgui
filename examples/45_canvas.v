@@ -3,7 +3,7 @@ module main
 // Пример 45. Canvas: растровый редактор (кисть, ластик, пипетка, заливка, линия, прямоугольник) поверх единого колбэка on_input.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/45_canvas.v
+//   ~/soft/v/v run examples/45_canvas.v
 
 import vgui
 import math

@@ -4,7 +4,7 @@ module vgui
 // потомка давало цикл и бесконечную рекурсию в flatten; узел, добавленный
 // второму родителю, жил в дереве дважды; снятый узел помнил старого родителя.
 //
-// Запуск (из корня vgui): v -enable-globals test tree_node_test.v
+// Запуск (из корня vgui): v test tree_node_test.v
 
 fn test_cycle_is_rejected() {
 	mut root := tree_node('root')

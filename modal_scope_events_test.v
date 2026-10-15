@@ -12,7 +12,7 @@ import os
 // События подкладываются в очередь SDL (testkit.v, sim_click: SDL_PushEvent +
 // process_events), дисплей не нужен (SDL_VIDEODRIVER=dummy).
 //
-// Запуск: v -enable-globals test vgui/modal_scope_events_test.v
+// Запуск: v test vgui/modal_scope_events_test.v
 // ═══════════════════════════════════════════════════════
 
 @[heap]

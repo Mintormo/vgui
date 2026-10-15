@@ -3,7 +3,7 @@ module main
 // Пример 09. TextArea: многострочное поле ввода, колбэк on_change получает весь текст.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/09_text_area.v
+//   ~/soft/v/v run examples/09_text_area.v
 
 import vgui
 

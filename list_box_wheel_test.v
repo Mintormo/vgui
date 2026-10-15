@@ -8,7 +8,7 @@ import os
 // колесо поглощается и не уходит прокручиваемому родителю; wheel =
 // false отдаёт колесо родителю.
 //
-// Запуск: v -enable-globals test vgui/list_box_wheel_test.v (из v/, SDL_VIDEODRIVER=dummy)
+// Запуск: v test vgui/list_box_wheel_test.v (из v/, SDL_VIDEODRIVER=dummy)
 // ═══════════════════════════════════════════════════════
 
 fn wheel_at(mut win Window, app &App, x f32, y f32, dy f32) {

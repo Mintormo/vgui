@@ -4,7 +4,7 @@ module vgui
 // отключённого контейнера (ввод не доходит, Tab пропускает, фокус снимается),
 // разметка disabled. Вид проверяют снапшоты *_disabled_* в snapshot_test.v.
 //
-// Запуск: v -enable-globals test enabled_test.v
+// Запуск: v test enabled_test.v
 
 @[heap]
 struct EnCounter {

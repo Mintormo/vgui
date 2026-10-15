@@ -7,7 +7,7 @@ module main
 // детей не трогает: включили контейнер - каждый ребёнок снова такой, каким был.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/55_disabled_state.v
+//   ~/soft/v/v run examples/55_disabled_state.v
 
 import vgui
 

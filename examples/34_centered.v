@@ -3,7 +3,7 @@ module main
 // Пример 34. Centered: центрирование ребёнка заданного размера в доступной области.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/34_centered.v
+//   ~/soft/v/v run examples/34_centered.v
 
 import vgui
 

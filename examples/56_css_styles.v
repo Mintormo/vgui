@@ -5,7 +5,7 @@ module main
 // запустите пример, правьте 56_styles.css - окно перерисуется.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/56_css_styles.v
+//   ~/soft/v/v run examples/56_css_styles.v
 
 import os
 import vgui

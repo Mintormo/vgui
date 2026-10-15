@@ -3,7 +3,7 @@ module main
 // Пример 22. ListBox: прокручиваемый список, колбэки on_select и on_dbl_click.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/22_list_box.v
+//   ~/soft/v/v run examples/22_list_box.v
 
 import vgui
 

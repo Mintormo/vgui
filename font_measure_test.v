@@ -8,7 +8,7 @@ module vgui
 // раскладка сдвигалась, а экран перерисовывался только по dirty-областям - оставались
 // куски кадра со старыми позициями (полоски поверх рамок полей ввода в примере 56).
 //
-// Запуск: SDL_VIDEODRIVER=dummy v -enable-globals test font_measure_test.v
+// Запуск: SDL_VIDEODRIVER=dummy v test font_measure_test.v
 
 fn test_label_measure_uses_requested_size_before_first_draw() {
 	mut t := new_test_ui(width: 300, height: 200)!

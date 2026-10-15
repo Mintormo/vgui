@@ -3,7 +3,7 @@ module main
 // Пример 28. MenuBar: полоса меню вверху окна.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/28_menu_bar.v
+//   ~/soft/v/v run examples/28_menu_bar.v
 
 import vgui
 

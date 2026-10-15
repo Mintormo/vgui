@@ -3,7 +3,7 @@ module main
 // Пример 41. Themes: встроенные темы и переключение темы окна через win.set_theme().
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/41_themes.v
+//   ~/soft/v/v run examples/41_themes.v
 
 import vgui
 

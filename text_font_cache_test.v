@@ -5,7 +5,7 @@ import os
 // Тесты кэша текстовых текстур (обработка коллизий FNV-1a) и кэша
 // шрифтов по размерам (учёт физического масштаба окна).
 //
-// Запуск: v -enable-globals test vgui/text_font_cache_test.v
+// Запуск: v test vgui/text_font_cache_test.v
 // Требует SDL3 (видеодрайвер dummy — без дисплея).
 
 fn make_test_window() !(&App, &Window) {

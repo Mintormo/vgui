@@ -3,7 +3,7 @@ module main
 // Пример 37. Accordion: разворачиваемые секции (accordion_single - открыта одна, accordion_multi - несколько).
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/37_accordion.v
+//   ~/soft/v/v run examples/37_accordion.v
 
 import vgui
 

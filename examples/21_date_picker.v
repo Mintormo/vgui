@@ -3,7 +3,7 @@ module main
 // Пример 21. DatePicker: встроенный календарь, колбэк on_change(year, month, day).
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/21_date_picker.v
+//   ~/soft/v/v run examples/21_date_picker.v
 
 import vgui
 

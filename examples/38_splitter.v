@@ -3,7 +3,7 @@ module main
 // Пример 38. Splitter: две панели с перетаскиваемой границей.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/38_splitter.v
+//   ~/soft/v/v run examples/38_splitter.v
 
 import vgui
 

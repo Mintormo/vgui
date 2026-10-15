@@ -3,7 +3,7 @@ module main
 // Пример 48. Авто-раскладка: размеры берутся из самих виджетов (add, flex, min/max, align), без пикселей в разметке.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/48_auto_layout.v
+//   ~/soft/v/v run examples/48_auto_layout.v
 
 import vgui
 

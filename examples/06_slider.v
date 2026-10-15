@@ -3,7 +3,7 @@ module main
 // Пример 06. Slider: горизонтальный и вертикальный ползунки, отображение значения, шаг и свои цвета.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/06_slider.v
+//   ~/soft/v/v run examples/06_slider.v
 
 import vgui
 

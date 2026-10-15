@@ -3,7 +3,7 @@ module main
 // Пример 26. PlotView: график функций и точек (колесо - зум, перетаскивание - панорама).
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/26_plot_view.v
+//   ~/soft/v/v run examples/26_plot_view.v
 
 import math
 import vgui

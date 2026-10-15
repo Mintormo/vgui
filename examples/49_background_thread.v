@@ -3,7 +3,7 @@ module main
 // Пример 49. Фоновый поток (app.post) и собственный цикл событий вместо app.run() (pump_events / render_all).
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/49_background_thread.v
+//   ~/soft/v/v run examples/49_background_thread.v
 
 import time
 import vgui

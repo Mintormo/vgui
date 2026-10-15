@@ -3,7 +3,7 @@ module main
 // Пример 35. ScrollBox: прокрутка содержимого, не помещающегося в видимую область.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/35_scroll_box.v
+//   ~/soft/v/v run examples/35_scroll_box.v
 
 import vgui
 

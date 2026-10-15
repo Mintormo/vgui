@@ -3,7 +3,7 @@ module vgui
 // ColorPicker: строгий разбор hex (аудит 2026-10, 2.10). Прежняя эвристика
 // `c.a > 0 || text.contains('00')` принимала мусор, содержащий «00».
 //
-// Запуск (из корня vgui): v -enable-globals test color_picker_test.v
+// Запуск (из корня vgui): v test color_picker_test.v
 
 fn test_parse_hex_is_strict() {
 	assert cp_parse_hex('#FF8000')? == Color{255, 128, 0, 255}

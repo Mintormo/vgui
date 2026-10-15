@@ -19,7 +19,7 @@ import os
 // В сценах нет ничего, что зависит от времени: не используются подсказки
 // (задержка показа по часам) и фокус в полях ввода (мигающий курсор).
 //
-// Перезаписать эталоны: VGUI_UPDATE_SNAPSHOTS=1 v -enable-globals test snapshot_ui_test.v
+// Перезаписать эталоны: VGUI_UPDATE_SNAPSHOTS=1 v test snapshot_ui_test.v
 
 const ui_snapshot_dir = os.join_path(@VMODROOT, 'testdata', 'snapshots')
 

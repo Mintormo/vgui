@@ -6,7 +6,7 @@ module vgui
 // а register/unregister/tab читают только `visible`/`enabled` и пишут флаг
 // `focused`.
 //
-// Запуск: v -enable-globals test vgui/focus_test.v
+// Запуск: v test vgui/focus_test.v
 
 // ─── Регистрация снимается симметрично ─────────────────
 //

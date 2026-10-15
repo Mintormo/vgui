@@ -8,7 +8,7 @@ import os
 // высоту аккордеона. В режиме fit_content аккордеон не прокручивается сам,
 // а отдаёт полную высоту внешнему ScrollBox.
 //
-// Запуск: v -enable-globals test vgui/accordion_fit_test.v (из v/, SDL_VIDEODRIVER=dummy)
+// Запуск: v test vgui/accordion_fit_test.v (из v/, SDL_VIDEODRIVER=dummy)
 // ═══════════════════════════════════════════════════════
 
 struct FitProbe {

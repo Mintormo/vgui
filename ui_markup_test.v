@@ -4,7 +4,7 @@ module vgui
 // свойства раскладки, громкие ошибки с номером строки и живой интерфейс
 // через testkit (клик по кнопке из разметки доходит до колбэка из кода).
 //
-// Запуск: v -enable-globals test ui_markup_test.v
+// Запуск: v test ui_markup_test.v
 
 const notes_ui = '
 // окно заметок

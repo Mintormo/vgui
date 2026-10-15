@@ -3,7 +3,7 @@ module main
 // Пример 16. Breadcrumbs: хлебные крошки - цепочка навигации с колбэком on_click(index, text).
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/16_breadcrumbs.v
+//   ~/soft/v/v run examples/16_breadcrumbs.v
 
 import vgui
 

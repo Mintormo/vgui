@@ -3,7 +3,7 @@ module vgui
 // TreeView: кэш плоского списка по отпечатку дерева (аудит 2026-10, 3.3). Кэш обязан
 // замечать любые изменения, которые делаются через узлы в обход TreeView.
 //
-// Запуск (из корня vgui): v -enable-globals test tree_view_cache_test.v
+// Запуск (из корня vgui): v test tree_view_cache_test.v
 
 fn test_flat_cache_tracks_tree_changes() {
 	mut tv := tree_view()

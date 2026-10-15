@@ -3,7 +3,7 @@ module main
 // Пример 47. Icon: иконки встроенного шрифта Lucide - сетка, размеры, цвета, иконка рядом с текстом.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/47_icons.v
+//   ~/soft/v/v run examples/47_icons.v
 
 import vgui
 

@@ -79,10 +79,10 @@ fn main() {
 ```
 
 ```bash
-v -enable-globals run hello.v
+v run hello.v
 ```
 
-Флаг `-enable-globals` обязателен: библиотека хранит глобальные реестры в `__global`-переменных.
+Флаг `-enable-globals` не нужен: файлы с `__global`-переменными помечены атрибутом `@[has_globals]`.
 
 **Раскладка без пикселей.** `box.add(w)` даёт виджету размер по содержимому, `box.add(w, flex: 1)` -
 долю свободного места; есть ещё `min:`, `max:` и `align:`. Окно без заданного размера подстраивается
@@ -94,7 +94,7 @@ v -enable-globals run hello.v
 описаниями - в [examples/README.md](examples/README.md).
 
 ```bash
-v -enable-globals run examples/01_label.v      # один пример
+v run examples/01_label.v      # один пример
 ./examples/build.sh                            # собрать все в examples/bin/
 ```
 
@@ -103,7 +103,7 @@ v -enable-globals run examples/01_label.v      # один пример
 ## Тесты
 
 ```bash
-SDL_VIDEODRIVER=dummy v -enable-globals test .
+SDL_VIDEODRIVER=dummy v test .
 ```
 
 Дисплей не нужен: SDL работает с драйвером `dummy`.

@@ -8,7 +8,7 @@ import os
 // следом mouse_dbl_click. Виджеты, которые реагируют на оба, не должны
 // срабатывать дважды за один клик.
 //
-// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v -enable-globals test dbl_click_test.v
+// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v test dbl_click_test.v
 
 struct DblLog {
 mut:

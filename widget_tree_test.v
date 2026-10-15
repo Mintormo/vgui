@@ -18,7 +18,7 @@ module vgui
 // (сверяйте с PROJECT.md "Константы _kind виджетов" при добавлении
 // нового виджета).
 //
-// Запуск: v -enable-globals test vgui/widget_tree_test.v
+// Запуск: v test vgui/widget_tree_test.v
 
 // WalkCollector — вспомогательная куча для теста walk_widgets:
 // closure-параметр cb принимает только (&Widget), поэтому

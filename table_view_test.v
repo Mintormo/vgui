@@ -3,7 +3,7 @@ module vgui
 // TableView (аудит 2026-10, 2.9): прокрутка редактора ячейки за курсором, on_change
 // только при изменении, полосы прокрутки с учётом соседней полосы. Без окна и SDL.
 //
-// Запуск (из корня vgui): v -enable-globals test table_view_test.v
+// Запуск (из корня vgui): v test table_view_test.v
 
 fn test_edit_scroll_follows_cursor() {
 	// текст помещается - прокрутки нет

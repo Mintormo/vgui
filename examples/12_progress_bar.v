@@ -3,7 +3,7 @@ module main
 // Пример 12. ProgressBar: линейный, круговой и неопределённый прогресс.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/12_progress_bar.v
+//   ~/soft/v/v run examples/12_progress_bar.v
 
 import vgui
 

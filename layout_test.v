@@ -8,7 +8,7 @@ module vgui
 // метрики без загруженного шрифта дают 0 и на геометрию
 // распределения не влияют.
 //
-// Запуск: v -enable-globals test vgui/layout_test.v
+// Запуск: v test vgui/layout_test.v
 
 fn empty_ctx() &RenderContext {
 	return &RenderContext{

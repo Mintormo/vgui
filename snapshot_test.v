@@ -9,7 +9,7 @@ import os
 // открыть и сравнить глазами.
 //
 // Изменение намеренное - перезаписать эталоны и закоммитить их вместе с правкой:
-//   VGUI_UPDATE_SNAPSHOTS=1 v -enable-globals test snapshot_test.v
+//   VGUI_UPDATE_SNAPSHOTS=1 v test snapshot_test.v
 //
 // Сцены с действиями (наведение, нажатие, фокус, открытые попапы, CSS) - в
 // snapshot_ui_test.v.
@@ -17,7 +17,7 @@ import os
 // В сценах нет ничего, что зависит от времени или даты (спиннер, мигающий
 // курсор, «сегодня» календаря): кадр обязан быть одинаковым при каждом запуске.
 //
-// Запуск: v -enable-globals test snapshot_test.v
+// Запуск: v test snapshot_test.v
 
 const snapshot_dir = os.join_path(@VMODROOT, 'testdata', 'snapshots')
 

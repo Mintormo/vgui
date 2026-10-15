@@ -3,7 +3,7 @@ module main
 // Пример 15. ImageView: показ картинки из файла с режимом масштабирования .fit.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/15_image_view.v
+//   ~/soft/v/v run examples/15_image_view.v
 
 import os
 import vgui

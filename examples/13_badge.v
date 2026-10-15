@@ -3,7 +3,7 @@ module main
 // Пример 13. Badge: бейджи-варианты, счётчик и точка.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/13_badge.v
+//   ~/soft/v/v run examples/13_badge.v
 
 import vgui
 

@@ -7,7 +7,7 @@ import os
 // сопоставление селекторов с цепочкой предков и живая отрисовка через testkit -
 // цвет пикселей действительно меняется, а тема после виджета восстанавливается.
 //
-// Запуск: SDL_VIDEODRIVER=dummy v -enable-globals test css_test.v
+// Запуск: SDL_VIDEODRIVER=dummy v test css_test.v
 
 const red = Color{255, 0, 0, 255}
 const green = Color{0, 255, 0, 255}

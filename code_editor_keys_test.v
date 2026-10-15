@@ -3,7 +3,7 @@ module vgui
 // CodeEditor: Tab/Shift+Tab и раскрытие табов (аудит 2026-10, 1.2 и 2.4).
 // Чистая логика редактора, окна и SDL не нужны.
 //
-// Запуск (из корня vgui): v -enable-globals test code_editor_keys_test.v
+// Запуск (из корня vgui): v test code_editor_keys_test.v
 
 // Отступ брался срезом готовой строки пробелов: tab_size больше её длины
 // (4 у key_tab, 16 у ce_expand_tabs) ронял программу паникой.

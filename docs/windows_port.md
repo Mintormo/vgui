@@ -18,7 +18,7 @@ SDL3_image — готовые пакеты MSYS2 mingw64 (msvcrt, совмест
 Ubuntu), распакованные в префикс:
 
 ```bash
-v -os windows -cc x86_64-w64-mingw32-gcc-posix -enable-globals -subsystem windows \
+v -os windows -cc x86_64-w64-mingw32-gcc-posix -subsystem windows \
   -cflags "-I$PFX/include" -ldflags "-L$PFX/lib" -o app.exe app.v
 ```
 

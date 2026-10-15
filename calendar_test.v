@@ -3,7 +3,7 @@ module vgui
 // Calendar (аудит 2026-10, 2.13): хит-тест по высоте шрифта кадра, drill_up без смены
 // вида не шлёт on_view_change, клавиатура при фокусе. Без окна и SDL.
 //
-// Запуск (из корня vgui): v -enable-globals test calendar_test.v
+// Запуск (из корня vgui): v test calendar_test.v
 
 struct CalLog {
 mut:

@@ -3,7 +3,7 @@ module main
 // Пример 27. MenuButton: кнопка с выпадающим меню действий.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/27_menu_button.v
+//   ~/soft/v/v run examples/27_menu_button.v
 
 import vgui
 

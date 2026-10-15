@@ -4,7 +4,7 @@ import os
 
 // CodeEditor: кэш ширины строк и hit_pos двоичным поиском (аудит 2026-10, 3.2).
 //
-// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v -enable-globals test code_editor_metrics_test.v
+// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v test code_editor_metrics_test.v
 
 // Прежний перебор всех префиксов - эталон для двоичного поиска.
 fn brute_hit_col(e &CodeEditor, ln []rune, rel_x f32, ctx &RenderContext) int {

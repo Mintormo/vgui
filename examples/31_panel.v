@@ -3,7 +3,7 @@ module main
 // Пример 31. Panel: контейнер с фоном, рамкой, скруглением и отступом вокруг одного ребёнка.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/31_panel.v
+//   ~/soft/v/v run examples/31_panel.v
 
 import vgui
 

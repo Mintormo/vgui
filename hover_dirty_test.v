@@ -13,7 +13,7 @@ import os
 // render_dirty_test.v (там живёт инструмент capture_rgba/diff_count):
 // test_partial_hover_frame_matches_full_frame_pixels.
 //
-// Запуск: v -enable-globals test vgui/hover_dirty_test.v
+// Запуск: v test vgui/hover_dirty_test.v
 // ═══════════════════════════════════════════════════════
 
 // make_hover_window собирает окно 200x200 с колонкой из двух кнопок по

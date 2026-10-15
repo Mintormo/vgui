@@ -3,7 +3,7 @@ module main
 // Пример 03. CheckBox: колбэк on_change, начальное состояние, отключённый чекбокс и программное управление (set_checked / toggle / is_checked).
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/03_checkbox.v
+//   ~/soft/v/v run examples/03_checkbox.v
 
 import vgui
 

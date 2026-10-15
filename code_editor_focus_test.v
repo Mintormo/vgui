@@ -6,7 +6,7 @@ import os
 // окна через FocusManager. Tab вставляет отступ, Ctrl+Tab передаёт фокус дальше,
 // Esc и клик мимо снимают его. Плюс «желаемая» колонка вертикального движения.
 //
-// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v -enable-globals test code_editor_focus_test.v
+// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v test code_editor_focus_test.v
 
 fn ce_key(key int, mods u16) &GuiEvent {
 	return &GuiEvent{

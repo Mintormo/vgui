@@ -3,7 +3,7 @@ module vgui
 // Тексты виджетов идут через перевод (аудит 2026-10, раздел 4): DatePicker,
 // ComboBox, PropertyGrid. Без окна и SDL.
 //
-// Запуск (из корня vgui): v -enable-globals test widget_i18n_test.v
+// Запуск (из корня vgui): v test widget_i18n_test.v
 
 fn test_widget_texts_follow_locale() {
 	set_locale('ru')

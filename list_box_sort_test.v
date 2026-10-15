@@ -4,7 +4,7 @@ module vgui
 // кнопке сортировки только менял стрелку и звал on_sort, строки оставались на месте.
 // Теперь при auto_sort ListBox переставляет их сам. Без окна и SDL.
 //
-// Запуск (из корня vgui): v -enable-globals test list_box_sort_test.v
+// Запуск (из корня vgui): v test list_box_sort_test.v
 
 struct SortLog {
 mut:

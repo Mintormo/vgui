@@ -7,7 +7,7 @@ import os
 // курсора - подсветка должна перейти на виджет, который теперь под ним,
 // без движения мыши (синтетический mouse_move в dispatch_event_with_app).
 //
-// Запуск: v -enable-globals test vgui/wheel_hover_test.v (из v/, SDL_VIDEODRIVER=dummy)
+// Запуск: v test vgui/wheel_hover_test.v (из v/, SDL_VIDEODRIVER=dummy)
 // ═══════════════════════════════════════════════════════
 
 fn test_wheel_scroll_updates_hover() {

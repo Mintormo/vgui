@@ -3,7 +3,7 @@ module main
 // Пример 17. NotificationManager: всплывающие уведомления поверх окна.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/17_notification.v
+//   ~/soft/v/v run examples/17_notification.v
 
 import vgui
 

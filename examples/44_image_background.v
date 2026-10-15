@@ -3,7 +3,7 @@ module main
 // Пример 44. ImageBackground: фон окна из картинки (в т.ч. замощение) и ImageBackground как обычный виджет-баннер.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/44_image_background.v
+//   ~/soft/v/v run examples/44_image_background.v
 
 import os
 import vgui

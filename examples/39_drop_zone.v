@@ -3,7 +3,7 @@ module main
 // Пример 39. DropZone: зона приёма перетаскиваемых файлов (drag-and-drop) и выбор файла кликом.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/39_drop_zone.v
+//   ~/soft/v/v run examples/39_drop_zone.v
 
 import vgui
 

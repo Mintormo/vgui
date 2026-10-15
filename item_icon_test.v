@@ -3,7 +3,7 @@ module vgui
 // Тесты ItemIcon (item_icon.v): значение иконки, кэш текстур (в том числе
 // кэширование неудачной загрузки) и отрисовка глифа Lucide и картинки из байтов.
 //
-// Запуск: v -enable-globals test item_icon_test.v
+// Запуск: v test item_icon_test.v
 
 // solid_bmp - BMP 24 бит w×h одного цвета (ширина кратна 4 - строки без выравнивания).
 fn solid_bmp(w int, h int, c Color) []u8 {

@@ -14,7 +14,7 @@ module vgui
 //     виден сразу;
 //   - виджет без measure() не кэшируется (его hint — текущие bounds).
 //
-// Запуск: VFLAGS="-enable-globals" v test vgui/measure_cache_test.v (из v/)
+// Запуск: v test vgui/measure_cache_test.v (из v/)
 // ═══════════════════════════════════════════════════════
 
 fn measure_cache_ctx() &RenderContext {

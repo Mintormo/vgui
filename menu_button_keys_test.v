@@ -7,7 +7,7 @@ import os
 // open кнопки оставался true (стрелка «открыта», следующий клик - закрытие).
 //
 // Нужно окно (шрифты для размеров попапа), под dummy-драйвером.
-// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v -enable-globals test menu_button_keys_test.v
+// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v test menu_button_keys_test.v
 
 // Журнал выборов: замыкание V захватывает массив копией, поэтому - структура в куче.
 struct MbPickLog {

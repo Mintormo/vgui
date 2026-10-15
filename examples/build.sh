@@ -26,7 +26,7 @@ trap 'rm -rf "$tmpdir"' EXIT
 build_one() {
     local src="$1" name="$2"
     echo "Building $name..."
-    if v -cc gcc -enable-globals "examples/$src" -o "examples/bin/$name" >"$tmpdir/$name.log" 2>&1; then
+    if v -cc gcc "examples/$src" -o "examples/bin/$name" >"$tmpdir/$name.log" 2>&1; then
         echo 0 >"$tmpdir/$name.status"
     else
         echo 1 >"$tmpdir/$name.status"

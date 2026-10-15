@@ -3,7 +3,7 @@ module main
 // Пример 24. TreeView: иерархическое дерево из узлов TreeNode.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/24_tree_view.v
+//   ~/soft/v/v run examples/24_tree_view.v
 
 import vgui
 

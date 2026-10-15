@@ -39,17 +39,17 @@ PROJECT.md   — подробный справочник по архитекту
 
 ```bash
 # тесты — все *_test.v (из корня, дисплей не нужен)
-SDL_VIDEODRIVER=dummy ~/soft/v/v -enable-globals test .
+SDL_VIDEODRIVER=dummy ~/soft/v/v test .
 
 # один тест
-SDL_VIDEODRIVER=dummy ~/soft/v/v -enable-globals test layout_test.v
+SDL_VIDEODRIVER=dummy ~/soft/v/v test layout_test.v
 
 # снапшоты рендера: намеренно изменили вид - перезаписать эталоны, посмотреть и закоммитить
-VGUI_UPDATE_SNAPSHOTS=1 SDL_VIDEODRIVER=dummy ~/soft/v/v -enable-globals test snapshot_test.v
+VGUI_UPDATE_SNAPSHOTS=1 SDL_VIDEODRIVER=dummy ~/soft/v/v test snapshot_test.v
 
 # примеры (статически включают vgui — ПЕРЕСОБИРАТЬ после правок движка)
 PATH="$HOME/soft/v:$PATH" ./examples/build.sh
-~/soft/v/v -enable-globals run examples/01_label.v
+~/soft/v/v run examples/01_label.v
 ```
 
 «В демо не работает, а тесты зелёные» почти всегда означает устаревший бинарник примера.
@@ -66,6 +66,8 @@ PATH="$HOME/soft/v:$PATH" ./examples/build.sh
 - **Никакого длинного тире (`—`) в заголовках окон и в `vgui.label(...)` демо** - глиф не рендерится
   (кракозябра/квадрат). Пишите дефис-минус `-`. В TextArea/CodeEditor тире допустимы.
 - В V `shared` - ключевое слово, не называйте так переменные.
+- **Файл с `__global` начинается с `@[has_globals]` перед `module`** - флаг `-enable-globals` проекту не
+  нужен; атрибут действует на файл, а не на модуль (PROJECT.md, «Компилятор V»).
 - **Суффиксы ОС в именах файлов** (`_macos`, `_linux`, `_windows`, `_darwin`, `_nix`...): V собирает
   такой файл только на этой ОС - `theme_macos_test.v` на Linux молча SKIP. Не называйте так файлы
   без намерения.

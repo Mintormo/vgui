@@ -4,7 +4,7 @@ module vgui
 // поля вместе с префиксом и отклонял любой ввод, а atoi по всему тексту не
 // разбирал "$5". Без окна и SDL: проверяются разбор и допуск текста.
 //
-// Запуск (из корня vgui): v -enable-globals test spinbox_text_test.v
+// Запуск (из корня vgui): v test spinbox_text_test.v
 
 fn test_number_part_strips_prefix_and_suffix() {
 	mut s := spinbox()

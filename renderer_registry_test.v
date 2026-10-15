@@ -4,7 +4,7 @@ module vgui
 // SDL не трогаем — register/unregister работают с любыми ненулевыми
 // указателями, поэтому используем фиктивные адреса.
 //
-// Запуск: v -enable-globals test vgui/renderer_registry_test.v
+// Запуск: v test vgui/renderer_registry_test.v
 
 fn test_register_and_alive() {
 	g_live_renderers = []LiveRenderer{}

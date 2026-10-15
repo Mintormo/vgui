@@ -3,7 +3,7 @@ module main
 // Пример 14. Separator: горизонтальные (hseparator) и вертикальные (vseparator) разделительные линии.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/14_separator.v
+//   ~/soft/v/v run examples/14_separator.v
 
 import vgui
 

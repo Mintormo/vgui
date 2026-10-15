@@ -3,7 +3,7 @@ module main
 // Пример 42. i18n: переводы интерфейса, выбор языка и обновление подписей при смене локали.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/42_i18n.v
+//   ~/soft/v/v run examples/42_i18n.v
 
 import vgui
 

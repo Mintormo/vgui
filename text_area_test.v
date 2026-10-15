@@ -2,7 +2,7 @@ module vgui
 
 // TextArea и сочетания Ctrl+буква (аудит 2026-10, 2.12). Без окна и SDL.
 //
-// Запуск (из корня vgui): v -enable-globals test text_area_test.v
+// Запуск (из корня vgui): v test text_area_test.v
 
 // max_len ограничивает ввод: лишнее обрезается, без места - правки нет.
 fn test_max_len_limits_input() {

@@ -3,7 +3,7 @@ module vgui
 // Бюджет кадра главного цикла по AppConfig.target_fps (аудит 2026-10, 2.3:
 // настройка раньше не читалась, кадр был жёстко 16 мс). SDL не нужен.
 //
-// Запуск (из корня vgui): v -enable-globals test app_loop_test.v
+// Запуск (из корня vgui): v test app_loop_test.v
 
 fn test_frame_budget_follows_target_fps() {
 	assert frame_budget_ms(60) == 16

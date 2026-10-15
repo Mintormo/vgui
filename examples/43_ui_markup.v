@@ -4,7 +4,7 @@ module main
 // поведение - в коде, элементы находятся по #id.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/43_ui_markup.v
+//   ~/soft/v/v run examples/43_ui_markup.v
 
 import vgui
 

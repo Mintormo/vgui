@@ -3,7 +3,7 @@ module main
 // Пример 53. Anim: анимируемое число для своих виджетов (tween, easing, smooth).
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/53_animation.v
+//   ~/soft/v/v run examples/53_animation.v
 
 import vgui
 

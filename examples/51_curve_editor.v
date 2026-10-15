@@ -3,7 +3,7 @@ module main
 // Пример 51. CurveEditor: редактор тональной кривой с гистограммой и "призраком" второй кривой.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/51_curve_editor.v
+//   ~/soft/v/v run examples/51_curve_editor.v
 
 import vgui
 

@@ -3,7 +3,7 @@ module main
 // Пример 46. Безрамочное окно со своим заголовком на WindowTitleDrag: перетаскивание, разворот двойным кликом, кнопки управления.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/46_borderless_window.v
+//   ~/soft/v/v run examples/46_borderless_window.v
 
 import vgui
 

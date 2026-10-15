@@ -3,7 +3,7 @@ module main
 // Пример 18. CodeEditor: редактор кода с номерами строк, выделением, undo/redo и подсветкой синтаксиса V.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/18_code_editor.v
+//   ~/soft/v/v run examples/18_code_editor.v
 
 import vgui
 

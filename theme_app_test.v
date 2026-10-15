@@ -7,7 +7,7 @@ import os
 // в add_window/add_dialog; App.set_theme меняет её у всех окон без своей
 // темы; явная тема (WindowConfig.theme, Window.set_theme) не трогается.
 //
-// Запуск: v -enable-globals test vgui/theme_app_test.v (из v/, SDL_VIDEODRIVER=dummy)
+// Запуск: v test vgui/theme_app_test.v (из v/, SDL_VIDEODRIVER=dummy)
 // ═══════════════════════════════════════════════════════
 
 fn test_window_without_theme_follows_app() {

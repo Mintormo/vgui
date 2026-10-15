@@ -3,7 +3,7 @@ module vgui
 // Блочные комментарии в подсветке (аудит 2026-10, 5.4): KeywordHighlighter учитывает
 // /* ... */ через строки, Python-подсветчик '/*' комментарием не считает.
 //
-// Запуск (из корня vgui): v -enable-globals test syntax_highlighter_test.v
+// Запуск (из корня vgui): v test syntax_highlighter_test.v
 
 fn joined(tokens []SyntaxToken) string {
 	return tokens.map(it.text).join('')

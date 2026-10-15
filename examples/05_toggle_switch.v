@@ -3,7 +3,7 @@ module main
 // Пример 05. ToggleSwitch: переключатель on/off с колбэком on_change, отключённый и программно переключаемый.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/05_toggle_switch.v
+//   ~/soft/v/v run examples/05_toggle_switch.v
 
 import vgui
 

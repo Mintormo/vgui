@@ -3,7 +3,7 @@ module main
 // Пример 50. Область модальности: модальный диалог блокирует только своё окно, а не все окна приложения.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/50_modal_scope.v
+//   ~/soft/v/v run examples/50_modal_scope.v
 
 import vgui
 

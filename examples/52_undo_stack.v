@@ -3,7 +3,7 @@ module main
 // Пример 52. UndoStack: стек отменяемых команд приложения со слиянием (merge_id) и группами.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/52_undo_stack.v
+//   ~/soft/v/v run examples/52_undo_stack.v
 
 import vgui
 

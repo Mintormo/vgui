@@ -16,7 +16,7 @@ cd examples
 Запуск одного примера без отдельной сборки (из корня проекта):
 
 ```bash
-v -enable-globals run examples/01_label.v
+v run examples/01_label.v
 ```
 
 > Импорт `vgui` компилятор V находит через симлинк `~/.vmodules/vgui` на корень

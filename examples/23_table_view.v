@@ -3,7 +3,7 @@ module main
 // Пример 23. TableView: таблица с колонками, строками и инлайн-редактированием ячеек.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/23_table_view.v
+//   ~/soft/v/v run examples/23_table_view.v
 
 import vgui
 

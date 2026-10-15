@@ -3,7 +3,7 @@ module main
 // Пример 36. TabBox: вкладки, на каждой - свой виджет.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/36_tab_box.v
+//   ~/soft/v/v run examples/36_tab_box.v
 
 import vgui
 

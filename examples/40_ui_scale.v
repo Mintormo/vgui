@@ -3,7 +3,7 @@ module main
 // Пример 40. UI Scale: масштабирование всего интерфейса окна через win.set_ui_scale().
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/40_ui_scale.v
+//   ~/soft/v/v run examples/40_ui_scale.v
 
 import vgui
 

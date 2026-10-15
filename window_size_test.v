@@ -5,7 +5,7 @@ import os
 // Размер окна в логических единицах (аудит 2026-10, 2.15): set_size умножает на
 // ui_scale, а config.width/height везде хранят логический размер.
 //
-// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v -enable-globals test window_size_test.v
+// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v test window_size_test.v
 
 fn test_set_size_is_logical() {
 	os.setenv('SDL_VIDEODRIVER', 'dummy', true)

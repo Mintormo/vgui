@@ -3,7 +3,7 @@ module main
 // Пример 11. Spinner: индикатор загрузки, спиннер с текстом, управление через start()/stop().
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/11_spinner.v
+//   ~/soft/v/v run examples/11_spinner.v
 
 import vgui
 

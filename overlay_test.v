@@ -10,7 +10,7 @@ import os
 // release_overlay (путь vgui_destroy) убирает попап с экрана.
 //
 // Нужно реальное окно (шрифты для размеров попапа), под dummy-драйвером.
-// Запуск: SDL_VIDEODRIVER=dummy v -enable-globals test vgui/overlay_test.v
+// Запуск: SDL_VIDEODRIVER=dummy v test vgui/overlay_test.v
 
 fn make_overlay_test_window() !(&App, &Window) {
 	os.setenv('SDL_VIDEODRIVER', 'dummy', true)

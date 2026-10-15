@@ -11,7 +11,7 @@ import os
 //   - анимация, шагающая в arrange(), шагает раз за кадр, а не на каждое
 //     событие, и дети Accordion стоят там же, где рисуются заголовки.
 //
-// Запуск: v -enable-globals test vgui/arrange_test.v (из v/, SDL_VIDEODRIVER=dummy)
+// Запуск: v test vgui/arrange_test.v (из v/, SDL_VIDEODRIVER=dummy)
 // ═══════════════════════════════════════════════════════
 
 fn make_arrange_test_window(w int, h int) !(&App, &Window) {

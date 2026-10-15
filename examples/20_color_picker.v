@@ -3,7 +3,7 @@ module main
 // Пример 20. ColorPicker: выбор цвета с HSV-палитрой и альфа-каналом.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/20_color_picker.v
+//   ~/soft/v/v run examples/20_color_picker.v
 
 import vgui
 

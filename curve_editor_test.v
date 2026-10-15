@@ -5,7 +5,7 @@ import os
 // ═══════════════════════════════════════════════════════
 // CurveEditor: монотонный сплайн (Фрич–Карлсон) и правка мышью.
 //
-// Запуск: v -enable-globals test vgui/curve_editor_test.v (из v/, SDL_VIDEODRIVER=dummy)
+// Запуск: v test vgui/curve_editor_test.v (из v/, SDL_VIDEODRIVER=dummy)
 // ═══════════════════════════════════════════════════════
 
 fn test_curve_math() {

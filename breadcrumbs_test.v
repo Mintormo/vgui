@@ -5,7 +5,7 @@ import os
 // Breadcrumbs (аудит 2026-10, 2.14): наведение переживает пересборку сегментов в
 // draw (раньше подсветка не рисовалась вовсе), корень пути виден в свёрнутом виде.
 //
-// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v -enable-globals test breadcrumbs_test.v
+// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v test breadcrumbs_test.v
 
 fn test_collapsed_view_keeps_root_and_hover() {
 	os.setenv('SDL_VIDEODRIVER', 'dummy', true)

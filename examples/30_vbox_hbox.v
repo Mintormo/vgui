@@ -3,7 +3,7 @@ module main
 // Пример 30. VBox/HBox: линейная раскладка - естественный размер (add) против доли свободного места (flex).
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/30_vbox_hbox.v
+//   ~/soft/v/v run examples/30_vbox_hbox.v
 
 import vgui
 

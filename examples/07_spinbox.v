@@ -3,7 +3,7 @@ module main
 // Пример 07. SpinBox: целочисленный счётчик с диапазоном, шагом, префиксом и суффиксом.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/07_spinbox.v
+//   ~/soft/v/v run examples/07_spinbox.v
 
 import vgui
 

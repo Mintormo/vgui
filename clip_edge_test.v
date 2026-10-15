@@ -9,7 +9,7 @@ module vgui
 // стёрта. В примере 56 так пропадала нижняя рамка поля ввода при наведении на
 // переключатель под ним.
 //
-// Запуск: SDL_VIDEODRIVER=dummy v -enable-globals test clip_edge_test.v
+// Запуск: SDL_VIDEODRIVER=dummy v test clip_edge_test.v
 
 // Разметка - фрагмент примера 56, на котором баг воспроизводился (без CSS).
 const clip_edge_vui = '

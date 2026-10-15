@@ -3,7 +3,7 @@ module main
 // Пример 08. TextInput: однострочное поле - on_change/on_submit, пароль, ограничение длины, чтение через get_text().
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/08_text_input.v
+//   ~/soft/v/v run examples/08_text_input.v
 
 import vgui
 

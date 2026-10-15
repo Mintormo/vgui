@@ -3,7 +3,7 @@ module main
 // Пример 54. ItemIcon: иконки в меню, дереве, списке, вкладках, ComboBox, MenuButton и Accordion.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/54_item_icons.v
+//   ~/soft/v/v run examples/54_item_icons.v
 
 import vgui
 

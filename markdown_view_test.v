@@ -9,7 +9,7 @@ import os
 // повторное освобождение; а кэш по голому пути отдавал текстуру чужого или уже
 // мёртвого рендерера, если виджет переносили в другое окно.
 //
-// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v -enable-globals test markdown_view_test.v
+// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v test markdown_view_test.v
 
 const md_test_image = os.join_path(@VMODROOT, 'assets', 'icons', 'home.png')
 

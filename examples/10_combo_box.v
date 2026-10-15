@@ -3,7 +3,7 @@ module main
 // Пример 10. ComboBox: выпадающий список, колбэк on_change и подсказка-плейсхолдер.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/10_combo_box.v
+//   ~/soft/v/v run examples/10_combo_box.v
 
 import vgui
 

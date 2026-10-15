@@ -3,7 +3,7 @@ module main
 // Пример 04. RadioButton: группы взаимоисключающих кнопок через поле .radio_group.
 //
 // Запуск (из корня репозитория):
-//   ~/soft/v/v -enable-globals run examples/04_radio_button.v
+//   ~/soft/v/v run examples/04_radio_button.v
 
 import vgui
 

@@ -5,7 +5,7 @@ import os
 // Notification: анимация и таймер автозакрытия будят только область уведомления, а не
 // всё окно (аудит 2026-10, 3.5; правило mark_anim_rect из CLAUDE.md).
 //
-// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v -enable-globals test notification_dirty_test.v
+// Запуск (из корня vgui): SDL_VIDEODRIVER=dummy v test notification_dirty_test.v
 
 fn test_notification_marks_only_its_area() {
 	os.setenv('SDL_VIDEODRIVER', 'dummy', true)

@@ -18,7 +18,7 @@ import os
 // SDL_RenderReadPixels, so any future "does a partial frame match a full one"
 // question can be answered the same way instead of by eyeballing screenshots.
 //
-// Запуск: v -enable-globals test vgui/render_dirty_test.v
+// Запуск: v test vgui/render_dirty_test.v
 
 fn make_render_test_window(w int, h int) !(&App, &Window) {
 	os.setenv('SDL_VIDEODRIVER', 'dummy', true)
