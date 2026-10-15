@@ -815,7 +815,11 @@ Ctrl+Tab/Ctrl+Shift+Tab — переход к следующему/предыд�
 глубокой прокрутке, правка через `on_change`, `set_virtual_count`, Shift-диапазон на 300 тыс. строк,
 помощники отметок), вид шапки - снапшоты `lists_*`, `state_hover_row_*`, `css_styles_*`.
 
-C-ABI и Python виртуальный режим пока не выставляют.
+C-ABI и Python (с 16.10.2026): `vgui_list_box_set_virtual`/`vgui_table_view_set_virtual` и т.д.; колбэк
+текста возвращает строку через ответную функцию `vgui_virtual_reply` (vgui-capi/PROJECT.md, «Виртуальный
+режим: колбэк с ответом»). В Python - `set_virtual(count, text_fn)`, `set_virtual_count`,
+`clear_virtual`, `is_virtual`, у ListBox ещё `set_virtual_icons`; пример - `vguipy/examples/57_virtual_rows.py`.
+Сортируемых колонок (`on_sort`) в Python по-прежнему нет.
 
 ## ScrollBox: несколько детей стопкой
 
