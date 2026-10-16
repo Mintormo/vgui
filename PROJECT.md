@@ -44,6 +44,9 @@ vgui - самостоятельная библиотека, ничего не з
 - ListBox: сортировка строк (`auto_sort`)
 - Виртуальный режим ListBox и TableView (`set_virtual`); шапка колонок
 - ScrollBox: несколько детей стопкой
+- Splitter: панель держит размер в пикселях (`keep`)
+- Диалог не больше экрана (`Dialog.show`, `ScrollBox.fit_content`)
+- Поле ввода сочетания (`ShortcutInput`, kind 53)
 - Временные модальные диалоги освобождают себя сами
 - Компилятор V
 - Зависимости SDL3 (поиск в системных путях)
@@ -896,6 +899,80 @@ C-ABI и Python (с 16.10.2026): `vgui_list_box_set_virtual`/`vgui_table_view_se
 `vgui_scroll_box_set_spacing`, Python `ScrollBox.set_spacing`. Тест —
 `test_scroll_box_stacks_several_children` в `layout_test.v`.
 
+## Splitter: панель держит размер в пикселях (`keep`)
+
+По умолчанию `Splitter` хранит долю `ratio`, и при изменении окна обе панели масштабируются. Для
+боковой панели инструментов это неправильно: при растяжении окна должна расти область просмотра, а
+панель — оставаться той ширины, которую задал пользователь. Режим `keep` (`.first`/`.second`, с
+17.10.2026; до этого vraw держал невидимый виджет перед корнем, пересчитывавший долю): удерживаемая
+панель держит `keep_size` px, `ratio` выводится из него в `arrange()` (`apply_keep`) — именно в
+раскладке, а не по `window_resize`: кадр новой ширины рисуется до рассылки события, и панель на кадр
+«прыгала» бы долей. Минимумы `min_first`/`min_second` применяет `clamped_ratio` как обычно: узкое
+окно ужимает панель, `keep_size` при этом не меняется — окно шире, и панель снова прежняя.
+Перетаскивание полосы пишет новый размер в `keep_size` (`keep_from_ratio`, с учётом минимумов);
+`on_resize(ratio)` по-прежнему зовётся в конце. `set_ratio` в режиме `keep` сбрасывает `keep_size` —
+он пересчитается из новой доли. `apply_keep()` публичный: приложению, которому доля нужна сразу после
+`set_keep`, до следующей раскладки. Разметка: `split keep=second size=440`; C-ABI
+`vgui_splitter_set_keep(ptr, side, size)` (0 — доля, 1 — первая, 2 — вторая) /
+`vgui_splitter_get_keep_size`; Python `Splitter.set_keep(Splitter.KEEP_SECOND, 440)` /
+`get_keep_size`. Тесты — `shortcut_input_test.v` (`test_splitter_keep_*`).
+
+## Диалог не больше экрана (`Dialog.show`, `ScrollBox.fit_content`)
+
+Диалог «по содержимому» с длинным содержимым (окно настроек) при большом масштабе интерфейса и
+маленьком экране уходил низом за край вместе с кнопкой «Закрыть». С 17.10.2026 (перенесено из vraw)
+`Dialog.show` → `apply_size`: размер по содержимому (`auto_size`) или заданный при создании,
+в масштабе родителя, **не больше свободного места** на экране родителя (`screen_room`:
+`SDL_GetDisplayUsableBounds` — рабочая область без панелей ОС — минус `dialog_margin_w/h` = 40/80 px
+под рамку и заголовок, делённое на масштаб). Не влезло по высоте — окно шире на полосу прокрутки
+корневого вертикального `ScrollBox` (`root_scrollbar_w`), иначе полоса съела бы ширину содержимого.
+`base_width`/`base_height` не урезаются: на большом экране диалог снова получит полный размер.
+`Dialog.refit()` — то же для открытого диалога (после смены масштаба родителя или содержимого) и по
+центру экрана; закрытый не трогает.
+
+Прокрутка работает, только если корень диалога — `ScrollBox`, а он на `measure()` вдоль оси отвечал
+160 px (растягиваемый виджет) — диалог «по содержимому» получался крошечным. Поэтому
+`ScrollBox.fit_content`: вдоль оси — стопка детей своего размера плюс поля (как её раскладывает
+`update_eff_content_size`), поперёк — содержимое **без** места под полосу (оно появляется, только если
+места меньше содержимого, а диалог тогда сам шире на полосу); минимум вдоль оси — прежние 40 px.
+Режим включается явно: обычный `ScrollBox` в раскладке по-прежнему просит 160 px. Разметка
+`scroll fit`; C-ABI `vgui_scroll_box_set_fit_content`, `vgui_dialog_refit`; Python
+`ScrollBox.set_fit_content`, `Dialog.refit`. Тесты — `test_scroll_box_fit_content_measures_content`,
+`test_dialog_not_taller_than_screen` (dummy-драйвер SDL сообщает размер экрана).
+
+## Поле ввода сочетания (`ShortcutInput`, kind 53)
+
+Как `QKeySequenceEdit` в Qt (с 17.10.2026; до этого vraw ловил нажатие невидимым виджетом диалога).
+Кнопка с текущим сочетанием (`shortcut`; пусто — `empty_text` или «нет»); щелчок, Enter или пробел в
+фокусе — ожидание («Нажмите сочетание...», стиль accent). В ожидании: Esc — отмена, Backspace/Delete —
+снять (`on_change('')`), модификатор сам по себе — ждать, сочетание из `reserved` — `on_reject(s)` и
+ждать дальше, иначе — новое значение (`on_change(s)`). Щелчок мимо поля, второй щелчок по нему,
+потеря фокуса окном, неактивность — отмена. `on_wait(bool)` — начало и конец ожидания.
+
+**Имена — по месту клавиши.** `shortcut_from_event` строит «Ctrl+Shift+Alt+Клавиша» по scancode
+(`shortcut_key_name`: буквы A–Z, цифры, F1–F12, знаки основного ряда US, Enter, PageUp...), а не по
+символу раскладки: в русской раскладке Ctrl+«з» — это «Ctrl+P». Такие строки понимают
+`MenuItem.shortcut` и `HotkeyManager.bind` (`menu_shortcut_matches` тоже сравнивает и по физической
+клавише). `shortcut_normalize` приводит текст (настройки, код) к тому же виду: регистр и порядок
+модификаторов не важны, «esc»/«del»/«pgdn» — синонимы, неизвестная клавиша — "". Общие для любого
+приложения с настраиваемыми клавишами — vraw перешёл на них со своих `hk_norm`/`hk_event_name`.
+
+**Устройство.** Рисует и ловит щелчки внутренняя `Button` (`btn`): вид, наведение, фокус, Tab,
+неактивность — как у кнопки; `set_bounds` отдаёт ей те же bounds, `measure` — по самой широкой из
+надписей (сочетание/«нет» и «Нажмите сочетание...»), чтобы поле не прыгало. Ожидание занимает **слот
+оверлея окна** (владелец — само поле): его обработчик получает события раньше меню, горячих клавиш и
+виджетов, поэтому нажатое сочетание не срабатывает как команда (`test_shortcut_input_does_not_leak_to_menu`);
+открытие другого попапа вытесняет ожидание через close-хук. Щелчок кнопки только ставит
+`toggle_req`, а начинает/прерывает ожидание `handle_event` после кнопки — там есть `App` и активный
+контекст окна. Внутренняя кнопка — отдельный объект в фокус-учёте: мост при `vgui_destroy` поля
+снимает с учёта и её. Встроенные надписи — `si.none`/`si.wait` (en, ru); приложение с другими языками
+задаёт `empty_text`/`wait_text`.
+
+Разметка `shortcut "Ctrl+S"`; C-ABI `vgui_shortcut_input_*`, `vgui_shortcut_normalize`; Python
+`ShortcutInput`, `shortcut_normalize`; testkit — `sim_key_sc`/`TestUi.key_sc` (нажатие с местом
+клавиши), C-ABI `vgui_test_key_sc`, Python `UiTester.key(..., scancode=)`. Тесты — `shortcut_input_test.v`,
+`vguipy/tests/test_shortcut_input.py`, пример `examples/58_shortcut_input.v`.
+
 ## Временные модальные диалоги освобождают себя сами
 
 Одноразовые диалоги (`message_box` в `native_file_dialog.v`, `color_dialog`, `date_dialog`) вызывают `app.remove_dialog(dlg)` + `dlg.win.cleanup()` после wait-loop на **каждом** пути выхода — `close_with_result` лишь прячет SDL-окно, поэтому без этого каждый вызов навсегда утекал скрытым `SDL_Window` + рендерером + деревом виджетов, а `app.dialogs` рос (и перебирался) каждый кадр. `App.remove_dialog(d)` / `App.remove_window(w)` (`sdl3_app.v`) отсоединяют по тождеству указателя, не освобождая. `vgui_dialog_destroy` / `vgui_window_destroy` дополнительно убирают объект из `app.dialogs` / `app.windows` (обходом `g_apps`), так что Python-сторонний `_destroy_now()` больше не оставляет висячую V-ссылку в списках App. Интроспекционные экспорты для тестов на утечки: `vgui_app_dialog_count` / `vgui_app_window_count` (объявлены в `_lib.py`). Нюанс: уничтожение окна/диалога изнутри Python-колбэка делает delete из списка, по которому `process_events` может в этот момент итерироваться, — V-шный `for-in` перечитывает `len` на каждом шаге, поэтому худший случай — один пропущенный элемент в текущем проходе, а не UB.
@@ -1287,9 +1364,9 @@ vbox pad=12 gap=8
 |---|---|---|---|
 | `vbox`, `hbox` | — | `pad`, `gap`, `cross=stretch\|start\|center\|end`, `bg=#rrggbb` | виджеты; у них `flex`, `min`, `max`, `align` |
 | `panel` | — | `pad`, `radius`, `bg`, `border` | ≤ 1 виджет |
-| `scroll` | — | `horizontal`, `pad`, `gap` | виджеты стопкой |
+| `scroll` | — | `horizontal`, `pad`, `gap`, `fit` (размер по содержимому) | виджеты стопкой |
 | `grid` | — | `cols` (2), `gap`, `pad` | виджеты потоком по строкам; у них `colspan` |
-| `split` | — | `vertical`, `ratio` | ровно 2 виджета |
+| `split` | — | `vertical`, `ratio`, `keep=first\|second` + `size` (панель держит px) | ровно 2 виджета |
 | `tabs` | — | `pos=top\|bottom\|left\|right` | `tab "Заголовок" icon=` с 1 виджетом |
 | `accordion` | — | `multi` | `section "Заголовок" icon= expanded` с 1 виджетом |
 | `menubar` | — | — | `menu "Файл"` → `item`/`check checked`/`submenu`/`separator`; у пунктов `icon`, `shortcut`, `disabled`, `#id` |
@@ -1298,6 +1375,7 @@ vbox pad=12 gap=8
 | `tree` | — | — | `node "текст" icon= collapsed #id`, вложенные `node` |
 | `label` | да | `size`, `bold`, `italic`, `mono`, `wrap`, `align`, `color` | — |
 | `button` | да | `icon` (Lucide), `style=normal\|accent\|outline\|flat\|danger\|success`, `toggle`, `active` | — |
+| `shortcut` | да (сочетание) | — | поле ввода сочетания (`ShortcutInput`) |
 | `checkbox`, `radio`, `toggle` | да | `checked` (у toggle — `on`), у radio `group` | — |
 | `slider` | — | `min`, `max`, `value`, `step`, `vertical`, `show_value` | — |
 | `progress` | — | `value` (проценты) | — |

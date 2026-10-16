@@ -336,6 +336,7 @@ fn test_every_widget_type_has_tooltip_field() {
 		HasTooltip(&Canvas{}),
 		HasTooltip(&Icon{}),
 		HasTooltip(&CurveEditor{}),
+		HasTooltip(&ShortcutInput{}),
 	]
 	// все kind_* минус 7 служебных и не-виджетов (см. комментарий выше)
 	assert with_tip.len == css_max_kind - 7

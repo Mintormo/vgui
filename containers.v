@@ -861,6 +861,11 @@ pub mut:
 	scroll_speed f32 = 30
 	pad          f32 = 2
 	spacing      f32 = 4 // между детьми стопки (при одном ребёнке не используется)
+	// fit_content - measure() просит вдоль оси прокрутки размер содержимого (а не 160 px), а
+	// поперёк - без места под полосу: окно «по содержимому» (диалог) с прокруткой в корне
+	// получает размер содержимого, а меньше места - прокрутку (Dialog.show, «Диалог не
+	// больше экрана» в PROJECT.md). Сжимается по-прежнему до min (40 px).
+	fit_content bool
 	// ── Scrollbar customization ──
 	sb_width             f32 // track width/height; 0 → 14
 	sb_radius            f32 = -1 // corner radius; <0 → 3

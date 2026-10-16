@@ -390,6 +390,7 @@ fn test_every_widget_type_has_css_tags() {
 		CssTagged(&Canvas{}),
 		CssTagged(&Icon{}),
 		CssTagged(&CurveEditor{}),
+		CssTagged(&ShortcutInput{}),
 	]
 	assert tagged.len == css_max_kind
 }

@@ -169,6 +169,8 @@ pub fn add_translations_json(locale string, text string) ! {
 fn i18n_load_builtins() {
 	i18n.add_translations('en', {
 		'btn.ok':                   'OK'
+		'si.none':                  'None'
+		'si.wait':                  'Press shortcut...'
 		'btn.cancel':               'Cancel'
 		'btn.yes':                  'Yes'
 		'btn.no':                   'No'
@@ -215,6 +217,8 @@ fn i18n_load_builtins() {
 	})
 	i18n.add_translations('ru', {
 		'btn.ok':                   'ОК'
+		'si.none':                  'нет'
+		'si.wait':                  'Нажмите сочетание...'
 		'btn.cancel':               'Отмена'
 		'btn.yes':                  'Да'
 		'btn.no':                   'Нет'

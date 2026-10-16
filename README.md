@@ -7,7 +7,8 @@ GUI-библиотека для языка [V](https://vlang.io) поверх [S
 Что есть:
 
 - **элементы управления** - Label, Button, CheckBox, RadioButton, ToggleSwitch, Slider, Spinbox,
-  TextInput, TextArea, ComboBox, Spinner, ProgressBar, DatePicker, ColorPicker, CurveEditor;
+  TextInput, TextArea, ComboBox, Spinner, ProgressBar, DatePicker, ColorPicker, CurveEditor,
+  ShortcutInput;
 - **сложные виджеты** - CodeEditor с подсветкой синтаксиса, MarkdownView, ListBox, TableView,
   TreeView, PropertyGrid, PlotView, Canvas (рисование с доступом к пикселям), ImageView;
 - **контейнеры** - VBox/HBox, Panel, Grid, Stack, Centered, ScrollBox, TabBox, Accordion, Splitter;

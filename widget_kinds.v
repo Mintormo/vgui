@@ -63,3 +63,4 @@ pub const kind_image_background = 49
 pub const kind_canvas = 50
 pub const kind_icon = 51
 pub const kind_curve_editor = 52
+pub const kind_shortcut_input = 53

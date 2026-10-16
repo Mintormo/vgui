@@ -69,12 +69,13 @@ fn tag_cases() []TagCase {
 		TagCase{voidptr(&Canvas{}), kind_canvas, 'Canvas'},
 		TagCase{voidptr(&Icon{}), kind_icon, 'Icon'},
 		TagCase{voidptr(&CurveEditor{}), kind_curve_editor, 'CurveEditor'},
+		TagCase{voidptr(&ShortcutInput{}), kind_shortcut_input, 'ShortcutInput'},
 	]
 }
 
 fn test_every_widget_carries_its_tag() {
 	cases := tag_cases()
-	assert cases.len == 52
+	assert cases.len == 53
 	for c in cases {
 		got := widget_type_tag(c.ptr)
 		assert got == c.kind, '${c.name}: тег ${got}, ожидался ${c.kind}'

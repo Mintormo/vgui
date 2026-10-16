@@ -694,6 +694,9 @@ pub fn (s &ScrollBox) measure(ctx &RenderContext) SizeHint {
 			cross_min = max_f32(cross_min, c.min_h)
 		}
 	}
+	if s.fit_content {
+		return s.measure_fit_content(cross_pref, cross_min, ctx)
+	}
 	// Константа 16 - ожидаемая толщина полосы прокрутки (дублирует значение отрисовки, не читается из неё).
 	sb := f32(16) // место под полосу прокрутки
 	if s.dir == .vertical {
@@ -711,6 +714,64 @@ pub fn (s &ScrollBox) measure(ctx &RenderContext) SizeHint {
 		min_w:    40
 		min_h:    cross_min + s.pad * 2
 		h_policy: .expanding
+	}
+}
+
+// measure_fit_content - ScrollBox.fit_content: вдоль оси прокрутки - стопка детей своего
+// размера (как её раскладывает update_eff_content_size) плюс поля, поперёк - содержимое
+// без места под полосу (полоса появится, только если места дали меньше содержимого; окно
+// диалога тогда само становится шире на полосу - Dialog.show). Минимум вдоль оси - 40 px.
+fn (s &ScrollBox) measure_fit_content(cross_pref f32, cross_min f32, ctx &RenderContext) SizeHint {
+	vertical := s.dir == .vertical
+	mut along := f32(0)
+	for i, child in s.children {
+		c := measure_widget(child, ctx)
+		along += if vertical { c.h } else { c.w }
+		if i > 0 {
+			along += s.spacing
+		}
+	}
+	if vertical {
+		return SizeHint{
+			w:        cross_pref + s.pad * 2
+			h:        along + s.pad * 2
+			min_w:    cross_min + s.pad * 2
+			min_h:    40
+			v_policy: .expanding
+		}
+	}
+	return SizeHint{
+		w:        along + s.pad * 2
+		h:        cross_pref + s.pad * 2
+		min_w:    40
+		min_h:    cross_min + s.pad * 2
+		h_policy: .expanding
+	}
+}
+
+// ShortcutInput: размер внутренней кнопки по самой широкой из надписей - сочетание («нет»)
+// и «Нажмите сочетание...», чтобы поле не прыгало при входе в ожидание.
+pub fn (si &ShortcutInput) measure(ctx &RenderContext) SizeHint {
+	if !si.visible || si.btn == unsafe { nil } {
+		return SizeHint{}
+	}
+	mut probe := *si.btn
+	idle := if si.shortcut.len > 0 {
+		si.shortcut
+	} else if si.empty_text.len > 0 {
+		si.empty_text
+	} else {
+		tr('si.none')
+	}
+	wait := if si.wait_text.len > 0 { si.wait_text } else { tr('si.wait') }
+	probe.text = idle
+	a := probe.measure(ctx)
+	probe.text = wait
+	b := probe.measure(ctx)
+	return SizeHint{
+		...a
+		w:     max_f32(a.w, b.w)
+		min_w: max_f32(a.min_w, b.min_w)
 	}
 }
 

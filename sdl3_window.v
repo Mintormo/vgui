@@ -1806,9 +1806,21 @@ pub fn (mut d Dialog) add_widget(widget &Widget) {
 //
 // max_w/max_h = 0 → без верхней границы.
 pub fn (mut d Dialog) fit_to_content(max_w int, max_h int) {
+	if !d.measure_base(max_w, max_h) {
+		return
+	}
+	if d.win.open {
+		// Диалог уже на экране — применяем сразу.
+		d.win.set_size(d.base_width, d.base_height)
+	}
+}
+
+// measure_base - base_width/base_height (и config) по содержимому в пределах min_* конфига
+// и max_w/max_h (0 - без границы); false - содержимое ничего не просит, размер прежний.
+fn (mut d Dialog) measure_base(max_w int, max_h int) bool {
 	hint := d.win.measure_content()
 	if hint.w <= 0 && hint.h <= 0 {
-		return
+		return false
 	}
 	mut cw := int(hint.w)
 	mut ch := int(hint.h)
@@ -1828,10 +1840,47 @@ pub fn (mut d Dialog) fit_to_content(max_w int, max_h int) {
 	d.base_height = ch
 	d.win.config.width = cw
 	d.win.config.height = ch
-	if d.win.open {
-		// Диалог уже на экране — применяем сразу.
-		d.win.set_size(cw, ch)
+	return true
+}
+
+// Запас под рамку и заголовок окна (px экрана) у свободного места: диалог не упирается
+// в края и панель задач.
+const dialog_margin_w = 40
+const dialog_margin_h = 80
+
+fn C.SDL_GetDisplayUsableBounds(id u32, rect &C.SDL_Rect) bool
+
+// screen_room - свободное место (логические px при масштабе scale) на экране, где диалог
+// появится (экран родителя, без него - свой): рабочая область дисплея (без панелей ОС)
+// минус запас на рамку. 0, 0 - неизвестно, без ограничения.
+fn (d &Dialog) screen_room(scale f32) (int, int) {
+	win := if unsafe { d.parent != nil } { d.parent.sdl_window } else { d.win.sdl_window }
+	if win == unsafe { nil } || scale <= 0 {
+		return 0, 0
 	}
+	id := C.SDL_GetDisplayForWindow(win)
+	if id == 0 {
+		return 0, 0
+	}
+	mut r := C.SDL_Rect{}
+	if !C.SDL_GetDisplayUsableBounds(id, &r) {
+		return 0, 0
+	}
+	return int(f32(r.w - dialog_margin_w) / scale), int(f32(r.h - dialog_margin_h) / scale)
+}
+
+// root_scrollbar_w - толщина полосы прокрутки корневого ScrollBox диалога (0 - корень не
+// прокручивается). Диалог, урезанный по высоте экраном, становится шире на неё: иначе
+// полоса съела бы ширину содержимого (ScrollBox.fit_content просит ширину без полосы).
+fn (d &Dialog) root_scrollbar_w() int {
+	for w in d.win.widgets {
+		if w is ScrollBox {
+			if w.dir == .vertical {
+				return int(w.eff_sb_width() + 0.999)
+			}
+		}
+	}
+	return 0
 }
 
 // Показывает диалог: сбрасывает result в -1, подгоняет размер по содержимому (если auto_size),
@@ -1841,31 +1890,7 @@ pub fn (mut d Dialog) fit_to_content(max_w int, max_h int) {
 // первую.
 pub fn (mut d Dialog) show() {
 	d.result = -1
-	if d.auto_size {
-		d.fit_to_content(d.max_w, d.max_h)
-	}
-
-	mut target_scale := d.win.ctx.ui_scale
-	if unsafe { d.parent != nil } {
-		target_scale = d.parent.ctx.ui_scale
-	}
-	if target_scale < 0.5 {
-		target_scale = 1.0
-	}
-
-	pixel_w := int(f32(d.base_width) * target_scale + 0.5)
-	pixel_h := int(f32(d.base_height) * target_scale + 0.5)
-
-	C.SDL_SetWindowMinimumSize(d.win.sdl_window, pixel_w, pixel_h)
-	C.SDL_SetWindowMaximumSize(d.win.sdl_window, pixel_w, pixel_h)
-	C.SDL_SetWindowSize(d.win.sdl_window, pixel_w, pixel_h)
-
-	if d.win.ctx.ui_scale != target_scale {
-		d.win.set_ui_scale(target_scale)
-	}
-
-	d.win.ctx.screen_width = f32(d.base_width)
-	d.win.ctx.screen_height = f32(d.base_height)
+	d.apply_size()
 
 	pos := dialog_center_pos(d)
 	C.SDL_SetWindowPosition(d.win.sdl_window, pos, pos)
@@ -1878,6 +1903,65 @@ pub fn (mut d Dialog) show() {
 	// по своим правилам и позицию, заданную до показа, не берёт
 	C.SDL_SetWindowPosition(d.win.sdl_window, pos, pos)
 	C.SDL_RaiseWindow(d.win.sdl_window)
+}
+
+// refit - открытый диалог заново по размеру и по центру экрана: после смены масштаба
+// родителя (диалог берёт его масштаб) или содержимого. Закрытый диалог не трогает - его
+// размер посчитает show().
+pub fn (mut d Dialog) refit() {
+	if !d.win.open {
+		return
+	}
+	d.apply_size()
+	pos := dialog_center_pos(d)
+	C.SDL_SetWindowPosition(d.win.sdl_window, pos, pos)
+}
+
+// apply_size - размер окна диалога: по содержимому (auto_size) или заданный, в масштабе
+// родителя и не больше свободного места на экране (screen_room). Не влезло по высоте -
+// окно шире на полосу прокрутки корня (root_scrollbar_w). base_width/base_height не
+// урезаются: на большом экране диалог снова получит полный размер. Размер окна
+// фиксирован (min = max): пользователь его не меняет.
+fn (mut d Dialog) apply_size() {
+	if d.auto_size {
+		d.measure_base(d.max_w, d.max_h)
+	}
+
+	mut target_scale := d.win.ctx.ui_scale
+	if unsafe { d.parent != nil } {
+		target_scale = d.parent.ctx.ui_scale
+	}
+	if target_scale < 0.5 {
+		target_scale = 1.0
+	}
+
+	mut w := d.base_width
+	mut h := d.base_height
+	room_w, room_h := d.screen_room(target_scale)
+	if room_h > 0 && h > room_h {
+		h = room_h
+		w += d.root_scrollbar_w()
+	}
+	if room_w > 0 && w > room_w {
+		w = room_w
+	}
+	// config - логический размер окна: по нему set_ui_scale растягивает окно SDL
+	d.win.config.width = w
+	d.win.config.height = h
+
+	pixel_w := int(f32(w) * target_scale + 0.5)
+	pixel_h := int(f32(h) * target_scale + 0.5)
+
+	C.SDL_SetWindowMinimumSize(d.win.sdl_window, pixel_w, pixel_h)
+	C.SDL_SetWindowMaximumSize(d.win.sdl_window, pixel_w, pixel_h)
+	C.SDL_SetWindowSize(d.win.sdl_window, pixel_w, pixel_h)
+
+	if d.win.ctx.ui_scale != target_scale {
+		d.win.set_ui_scale(target_scale)
+	}
+
+	d.win.ctx.screen_width = f32(w)
+	d.win.ctx.screen_height = f32(h)
 }
 
 // dialog_center_pos - позиция диалога: по центру экрана, на котором

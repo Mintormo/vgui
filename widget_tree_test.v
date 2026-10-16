@@ -505,6 +505,15 @@ fn test_layouted_curve_editor() {
 	assert get_widget_bounds(w) == r
 }
 
+fn test_layouted_shortcut_input() {
+	mut si := shortcut_input('Ctrl+S')
+	mut w := Widget(si)
+	r := Rect{5, 6, 7, 8}
+	set_widget_bounds(mut w, r)
+	assert get_widget_bounds(w) == r
+	assert si.btn.bounds == r, 'внутренняя кнопка - в тех же bounds'
+}
+
 fn test_layouted_notification() {
 	mut w := Widget(&Notification{})
 	r := Rect{5, 6, 7, 8}

@@ -477,6 +477,18 @@ pub fn (mut w MarkdownView) set_bounds(r Rect) {
 	w.dirty = true
 }
 
+pub fn (w &ShortcutInput) bounds_of() Rect {
+	return w.bounds
+}
+
+// ShortcutInput: внутренняя кнопка получает те же bounds (рисует и ловит щелчки она).
+pub fn (mut w ShortcutInput) set_bounds(r Rect) {
+	w.bounds = r
+	if w.btn != unsafe { nil } {
+		w.btn.bounds = r
+	}
+}
+
 pub fn (w &NotificationManager) bounds_of() Rect {
 	return w.bounds
 }

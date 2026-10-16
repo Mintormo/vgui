@@ -70,10 +70,11 @@ const css_kind_by_name = {
 	'canvas':       kind_canvas
 	'icon':         kind_icon
 	'curve':        kind_curve_editor
+	'shortcut':     kind_shortcut_input
 }
 
 // css_max_kind — наибольший kind_* (размер массивов fields_by_kind).
-const css_max_kind = kind_curve_editor
+const css_max_kind = kind_shortcut_input
 
 // css_name_by_kind — обратная таблица: kind -> имя типа (пусто - в CSS нет имени).
 const css_name_by_kind = css_build_name_by_kind()

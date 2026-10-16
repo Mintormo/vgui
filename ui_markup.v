@@ -643,6 +643,8 @@ fn (mut b UiBuilder) build_scroll(mut n UiNode) !&Widget {
 	mut s := if b.prop_flag(mut n, 'horizontal')! { scroll_box_h(0) } else { scroll_box(0) }
 	s.pad = b.prop_num(mut n, 'pad', s.pad)!
 	s.spacing = b.prop_num(mut n, 'gap', s.spacing)!
+	// fit - размер по содержимому (ScrollBox.fit_content: корень диалога «не больше экрана»)
+	s.fit_content = b.prop_flag(mut n, 'fit')!
 	for mut c in n.children {
 		s.add(b.build_child(mut c)!)
 	}
@@ -714,6 +716,12 @@ fn (mut b UiBuilder) build_split(mut n UiNode) !&Widget {
 	s.set_second(b.build_child(mut c1)!)
 	if ratio >= 0 {
 		s.set_ratio(ratio)
+	}
+	// keep=first|second size=N - панель держит N px при изменении размера (Splitter.keep)
+	keep := b.prop_choice(mut n, 'keep', ['ratio', 'first', 'second'], 'ratio')!
+	if keep != 'ratio' {
+		s.set_keep(if keep == 'first' { SplitKeep.first } else { SplitKeep.second }, b.prop_num(mut n,
+			'size', 0)!)
 	}
 	return s
 }
@@ -941,6 +949,10 @@ fn (mut b UiBuilder) build_leaf(mut n UiNode) !&Widget {
 			rb.selected = b.prop_flag(mut n, 'checked')!
 			rb.radio_group = b.prop_str(mut n, 'group', rb.radio_group)
 			return rb
+		}
+		'shortcut' {
+			// поле ввода сочетания (shortcut_input.v); текст - начальное сочетание
+			return shortcut_input(text)
 		}
 		'toggle' {
 			mut ts := toggle_switch(text)

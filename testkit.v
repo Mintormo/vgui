@@ -148,12 +148,20 @@ pub fn sim_wheel(mut app App, w &Window, x f32, y f32, dx f32, dy f32, mods u16)
 // sim_key - нажатие и отпускание клавиши keycode (sdl_k_*; для букв -
 // код символа, например `a`) с модификаторами mods (sdl_kmod_*).
 pub fn sim_key(mut app App, w &Window, keycode int, mods u16) {
+	sim_key_sc(mut app, w, keycode, 0, mods)
+}
+
+// sim_key_sc - то же с местом клавиши scancode (USB HID, sdl3_bindings.v): так нажимают в
+// чужой раскладке - символ (keycode) один, а физическая клавиша другая. Нужен виджетам,
+// которые смотрят на место клавиши (ShortcutInput, shortcut_from_event).
+pub fn sim_key_sc(mut app App, w &Window, keycode int, scancode int, mods u16) {
 	for down in [true, false] {
 		mut ev := C.SDL_Event{}
 		mut kb := unsafe { &C.SDL_KeyboardEvent(&ev) }
 		kb.@type = if down { sdl_keydown } else { sdl_keyup }
 		kb.windowID = w.sdl_id
 		kb.key = keycode
+		kb.scancode = scancode
 		kb.down = down
 		C.SDL_PushEvent(&ev)
 	}
@@ -503,6 +511,11 @@ pub fn (mut t TestUi) wheel(x f32, y f32, dy f32) {
 // key - клавиша с модификаторами: t.key(sdl_k_tab, 0), t.key(`s`, sdl_kmod_ctrl).
 pub fn (mut t TestUi) key(keycode int, mods u16) {
 	sim_key(mut t.app, t.win, keycode, mods)
+}
+
+// key_sc - клавиша с местом scancode: t.key_sc(`з`, 19, 0) - «P» в русской раскладке.
+pub fn (mut t TestUi) key_sc(keycode int, scancode int, mods u16) {
+	sim_key_sc(mut t.app, t.win, keycode, scancode, mods)
 }
 
 // type_text - ввод текста в виджет с фокусом.

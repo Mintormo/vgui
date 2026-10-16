@@ -31,13 +31,23 @@ module vgui
 // ═══════════════════════════════════════════════════════
 
 // Файл splitter.v: Splitter - контейнер из двух панелей (first/second) с перетаскиваемой
-// разделительной полосой. Хранит не пиксели, а долю ratio (0..1) от "полезного" места
-// (ширина/высота минус толщина полосы), поэтому при изменении размера окна панели масштабируются
-// пропорционально; min_first/min_second ограничивают доли снизу. Связи: раскладка - arrange()
+// разделительной полосой. По умолчанию хранит не пиксели, а долю ratio (0..1) от "полезного"
+// места (ширина/высота минус толщина полосы), поэтому при изменении размера окна панели
+// масштабируются пропорционально; min_first/min_second ограничивают доли снизу. Режим keep
+// (.first/.second) - одна панель держит размер keep_size в пикселях (боковая панель
+// инструментов), меняется только другая; ratio тогда выводится из keep_size в arrange(). Связи: раскладка - arrange()
 // выдаёт детям bounds через arrange_child (widget_tree.v), draw() рисует детей в клипе своих
 // прямоугольников, события - сначала полоса, потом дети. Полоса в покое невидима, подсвечивается
 // при наведении и перетаскивании. Тег типа kind_splitter - widget_tag.v. Дети хранятся по
 // указателю и не освобождаются при очистке Splitter.
+
+// SplitKeep - что сохраняется при изменении размера сплиттера: доля (.ratio, обе панели
+// масштабируются) или пиксельный размер одной из панелей (.first / .second).
+pub enum SplitKeep {
+	ratio
+	first
+	second
+}
 
 // Направление деления.
 pub enum SplitDir {
@@ -56,16 +66,24 @@ pub mut:
 	css        CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds     Rect
 	dir        SplitDir = .horizontal
-	ratio      f32      = 0.5               // 0..1, fraction of space for first pane
-	min_first  f32      = 50                // minimum size of first pane (px)
-	min_second f32      = 50                // minimum size of second pane (px)
-	bar_size   f32      = 4                 // thickness of the divider bar (thin; see bar_hit_rect for grab area)
-	bar_color  Color    = Color{0, 0, 0, 0} // 0 = use theme
-	bar_hover  Color    = Color{0, 0, 0, 0}
-	bar_drag   Color    = Color{0, 0, 0, 0}
-	visible    bool     = true
-	enabled    bool     = true // false - полоса не тянется, обе панели неактивны (enabled.v)
-	tooltip    string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	ratio      f32      = 0.5 // 0..1, fraction of space for first pane
+	min_first  f32      = 50  // minimum size of first pane (px)
+	min_second f32      = 50  // minimum size of second pane (px)
+	// keep - какая панель держит размер при изменении размера сплиттера: .ratio - обе
+	// масштабируются долей; .first/.second - эта держит keep_size px, остальное - другой.
+	// Перетаскивание полосы меняет keep_size; узкое окно ужимает панель до min_*, но
+	// keep_size не трогает - окно шире, и панель снова прежняя.
+	keep SplitKeep = .ratio
+	// keep_size - размер удерживаемой панели, px (keep != .ratio); 0 - взять из ratio на
+	// первой раскладке
+	keep_size f32
+	bar_size  f32   = 4                 // thickness of the divider bar (thin; see bar_hit_rect for grab area)
+	bar_color Color = Color{0, 0, 0, 0} // 0 = use theme
+	bar_hover Color = Color{0, 0, 0, 0}
+	bar_drag  Color = Color{0, 0, 0, 0}
+	visible   bool  = true
+	enabled   bool  = true // false - полоса не тянется, обе панели неактивны (enabled.v)
+	tooltip   string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	// Children
 	first  &Widget = unsafe { nil }
 	second &Widget = unsafe { nil }
@@ -124,12 +142,56 @@ pub fn (mut s Splitter) clear_second() {
 
 // Задаёт долю первой панели (ограничивается 0..1). Минимальные размеры применяются при раскладке.
 // Не вызывает on_resize и не инвалидирует кадр.
+// В режиме keep размер удерживаемой панели пересчитается из новой доли на следующей раскладке.
 pub fn (mut s Splitter) set_ratio(r f32) {
 	s.ratio = clamp_f32(r, 0.0, 1.0)
+	if s.keep != .ratio {
+		s.keep_size = 0
+	}
 }
 
 pub fn (s &Splitter) get_ratio() f32 {
 	return s.ratio
+}
+
+// set_keep - панель side (.first/.second) держит размер size px при изменении размера
+// сплиттера; .ratio - снова доля. Применится на следующей раскладке.
+pub fn (mut s Splitter) set_keep(side SplitKeep, size f32) {
+	s.keep = side
+	s.keep_size = if size > 0 { size } else { 0 }
+}
+
+// apply_keep выводит ratio из keep_size при текущем размере (режим keep). Минимумы
+// панелей применяет clamped_ratio, keep_size при этом не меняется. Зовёт arrange();
+// приложению - когда долю нужно знать сразу после set_keep, до следующей раскладки.
+pub fn (mut s Splitter) apply_keep() {
+	if s.keep == .ratio {
+		return
+	}
+	usable := s.total_main() - s.bar_size
+	if usable <= 0 {
+		return
+	}
+	if s.keep_size <= 0 {
+		// Первая раскладка без заданного размера - запомнить то, что дала доля
+		s.keep_size = if s.keep == .first { s.ratio * usable } else { (1 - s.ratio) * usable }
+	}
+	pane := clamp_f32(s.keep_size / usable, 0, 1)
+	s.ratio = if s.keep == .first { pane } else { 1 - pane }
+}
+
+// keep_from_ratio - после перетаскивания: удерживаемая панель получает новый размер
+// (уже с учётом минимумов - это размер, который пользователь видит).
+fn (mut s Splitter) keep_from_ratio() {
+	if s.keep == .ratio {
+		return
+	}
+	usable := s.total_main() - s.bar_size
+	if usable <= 0 {
+		return
+	}
+	r := s.clamped_ratio()
+	s.keep_size = if s.keep == .first { r * usable } else { (1 - r) * usable }
 }
 
 // ─── Geometry helpers ──────────────────────────────────
@@ -259,6 +321,10 @@ pub fn (mut s Splitter) arrange(mut ctx RenderContext) {
 	if is_bounds_unset(s.bounds) {
 		s.bounds = Rect{0, 0, ctx.screen_width, ctx.screen_height}
 	}
+	// Режим keep: доля - под размер удерживаемой панели при нынешнем размере сплиттера.
+	// Здесь, а не по window_resize: раскладка кадра идёт до рассылки события, и панель
+	// иначе на кадр «прыгала» бы долей.
+	s.apply_keep()
 	if unsafe { s.first != nil } {
 		arrange_child(mut s.first, s.first_rect(), mut ctx)
 	}
@@ -488,6 +554,8 @@ fn (mut s Splitter) update_ratio_from_mouse(mx f32, my f32) {
 		r = (usable - s.min_second) / usable
 	}
 	s.ratio = clamp_f32(r, 0.0, 1.0)
+	// Режим keep: тащат полосу - запоминается новый размер удерживаемой панели
+	s.keep_from_ratio()
 }
 
 // Ставит системный курсор изменения размера (стрелки влево-вправо или вверх-вниз),
