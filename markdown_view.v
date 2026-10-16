@@ -255,6 +255,7 @@ pub mut:
 	bounds                Rect
 	visible               bool = true
 	enabled               bool = true
+	tooltip               string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	hovered               bool
 	mode                  MarkdownMode = .preview
 	text                  string

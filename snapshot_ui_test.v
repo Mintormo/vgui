@@ -16,8 +16,8 @@ import os
 // перерисовкой, их бы не увидел. При расхождении рядом с эталоном кладётся
 // <имя>.partial.png - кадр после частичных перерисовок.
 //
-// В сценах нет ничего, что зависит от времени: не используются подсказки
-// (задержка показа по часам) и фокус в полях ввода (мигающий курсор).
+// В сценах нет ничего, что зависит от времени: фокус в полях ввода (мигающий
+// курсор) не используется, а у подсказки часы подменены (Window.tip_clock_ms).
 //
 // Перезаписать эталоны: VGUI_UPDATE_SNAPSHOTS=1 v test snapshot_ui_test.v
 
@@ -108,6 +108,29 @@ fn test_snapshot_hover_button() {
 		act:  fn (mut t TestUi, ui &Ui) {
 			x, y := center(t, ui, 'hover')
 			t.move(x, y)
+		}
+	)!
+}
+
+// Подсказка по полю tooltip (tooltip_manager.v): наведение, срок по
+// подменённым часам. Подсказка ряда видна над подписью без своей подсказки.
+fn test_snapshot_tooltip() {
+	snap_ui(
+		name: 'tooltip'
+		vui:  '
+vbox pad=12 gap=10
+  hbox gap=8 tooltip="Подсказка всего ряда"
+    label "Яркость" #lbl
+    button "Сохранить" tooltip="Сохранить снимок"
+'
+		act:  fn (mut t TestUi, ui &Ui) {
+			t.win.tip_clock_ms = 1000
+			x, y := center(t, ui, 'lbl')
+			t.move(x, y)
+			t.frame()
+			t.win.tip_clock_ms += 1000
+			t.frame()
+			assert t.win.tips.showing
 		}
 	)!
 }

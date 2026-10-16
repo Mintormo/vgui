@@ -60,6 +60,7 @@ pub mut:
 	placeholder string
 	visible     bool = true
 	enabled     bool = true
+	tooltip     string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	focused     bool
 	hovered     bool
 	max_len     int = 262144
@@ -385,7 +386,11 @@ pub fn (mut ta TextArea) draw(mut ctx RenderContext) {
 		for pi, ph_line in ph_lines {
 			row_y := cr.y + f32(pi) * line_step
 			if row_y > cr.y + cr_h { break }
-			ctx.draw_text_with_font(ph_line, cr.x, row_y, if en { ctx.theme.text_hint } else { ctx.theme.text_disabled }, font)
+			ctx.draw_text_with_font(ph_line, cr.x, row_y, if en {
+				ctx.theme.text_hint
+			} else {
+				ctx.theme.text_disabled
+			}, font)
 		}
 		ctx.pop_clip()
 		return

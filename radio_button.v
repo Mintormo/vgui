@@ -35,6 +35,7 @@ pub mut:
 	selected    bool
 	visible     bool = true
 	enabled     bool = true
+	tooltip     string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	hovered     bool
 	focus_anim  Anim = anim_smooth(anim_tau_focus)  // 0→1: кольцо фокуса и подсветка рамки
 	sel_anim    Anim = anim_smooth(anim_tau_toggle) // 0→1: радиус внутренней точки выбора

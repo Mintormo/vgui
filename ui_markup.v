@@ -490,6 +490,13 @@ fn (mut b UiBuilder) build(mut n UiNode) !&Widget {
 	if b.prop_flag(mut n, 'disabled')! {
 		set_widget_enabled(mut w, false)
 	}
+	// tooltip - у любого элемента (поле tooltip, показывает окно -
+	// tooltip_manager.v); у контейнера - подсказка всей его площади
+	if b.has_prop(mut n, 'tooltip') {
+		if !set_widget_tooltip(mut w, b.prop_str(mut n, 'tooltip', '')) {
+			return b.fail(n, 'tooltip: у ${n.typ} подсказки нет')
+		}
+	}
 	b.register_id(n, w)!
 	// #id и .классы - ещё и метки для селекторов CSS (css_apply.v)
 	if n.id.len > 0 {
@@ -913,7 +920,6 @@ fn (mut b UiBuilder) build_leaf(mut n UiNode) !&Widget {
 			bt.icon_name = b.prop_str(mut n, 'icon', '')
 			bt.toggle = b.prop_flag(mut n, 'toggle')!
 			bt.active = b.prop_flag(mut n, 'active')!
-			bt.tooltip = b.prop_str(mut n, 'tooltip', '')
 			bt.style = match b.prop_choice(mut n, 'style', ['normal', 'accent', 'outline', 'flat',
 				'danger', 'success'], 'normal')! {
 				'accent' { ButtonStyle.accent }

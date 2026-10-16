@@ -24,6 +24,7 @@ pub mut:
 	on          bool
 	visible     bool = true
 	enabled     bool = true
+	tooltip     string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	hovered     bool
 	focus_anim  Anim = Anim{
 		tau_ms:  anim_tau_focus

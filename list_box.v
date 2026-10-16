@@ -116,6 +116,7 @@ pub mut:
 	pad         f32  = 4
 	visible     bool = true
 	enabled     bool = true
+	tooltip     string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	focused     bool
 	hovered     bool
 	hover_index int = -1

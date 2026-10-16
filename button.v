@@ -70,10 +70,9 @@ pub mut:
 	icon_name string
 	// Legacy: text-based icon (emoji/symbol prefix)
 	icon_text string
-	// tooltip - всплывающая подсказка кнопки ("" - без подсказки). Кнопка сама
-	// держит виджет Tooltip (tip, создаётся лениво) и обслуживает его в draw/
-	// handle_event: отдельный Tooltip в окне не нужен, а подсказка кнопки,
-	// убранной из дерева, не всплывает над её старым местом (её draw не зовётся).
+	// tooltip - всплывающая подсказка ("" - без подсказки). Поле есть у всех
+	// виджетов; показывает подсказку окно (tooltip_manager.v), сама кнопка её
+	// не рисует.
 	tooltip      string
 	radius       f32       = -1 // < 0 - брать радиус из темы (eff_radius)
 	border_width f32       = 1
@@ -87,8 +86,6 @@ pub mut:
 	active_anim Anim // smooth animation for toggle active state
 	focus_group int
 	no_focus    bool // if true, button is excluded from focus chain and focus
-mut:
-	tip &Tooltip = unsafe { nil } // подсказка по полю tooltip, см. sync_tip
 }
 
 // ─── Constructors ──────────────────────────────────────
@@ -192,11 +189,6 @@ pub fn (mut b Button) draw(mut ctx RenderContext) {
 	en := ctx.is_enabled(b.enabled)
 	if !b.visible {
 		return
-	}
-	// Подсказка — до проверки клипа: пока она ждёт задержку или показана, кадры
-	// полные (mark_anim / prev_overlayish), и кнопка рисуется каждый кадр.
-	if b.sync_tip() {
-		b.tip.draw(mut ctx)
 	}
 	if !ctx.is_in_clip(b.bounds) {
 		return
@@ -417,15 +409,7 @@ fn (mut b Button) do_activate() {
 // фокусирует (если не no_focus) и взводит pressed; mouse_up над кнопкой
 // активирует; Tab двигает фокус; Space/Enter активируют сфокусированную.
 pub fn (mut b Button) handle_event(event &GuiEvent, app &App) bool {
-	if !b.visible {
-		return false
-	}
-	// Подсказка видит события и у неактивной кнопки — объяснить, почему она
-	// недоступна, её обычная работа. Событие она не поглощает.
-	if b.sync_tip() {
-		b.tip.handle_event(event, app)
-	}
-	if !b.enabled {
+	if !b.visible || !b.enabled {
 		return false
 	}
 
@@ -482,24 +466,4 @@ pub fn (mut b Button) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	return false
-}
-
-// sync_tip приводит внутреннюю подсказку в соответствие полю tooltip: создаёт
-// её при первом непустом тексте (привязанной к этой кнопке), обновляет текст.
-// Возвращает true, если подсказку нужно обслуживать.
-fn (mut b Button) sync_tip() bool {
-	if b.tooltip.len == 0 {
-		if b.tip != unsafe { nil } {
-			b.tip.showing = false
-		}
-		return false
-	}
-	if b.tip == unsafe { nil } {
-		mut t := tooltip(b.tooltip)
-		t.attach(b)
-		b.tip = t
-	} else if b.tip.text != b.tooltip {
-		b.tip.text = b.tooltip
-	}
-	return true
 }

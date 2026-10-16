@@ -36,6 +36,7 @@ pub mut:
 	big_step f32  = 10
 	visible  bool = true
 	enabled  bool = true
+	tooltip  string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	hovered  bool
 	dragging bool
 	focused  bool

@@ -59,6 +59,7 @@ pub mut:
 	font_size  int
 	visible    bool = true
 	enabled    bool = true // false - текст цветом text_disabled (enabled.v)
+	tooltip    string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	wrap       bool
 	clip       bool
 	pad        f32 = 4

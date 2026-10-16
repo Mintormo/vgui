@@ -129,6 +129,7 @@ pub mut:
 	bounds   Rect
 	visible  bool = true
 	enabled  bool = true
+	tooltip  string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	focused  bool
 	hovered  bool
 	readonly bool

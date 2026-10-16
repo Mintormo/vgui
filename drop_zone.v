@@ -33,8 +33,9 @@ pub mut:
 	text         string = 'Перетащите файлы сюда'
 	visible      bool   = true
 	enabled      bool   = true // false - сбросы и клик не принимаются, вид приглушён (enabled.v)
-	accept_files bool   = true
-	accept_text  bool   = true
+	tooltip      string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	accept_files bool = true
+	accept_text  bool = true
 	hovering     bool // drag currently over the zone
 	// Click-to-browse: a left click opens a file-open dialog.
 	click_to_browse        bool

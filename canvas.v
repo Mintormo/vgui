@@ -129,6 +129,7 @@ pub mut:
 	pixels   []u8
 	visible  bool = true
 	enabled  bool = true
+	tooltip  string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	// passive - холст только рисует: события не берёт и в фокус-учёт не
 	// встаёт, ввод идёт виджету под ним (как у Icon/ImageBackground). Не
 	// путать с enabled = false - тот рисует холст неактивным (вуаль).

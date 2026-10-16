@@ -88,6 +88,7 @@ pub mut:
 	placeholder string
 	visible     bool = true
 	enabled     bool = true
+	tooltip     string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	focused     bool
 	hovered     bool
 	pw_mode     bool

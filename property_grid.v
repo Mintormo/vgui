@@ -266,6 +266,7 @@ pub mut:
 	roots       []&Property
 	visible     bool = true
 	enabled     bool = true
+	tooltip     string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	hovered     bool
 	focused     bool
 	focus_anim  Anim = anim_smooth(anim_tau_focus)

@@ -294,6 +294,14 @@ pub mut:
 	// left as a ghost on the persistent render target — so their presence
 	// (this frame OR last frame) forces a full frame.
 	prev_overlayish bool
+	// ─── Подсказки по полю tooltip (tooltip_manager.v, PROJECT.md, «Подсказки») ───
+	// tooltip_delay_ms — задержка до показа подсказки; в режиме просмотра
+	// (только что показывалась другая) подсказка появляется сразу.
+	tooltip_delay_ms u32 = tt_default_delay
+	// Состояние менеджера подсказок окна: чья подсказка, когда показать.
+	tips TipManager
+	// tip_clock_ms — подмена часов подсказок в тестах (0 — SDL_GetTicks).
+	tip_clock_ms u64
 }
 
 // Создаёт окно: SDL_Window с флагами из cfg -> размеры/позиция/иконка -> рендерер (с реестром
@@ -1035,6 +1043,10 @@ fn (mut w Window) render() {
 	screen_rect := Rect{0, 0, w.ctx.screen_width, w.ctx.screen_height}
 	size_changed := w.ctx.screen_width != w.last_layout_w || w.ctx.screen_height != w.last_layout_h
 
+	// Подсказка по полю tooltip (tooltip_manager.v): пора показать - встаёт в
+	// pending_tooltips ДО снимков ниже, и кадр с ней получается полным.
+	w.tip_frame()
+
 	// Snapshots taken BEFORE the widget draw loop — used only to decide
 	// whether this frame must be FULL. A widget's draw() can legitimately
 	// change either condition while the loop runs (e.g. ComboBox/ContextMenu
@@ -1350,6 +1362,9 @@ fn (mut w Window) dispatch_event_inner(ev &GuiEvent, app &App) {
 	// событие (переключение вкладки, скролл, add в контейнер) взвело
 	// layout_dirty через invalidate_all() в конце этой же функции.
 	w.arrange_if_needed()
+	// Подсказка: клик, клавиша, колесо её прячут, уход мыши - сбрасывает.
+	// До оверлея - попап может поглотить событие.
+	w.tip_on_event(ev)
 	if w.ctx.overlay_ev != unsafe { nil } {
 		if w.ctx.overlay_ev(ev, app) {
 			w.ctx.invalidate_all()
@@ -1494,19 +1509,11 @@ fn (w &Window) hover_partial_ok(ev &GuiEvent) bool {
 // добавленный рисуется поверх, значит он же и перехватывает курсор.
 // Видимость корня проверяется здесь — widget_at смотрит только на детей.
 fn (w &Window) hover_target(x f32, y f32) (voidptr, Rect) {
-	for i := w.widgets.len - 1; i >= 0; i-- {
-		cw := w.widgets[i]
-		if unsafe { cw == nil } {
-			continue
-		}
-		if !widget_is_visible(cw) {
-			continue
-		}
-		if found := widget_at(cw, x, y) {
-			return voidptr(found), get_widget_bounds(found)
-		}
+	hit := w.hit_at(x, y)
+	if unsafe { hit.hit == nil } {
+		return unsafe { nil }, Rect{}
 	}
-	return unsafe { nil }, Rect{}
+	return voidptr(hit.hit), get_widget_bounds(hit.hit)
 }
 
 // invalidate_hover_change — обработка mouse_move вместо invalidate_all().
@@ -1516,7 +1523,12 @@ fn (w &Window) hover_target(x f32, y f32) (voidptr, Rect) {
 // движения, и первый же следующий частичный кадр перерисовал бы не тот
 // прямоугольник.
 fn (mut w Window) invalidate_hover_change(ev &GuiEvent) {
-	ptr, rect := w.hover_target(ev.mouse_x, ev.mouse_y)
+	// Один обход дерева на движение мыши - и для перерисовки hover, и для
+	// подсказки (tooltip_manager.v)
+	hit := w.hit_at(ev.mouse_x, ev.mouse_y)
+	w.tip_on_hover(hit, ev)
+	ptr := voidptr(hit.hit)
+	rect := if unsafe { hit.hit == nil } { Rect{} } else { get_widget_bounds(hit.hit) }
 	prev_ptr := w.hover_widget
 	prev_rect := w.hover_rect
 	w.hover_widget = ptr

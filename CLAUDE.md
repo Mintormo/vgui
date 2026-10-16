@@ -143,6 +143,11 @@ mode. Масштаб рендера выставляется заново пос
 `ctx.focus_block(&w)`. Контейнер рисует детей между `ctx.begin_disabled(own)`/`end_disabled(own)` и при
 `!enabled` не передаёт им ввод (`is_input_event`).
 
+**Подсказки** («Подсказки»). Поле `tooltip` у любого виджета; показывает её менеджер окна
+(`tooltip_manager.v`) по тому же обходу `widget_at`, что и hover. Виджет подсказку не рисует. Служебный
+слой, растянутый окном на весь экран (как `NotificationManager`), обязан быть прозрачным для курсора
+(`hit_passes_through`) - иначе под ним не работают ни hover, ни подсказки.
+
 **Оверлеи попапов** («Оверлеи попапов»). Один слот на окно с владельцем: только
 `ctx.set_overlay(owner, draw, ev, close)` / `ctx.clear_overlay(owner)`, никогда не присваивание
 `overlay_cb`/`overlay_ev`. `owner` - адрес самого виджета.
@@ -166,6 +171,7 @@ mode. Масштаб рендера выставляется заново пос
    поле `visible bool`) и проверка в `widget_tree_test.v`. Контейнер - ещё `arrange()`.
 3. Поле `enabled bool = true` и неактивный вид через `en := ctx.is_enabled(...)` (сложному содержимому -
    `ctx.draw_disabled_veil`); контейнер - `begin_disabled`/`end_disabled` вокруг детей.
+   Поле `tooltip string` + строка в `tooltip_manager_test.v` (подсказку рисует окно, не виджет).
 4. По желанию: `measure()` в `layout_measure.v`; `FocusKind` + ветки в `focus.v` для фокусируемых.
 5. Пример `examples/NN_виджет.v`.
 

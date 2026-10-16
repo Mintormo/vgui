@@ -317,7 +317,11 @@ pub fn (mut app App) pump_events() bool {
 		app.invalidate_all_windows()
 	}
 
-	return had_events || posted || tray_acted || restyled
+	// Подсказке пора показаться (tooltip_manager.v): событий не было, но кадр
+	// нужен - его tip_frame и поставит подсказку на экран.
+	tip_due := app.tooltip_wait_ms() == 0
+
+	return had_events || posted || tray_acted || restyled || tip_due
 }
 
 // update_running гасит running, когда не осталось ни одного открытого окна.
@@ -421,7 +425,15 @@ pub fn (mut app App) process_events() bool {
 			return false
 		}
 	} else {
-		if !C.SDL_WaitEventTimeout(&raw_event, i32(100)) {
+		// Спим до события, но не дольше 100 мс и не дольше, чем до срока
+		// ближайшей подсказки (tooltip_manager.v): иначе она появлялась бы с
+		// опозданием до 100 мс.
+		mut timeout := i32(100)
+		until_tip := app.tooltip_wait_ms()
+		if until_tip >= 0 && until_tip < 100 {
+			timeout = i32(until_tip)
+		}
+		if !C.SDL_WaitEventTimeout(&raw_event, timeout) {
 			return false
 		}
 	}

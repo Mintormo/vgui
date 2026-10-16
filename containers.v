@@ -371,6 +371,7 @@ pub struct HBox {
 pub mut:
 	type_tag int = kind_hbox // тег типа, см. widget_tag.v
 	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
+	tooltip  string  // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	box      BoxLayout
 }
 
@@ -461,6 +462,7 @@ pub struct VBox {
 pub mut:
 	type_tag int = kind_vbox // тег типа, см. widget_tag.v
 	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
+	tooltip  string  // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	box      BoxLayout
 }
 
@@ -551,12 +553,13 @@ pub mut:
 	type_tag int = kind_panel // тег типа, см. widget_tag.v
 	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds   Rect
-	bg       Color   = Color{0, 0, 0, 0}
-	border   Color   = Color{0, 0, 0, 0}
-	radius   f32     = -1
-	pad      f32     = 8
-	visible  bool    = true
-	enabled  bool    = true // false - неактивно всё содержимое (enabled.v)
+	bg       Color = Color{0, 0, 0, 0}
+	border   Color = Color{0, 0, 0, 0}
+	radius   f32   = -1
+	pad      f32   = 8
+	visible  bool  = true
+	enabled  bool  = true // false - неактивно всё содержимое (enabled.v)
+	tooltip  string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	child    &Widget = unsafe { nil }
 }
 
@@ -626,8 +629,9 @@ pub mut:
 	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds   Rect
 	children []&Widget
-	visible  bool  = true
-	enabled  bool  = true // false - неактивны все слои (enabled.v)
+	visible  bool = true
+	enabled  bool = true // false - неактивны все слои (enabled.v)
+	tooltip  string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	bg       Color = Color{0, 0, 0, 0}
 }
 
@@ -704,6 +708,7 @@ pub mut:
 	bounds   Rect
 	visible  bool = true
 	enabled  bool = true // ни на что не влияет: флаг для единообразия set_enabled
+	tooltip  string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 }
 
 // create_spacer - распорка: забирает свободное место (прижать
@@ -731,10 +736,11 @@ pub mut:
 	type_tag int = kind_centered // тег типа, см. widget_tag.v
 	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds   Rect
-	child_w  f32     = 200
-	child_h  f32     = 40
-	visible  bool    = true
-	enabled  bool    = true // false - неактивен ребёнок (enabled.v)
+	child_w  f32  = 200
+	child_h  f32  = 40
+	visible  bool = true
+	enabled  bool = true // false - неактивен ребёнок (enabled.v)
+	tooltip  string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	bg       Color   = Color{0, 0, 0, 0}
 	child    &Widget = unsafe { nil }
 }
@@ -847,8 +853,9 @@ pub mut:
 	content_w    f32 // user-specified content width (horizontal mode); 0 = auto
 	scroll_y     f32
 	scroll_x     f32
-	visible      bool  = true
-	enabled      bool  = true // false - не прокручивается, содержимое неактивно (enabled.v)
+	visible      bool = true
+	enabled      bool = true // false - не прокручивается, содержимое неактивно (enabled.v)
+	tooltip      string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	bg           Color = Color{0, 0, 0, 0}
 	children     []&Widget
 	scroll_speed f32 = 30

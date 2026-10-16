@@ -65,6 +65,7 @@ pub mut:
 	bar_drag   Color    = Color{0, 0, 0, 0}
 	visible    bool     = true
 	enabled    bool     = true // false - полоса не тянется, обе панели неактивны (enabled.v)
+	tooltip    string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	// Children
 	first  &Widget = unsafe { nil }
 	second &Widget = unsafe { nil }

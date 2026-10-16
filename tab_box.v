@@ -96,6 +96,7 @@ pub mut:
 	text_dir    TabTextDir = .horizontal
 	visible     bool       = true
 	enabled     bool       = true
+	tooltip     string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	focused     bool
 	focus_anim  Anim = anim_smooth(anim_tau_focus)
 	focus_group int

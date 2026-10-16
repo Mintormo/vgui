@@ -57,6 +57,7 @@ pub mut:
 	margin    f32 // inset from edges (both sides)
 	visible   bool = true
 	enabled   bool = true // false - линия приглушена (enabled.v)
+	tooltip   string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 }
 
 // ─── Constructors ──────────────────────────────────────

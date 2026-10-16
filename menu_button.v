@@ -52,7 +52,8 @@ pub mut:
 	style       ButtonStyle = .normal
 	visible     bool        = true
 	enabled     bool        = true
-	hovered     bool // mouse over the widget as a whole
+	tooltip     string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	hovered     bool   // mouse over the widget as a whole
 	// hovered_arrow — курсор над зоной стрелки (подмножество hovered); pressed / pressed_arrow — какая зона зажата (клик срабатывает по отпусканию)
 	hovered_arrow bool // mouse over the arrow zone specifically
 	pressed       bool // action zone pressed

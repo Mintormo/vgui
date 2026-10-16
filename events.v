@@ -29,6 +29,9 @@ pub enum EventType {
 	drop_text
 	drop_position
 	drop_complete
+	// курсор ушёл из окна (SDL_EVENT_WINDOW_MOUSE_LEAVE): гасит подсказку
+	// (tooltip_manager.v). Добавлено в конец - номера прочих не сдвигаются.
+	window_mouse_leave
 }
 
 // MouseButton - кнопка мыши, вызвавшая событие; none_ - не левая/средняя/правая (боковые и т.п.) или событие без кнопки.
@@ -132,7 +135,7 @@ pub fn get_event_window_id(raw &C.SDL_Event) u32 {
 		sdl_event_window_shown, sdl_event_window_hidden, sdl_event_window_exposed,
 		sdl_event_window_resized, sdl_event_window_pixel_size_changed, sdl_event_window_minimized,
 		sdl_event_window_maximized, sdl_event_window_restored, sdl_event_window_focus_gained,
-		sdl_event_window_focus_lost, sdl_event_window_close_requested {
+		sdl_event_window_focus_lost, sdl_event_window_close_requested, sdl_event_window_mouse_leave {
 			we := unsafe { &C.SDL_WindowEvent(raw) }
 			return we.windowID
 		}
@@ -288,6 +291,11 @@ pub fn parse_sdl_event(raw &C.SDL_Event) GuiEvent {
 		sdl_event_window_focus_lost {
 			we := unsafe { &C.SDL_WindowEvent(raw) }
 			ev.typ = .window_focus_lost
+			ev.timestamp = we.timestamp
+		}
+		sdl_event_window_mouse_leave {
+			we := unsafe { &C.SDL_WindowEvent(raw) }
+			ev.typ = .window_mouse_leave
 			ev.timestamp = we.timestamp
 		}
 		// SDL3 drag-and-drop. x/y are window-relative (logical pixels),

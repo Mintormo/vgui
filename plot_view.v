@@ -92,6 +92,7 @@ pub mut:
 	bounds  Rect
 	visible bool = true
 	enabled bool = true
+	tooltip string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	hovered bool
 	// Viewport in plot-space coordinates
 	// view_x/view_y — левый и нижний край видимой области, view_w/view_h — её размеры (в единицах данных)

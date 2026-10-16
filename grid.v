@@ -50,6 +50,7 @@ pub mut:
 	use_panel_bg bool
 	visible      bool = true
 	enabled      bool = true // false - неактивны все ячейки (enabled.v)
+	tooltip      string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	clip         bool = true
 }
 

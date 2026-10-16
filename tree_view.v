@@ -219,6 +219,7 @@ pub mut:
 	selected    &TreeNode = unsafe { nil }
 	visible     bool      = true
 	enabled     bool      = true
+	tooltip     string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	focused     bool
 	hovered     bool
 	focus_anim  Anim = anim_smooth(anim_tau_focus)

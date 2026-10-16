@@ -51,6 +51,7 @@ pub mut:
 	color      Color = Color{255, 0, 0, 255}
 	visible    bool  = true
 	enabled    bool  = true
+	tooltip    string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	hovered    bool
 	show_alpha bool       = true
 	on_change  fn (Color) = unsafe { nil }

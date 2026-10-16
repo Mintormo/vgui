@@ -37,6 +37,7 @@ pub mut:
 	step        int  = 1
 	visible     bool = true
 	enabled     bool = true
+	tooltip     string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	focus_group int
 	focus_anim  Anim = Anim{
 		tau_ms:  anim_tau_focus

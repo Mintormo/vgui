@@ -861,12 +861,37 @@ pub fn widget_is_visible(w &Widget) bool {
 // стоит не ошибочного клика, а лишь лишней/недостающей
 // перерисовки прямоугольника.
 pub fn widget_at(w &Widget, x f32, y f32) ?&Widget {
-	return widget_at_impl(w, x, y, 0)
+	mut tip := TipHit{}
+	return widget_at_impl(w, x, y, 0, mut tip)
+}
+
+// TipHit — результат widget_tip_at. hit — то же, что вернул бы widget_at
+// (nil — точка мимо). owner — ближайший к hit виджет с непустым полем
+// tooltip: сам hit или его предок на пути от корня. Так подсказку можно
+// повесить и на весь ряд (HBox с подписью и ползунком), а не только на
+// лист. owner == nil — подсказки нет, text — её текст.
+pub struct TipHit {
+pub mut:
+	hit   &Widget = unsafe { nil }
+	owner &Widget = unsafe { nil }
+	text  string
+}
+
+// widget_tip_at — виджет под точкой (как widget_at) и подсказка для неё за
+// один обход дерева. Используется окном (Window.hit_at, tooltip_manager.v).
+pub fn widget_tip_at(w &Widget, x f32, y f32) TipHit {
+	mut tip := TipHit{}
+	if found := widget_at_impl(w, x, y, 0, mut tip) {
+		tip.hit = unsafe { found }
+	}
+	return tip
 }
 
 // widget_at_impl — рекурсивная часть widget_at; depth защищает от циклов
-// (см. widget_tree_max_depth).
-fn widget_at_impl(w &Widget, x f32, y f32, depth int) ?&Widget {
+// (см. widget_tree_max_depth). tip заполняется на обратном ходе рекурсии:
+// самый глубокий кадр завершается первым, поэтому владельцем подсказки
+// становится ближайший к найденному виджету носитель непустого tooltip.
+fn widget_at_impl(w &Widget, x f32, y f32, depth int, mut tip TipHit) ?&Widget {
 	// Нулевой/отрицательный размер = виджет сейчас не нарисован (скрыт,
 	// вне видимой области, ещё не раскладывался) — клик ловить не должен.
 	b := get_widget_bounds(w)
@@ -894,12 +919,87 @@ fn widget_at_impl(w &Widget, x f32, y f32, depth int) ?&Widget {
 			if !widget_is_visible(c) {
 				continue
 			}
-			if found := widget_at_impl(c, x, y, depth + 1) {
+			if found := widget_at_impl(c, x, y, depth + 1, mut tip) {
+				take_tip(mut tip, w)
 				return found
 			}
 		}
 	}
+	// Ни один ребёнок не попал. «Прозрачный» виджет (см. hit_passes_through)
+	// курсор не ловит: точка уходит виджету, лежащему под ним.
+	if hit_passes_through(w, x, y) {
+		return none
+	}
+	take_tip(mut tip, w)
 	return unsafe { w }
+}
+
+// take_tip делает w владельцем подсказки, если её ещё нет, а у w есть текст.
+fn take_tip(mut tip TipHit, w &Widget) {
+	if unsafe { tip.owner != nil } {
+		return
+	}
+	text := widget_tooltip(w)
+	if text.len > 0 {
+		tip.owner = unsafe { w }
+		tip.text = text
+	}
+}
+
+// hit_passes_through — виджет не ловит курсор в точке (x, y), хотя его
+// bounds её содержат. Window.arrange раздаёт ВСЕМ верхнеуровневым виджетам
+// окна прямоугольник всего экрана, а часть из них — не видимое содержимое,
+// а служебные слои поверх дерева: без этой проверки hover_target и поиск
+// подсказки упирались бы в них и до интерфейса под ними не доходили.
+//   - Tooltip — сам рисуется в отдельном слое, места в раскладке не имеет;
+//   - ContextMenu — привязка меню к цели, попап живёт в слоте оверлея;
+//   - NotificationManager — прозрачен везде, кроме видимых уведомлений;
+//   - Canvas.passive — холст только рисует, события идут виджету под ним.
+fn hit_passes_through(w &Widget, x f32, y f32) bool {
+	if w is Tooltip || w is ContextMenu {
+		return true
+	}
+	if w is Canvas {
+		return w.passive
+	}
+	if w is NotificationManager {
+		for n in w.notifications {
+			if n.visible && !n.dismissed && n.bounds.contains(x, y) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// HasTooltip — поле-интерфейс (как HasVisibility/HasEnabled): ему
+// удовлетворяет любой тип с полем верхнего уровня `tooltip string`. Поле есть
+// у всех виджетов, кроме служебных (Tooltip, ContextMenu, Notification,
+// NotificationManager) и не-виджетов (MenuItem, TreeNode, Property);
+// полноту проверяет при компиляции tooltip_manager_test.v.
+pub interface HasTooltip {
+mut:
+	tooltip string
+}
+
+// widget_tooltip — текст подсказки виджета ("" — нет или тип без поля).
+pub fn widget_tooltip(w &Widget) string {
+	if w is HasTooltip {
+		return w.tooltip
+	}
+	return ''
+}
+
+// set_widget_tooltip задаёт подсказку любому виджету; false — у типа нет
+// поля (служебные слои). Кадр не инвалидирует (как и прочие сеттеры): в
+// живом цикле новый текст подхватится со следующего кадра.
+pub fn set_widget_tooltip(mut w Widget, text string) bool {
+	if mut w is HasTooltip {
+		w.tooltip = text
+		return true
+	}
+	return false
 }
 
 // HasWheel - виджет, который берёт колесо мыши (прокрутка, смена

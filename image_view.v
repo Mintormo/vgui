@@ -70,6 +70,7 @@ pub mut:
 	mode         ImageMode = .fit
 	visible      bool      = true
 	enabled      bool      = true
+	tooltip      string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	hovered      bool
 	pad          f32   = 2
 	bg_color     Color = Color{0, 0, 0, 0}

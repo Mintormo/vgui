@@ -28,8 +28,9 @@ pub mut:
 	type_tag  int = kind_spinner // тег типа, см. widget_tag.v
 	css       CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds    Rect
-	visible   bool         = true
-	enabled   bool         = true // false - приглушённые цвета (enabled.v)
+	visible   bool = true
+	enabled   bool = true // false - приглушённые цвета (enabled.v)
+	tooltip   string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	spinning  bool         = true
 	style     SpinnerStyle = .arc
 	color     Color        = Color{0, 0, 0, 0}

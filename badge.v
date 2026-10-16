@@ -43,8 +43,9 @@ pub mut:
 	dot_mode bool // show only a colored dot, no text
 	visible  bool = true
 	enabled  bool = true // false - приглушённые цвета (enabled.v)
-	pad_x    f32  = 7
-	pad_y    f32  = 3
+	tooltip  string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	pad_x    f32 = 7
+	pad_y    f32 = 3
 }
 
 // badge создаёт значок с произвольным текстом (вариант .info).

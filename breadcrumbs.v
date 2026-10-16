@@ -79,6 +79,7 @@ pub mut:
 	items    []string
 	visible  bool = true
 	enabled  bool = true
+	tooltip  string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	hovered  bool
 	// Appearance
 	separator         string    = bc_default_separator

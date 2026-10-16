@@ -56,8 +56,9 @@ pub mut:
 	type_tag int = kind_curve_editor // тег типа, см. widget_tag.v
 	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	bounds   Rect
-	visible  bool         = true
-	enabled  bool         = true
+	visible  bool = true
+	enabled  bool = true
+	tooltip  string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	points   []CurvePoint = [CurvePoint{0, 0}, CurvePoint{1, 1}]
 	// Цвет кривой; a == 0 — акцент темы. Значение по умолчанию задано
 	// явно: у Color альфа по умолчанию 255 (это был бы чёрный)

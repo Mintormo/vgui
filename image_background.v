@@ -44,7 +44,8 @@ pub mut:
 	mode          BgMode = .fill
 	visible       bool   = true
 	enabled       bool   = true // false - картинка приглушена вуалью (enabled.v)
-	bg_color      Color  = Color{0, 0, 0, 0}
+	tooltip       string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	bg_color      Color = Color{0, 0, 0, 0}
 	corner_radius f32
 	// Cached texture (same pattern + ABA guard as ImageView)
 	texture          voidptr = unsafe { nil }

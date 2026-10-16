@@ -27,6 +27,7 @@ pub mut:
 	day       int // 1-31
 	visible   bool = true
 	enabled   bool = true
+	tooltip   string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	hovered   bool
 	on_change fn (int, int, int) = unsafe { nil }
 }
