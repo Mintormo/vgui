@@ -46,6 +46,9 @@ module vgui
 
 // Ширина полосы прокрутки (логические px) и границы масштаба (экранных px на пиксель буфера).
 const cv_sb_w = f32(12)
+// Отступ миникарты от края видимой части и её рамка (подложка)
+const cv_nav_margin = f32(10)
+const cv_nav_pad = f32(3)
 const cv_min_zoom = f32(0.02)
 const cv_max_zoom = f32(32.0)
 
@@ -210,6 +213,13 @@ pub mut:
 	// buffer pixels there, screen_scale gives screen px per buffer px). It never
 	// touches the pixel buffer, so redrawing it costs no texture upload. V only.
 	on_overlay fn (mut ctx RenderContext) = unsafe { nil }
+	// Миникарта (навигатор): при увеличении, когда изображение не
+	// помещается целиком, в правом нижнем углу - всё изображение
+	// уменьшенным и рамка видимой части; щелчок и перетаскивание по ней
+	// переносят вид в эту точку (см. nav_rect, draw_navigator).
+	navigator      bool
+	navigator_size f32 = 160 // длинная сторона миникарты, px
+	nav_dragging   bool
 	// ── Detail layer (high-resolution tile over the image) ──
 	// A second RGBA picture drawn over the buffer rect detail_rect (BUFFER
 	// pixels, fractional) after the image and before on_overlay - e.g. a
@@ -837,6 +847,80 @@ fn (c &Canvas) hsb_rects() (Rect, Rect) {
 	return track, thumb
 }
 
+// ─── Миникарта ─────────────────────────────────────────
+
+// nav_rect - где рисуется миникарта (экранные px); пусто - не нужна:
+// выключена, режим вписывания/растяжки или изображение видно целиком.
+// Пропорции - как у буфера, длинная сторона navigator_size, но не больше
+// половины видимой части (на маленьком окне не закрывать снимок).
+fn (c &Canvas) nav_rect() Rect {
+	if !c.navigator || c.stretch || c.auto_fit || c.width <= 0 || c.height <= 0 {
+		return Rect{}
+	}
+	h_sb, v_sb := c.needs_scrollbars()
+	if !h_sb && !v_sb {
+		return Rect{}
+	}
+	vp := c.viewport()
+	size := min_f32(c.navigator_size, min_f32(vp.w, vp.h) * 0.5)
+	if size < 24 {
+		return Rect{}
+	}
+	mut w := size
+	mut h := size
+	if c.width >= c.height {
+		h = size * f32(c.height) / f32(c.width)
+	} else {
+		w = size * f32(c.width) / f32(c.height)
+	}
+	return Rect{vp.x + vp.w - w - cv_nav_margin, vp.y + vp.h - h - cv_nav_margin, w, h}
+}
+
+// draw_navigator - миникарта: подложка, та же текстура холста уменьшенной
+// (своей копии нет - сглаживание linear только на время этого вызова) и
+// рамка видимой части (светлая с тёмной обводкой - видна на любом снимке).
+fn (mut c Canvas) draw_navigator(mut ctx RenderContext) {
+	nr := c.nav_rect()
+	if nr.w <= 0 || unsafe { c.texture == nil } {
+		return
+	}
+	bg := Rect{nr.x - cv_nav_pad, nr.y - cv_nav_pad, nr.w + 2 * cv_nav_pad, nr.h + 2 * cv_nav_pad}
+	ctx.fill_rounded_rect(bg, Color{20, 20, 22, 210}, 4)
+	dst := C.SDL_FRect{
+		x: nr.x
+		y: nr.y
+		w: nr.w
+		h: nr.h
+	}
+	C.SDL_SetTextureScaleMode(c.texture, sdl_scalemode_linear)
+	C.SDL_RenderTexture(ctx.renderer, c.texture, unsafe { nil }, &dst)
+	C.SDL_SetTextureScaleMode(c.texture, sdl_scalemode_nearest)
+	vis := c.visible_buf_rect()
+	if vis.w <= 0 {
+		return
+	}
+	kx := nr.w / f32(c.width)
+	ky := nr.h / f32(c.height)
+	r := Rect{nr.x + vis.x * kx, nr.y + vis.y * ky, max_f32(vis.w * kx, 3), max_f32(vis.h * ky, 3)}
+	ctx.draw_rect(Rect{r.x - 1, r.y - 1, r.w + 2, r.h + 2}, Color{0, 0, 0, 200})
+	ctx.draw_rect(r, Color{255, 255, 255, 235})
+}
+
+// nav_center - точка миникарты (экранные px) - в центр видимой части
+fn (mut c Canvas) nav_center(mx f32, my f32) {
+	nr := c.nav_rect()
+	if nr.w <= 0 {
+		return
+	}
+	bx := clamp_f32((mx - nr.x) / nr.w, 0, 1) * f32(c.width)
+	by := clamp_f32((my - nr.y) / nr.h, 0, 1) * f32(c.height)
+	z := c.eff_scale()
+	vp := c.viewport()
+	c.scroll_x = bx * z - vp.w * 0.5
+	c.scroll_y = by * z - vp.h * 0.5
+	c.clamp_scroll()
+}
+
 // ─── Zoom / pan API ────────────────────────────────────
 
 // get_zoom - текущий масштаб (экранных px на пиксель буфера); в auto_fit - вычисленный.
@@ -999,6 +1083,8 @@ pub fn (mut c Canvas) draw(mut ctx RenderContext) {
 		c.on_overlay(mut ctx)
 		ctx.pop_clip()
 	}
+	// Миникарта - поверх подписей приложения (on_overlay), в своём углу
+	c.draw_navigator(mut ctx)
 
 	// Brush-size cursor: a filled (semi-transparent) disc at the pointer showing
 	// the paint brush's reach. Drawn last (on top of the image), clipped to the
@@ -1168,6 +1254,25 @@ pub fn (mut c Canvas) handle_event(event &GuiEvent, app &App) bool {
 		return true
 	}
 
+	// Перетаскивание по миникарте: вид следует за мышью
+	if c.nav_dragging {
+		match event.typ {
+			.mouse_move {
+				c.nav_center(event.mouse_x, event.mouse_y)
+				return true
+			}
+			.mouse_up {
+				if event.mouse_btn == .left {
+					c.nav_dragging = false
+				}
+				return true
+			}
+			else {}
+		}
+
+		return true
+	}
+
 	// Pan drag (middle/right button).
 	if c.panning {
 		match event.typ {
@@ -1305,6 +1410,15 @@ pub fn (mut c Canvas) handle_event(event &GuiEvent, app &App) bool {
 				.none_ { 0 }
 			}
 
+			// Миникарта - раньше всего: щелчок по ней не доходит до инструментов
+			if btn == .left {
+				nr := c.nav_rect()
+				if nr.w > 0 && nr.contains(event.mouse_x, event.mouse_y) {
+					c.nav_dragging = true
+					c.nav_center(event.mouse_x, event.mouse_y)
+					return true
+				}
+			}
 			// The left button grabs a scrollbar thumb before anything else.
 			if btn == .left {
 				h_sb, v_sb := c.needs_scrollbars()
