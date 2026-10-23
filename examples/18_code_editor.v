@@ -10,8 +10,8 @@ import vgui
 const sample_code = 'module main
 
 fn main() {
-	// Редактор кода с подсветкой синтаксиса V
-	greeting := "Привет, vgui!"
+	// Code editor with V syntax highlighting
+	greeting := "Hello, vgui!"
 	for i in 0 .. 3 {
 		println("\${i}: \${greeting}")
 	}
@@ -24,7 +24,7 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'CodeEditor - demo')!
 
-	mut status := vgui.label('Строк: -')
+	mut status := vgui.label('Lines: -')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Редактор кода: номера строк, выделение, undo/redo, подсветка.
@@ -33,12 +33,12 @@ fn main() {
 	ed.set_text(sample_code)
 	ed.show_line_numbers = true
 	ed.on_change = fn [mut ed, mut status] () {
-		status.text = 'Строк: ${ed.get_line_count()}'
+		status.text = 'Lines: ${ed.get_line_count()}'
 	}
 
 	mut b_get := vgui.button('get_line_count()')
 	b_get.on_click = fn [mut ed, mut status] () {
-		status.text = 'Строк: ${ed.get_line_count()}'
+		status.text = 'Lines: ${ed.get_line_count()}'
 	}
 
 	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.

@@ -63,11 +63,14 @@ mut:
 // Константы PlotView: plot_virtual_range — на сколько единиц (±) полосы прокрутки
 // считают «весь мир» графика (раздвигается, если вид вышел за него); plot_sb_w —
 // толщина полос прокрутки; plot_axis_pad_l/b — поля слева/снизу под подписи осей;
+// plot_axis_pad_t — поле сверху: подпись верхнего деления центрована по его линии и
+// половиной высоты выступает над графиком, ей нужно место внутри рамки;
 // plot_min_span/max_span — допустимая ширина/высота видимой области по каждой оси.
 const plot_virtual_range = f32(1000.0)
 const plot_sb_w = f32(12)
 const plot_axis_pad_l = f32(48)
 const plot_axis_pad_b = f32(24)
+const plot_axis_pad_t = f32(12)
 const plot_min_span = f32(0.001)
 const plot_max_span = f32(1_000_000.0)
 
@@ -460,11 +463,12 @@ fn (p &PlotView) plot_rect() Rect {
 	sbw := if p.show_scrollbars { plot_sb_w } else { f32(0) }
 	pad_l := if p.show_labels { plot_axis_pad_l } else { f32(6) }
 	pad_b := if p.show_labels { plot_axis_pad_b } else { f32(6) }
+	pad_t := if p.show_labels { plot_axis_pad_t } else { f32(6) }
 	return Rect{
 		x: p.bounds.x + pad_l
-		y: p.bounds.y + 6
+		y: p.bounds.y + pad_t
 		w: max_f32(p.bounds.w - pad_l - sbw - 6, 20)
-		h: max_f32(p.bounds.h - pad_b - sbw - 6, 20)
+		h: max_f32(p.bounds.h - pad_b - sbw - pad_t, 20)
 	}
 }
 
@@ -1004,11 +1008,43 @@ fn (p &PlotView) draw_series_scatter(s PlotSeries, pr Rect, mut ctx RenderContex
 	}
 }
 
-// draw_labels рисует подписи делений осей по тем же nice_step, что и сетка: по X — под графиком по центру деления, по Y — слева от графика, по вертикали по центру линии.
+// label_area — прямоугольник, в котором подписи делений должны помещаться целиком:
+// bounds виджета без рамки, справа - без вертикальной полосы прокрутки (подпись X у
+// правого края не налезает на дорожку). Снизу полоса не вычитается: подписи X по
+// замыслу стоят между графиком и горизонтальной полосой, а их рамка (с запасом под
+// шрифт) на несколько пикселей заходит на уровень дорожки, не задевая её глифами.
+fn (p &PlotView) label_area() Rect {
+	sbw := if p.show_scrollbars { plot_sb_w + 3 } else { f32(0) }
+	return Rect{
+		x: p.bounds.x + 1
+		y: p.bounds.y + 1
+		w: p.bounds.w - 2 - sbw
+		h: p.bounds.h - 2
+	}
+}
+
+// tick_label_fits решает, рисовать ли подпись деления. pos - экранная координата
+// деления вдоль оси, lo/hi - границы области графика по этой оси: деление вне графика
+// не подписывается (раньше брался допуск 10-20 px, и подпись крайнего деления
+// вылезала за рамку виджета). Затем сама подпись [start, start + size) должна целиком
+// лечь в [area_lo, area_hi] - иначе её не рисуем, а не сдвигаем: сдвинутая подпись
+// стояла бы не напротив своего деления. Допуск 0.5 px - на погрешность пересчёта
+// мировых координат в экранные (деление ровно на краю графика).
+fn tick_label_fits(pos f32, lo f32, hi f32, start f32, size f32, area_lo f32, area_hi f32) bool {
+	if pos < lo - 0.5 || pos > hi + 0.5 {
+		return false
+	}
+	return start >= area_lo && start + size <= area_hi
+}
+
+// draw_labels рисует подписи делений осей по тем же nice_step, что и сетка: по X - под
+// графиком по центру деления, по Y - слева от графика, по вертикали по центру линии.
+// Подписи, которые не помещаются в виджет целиком, пропускаются (tick_label_fits).
 fn (p &PlotView) draw_labels(pr Rect, mut ctx RenderContext) {
 	font := ctx.get_font(.regular, 0)
 	fh := ctx.font_height_of(font)
 	lc := p.eff_label(ctx)
+	area := p.label_area()
 
 	step_x := nice_step(p.view_w, 10)
 	step_y := nice_step(p.view_h, 8)
@@ -1018,11 +1054,12 @@ fn (p &PlotView) draw_labels(pr Rect, mut ctx RenderContext) {
 	mut x := x_start
 	for x <= p.view_x + p.view_w + step_x * 0.5 {
 		sx := p.px(x, pr)
-		if sx >= pr.x - 20 && sx <= pr.x + pr.w + 20 {
-			lbl := format_tick(x, step_x)
-			lw := ctx.measure_text_with_font(lbl, font).x
-			lx := sx - lw * 0.5
-			ly := pr.y + pr.h + 6
+		lbl := format_tick(x, step_x)
+		lw := ctx.measure_text_with_font(lbl, font).x
+		lx := sx - lw * 0.5
+		ly := pr.y + pr.h + 6
+		if tick_label_fits(sx, pr.x, pr.x + pr.w, lx, lw, area.x, area.x + area.w)
+			&& ly + fh <= area.y + area.h {
 			ctx.draw_text_with_font(lbl, lx, ly, lc, font)
 		}
 		x += step_x
@@ -1033,11 +1070,12 @@ fn (p &PlotView) draw_labels(pr Rect, mut ctx RenderContext) {
 	mut y := y_start
 	for y <= p.view_y + p.view_h + step_y * 0.5 {
 		sy := p.py(y, pr)
-		if sy >= pr.y - 10 && sy <= pr.y + pr.h + 10 {
-			lbl := format_tick(y, step_y)
-			lw := ctx.measure_text_with_font(lbl, font).x
-			lx := pr.x - lw - 8
-			ly := sy - fh * 0.5
+		lbl := format_tick(y, step_y)
+		lw := ctx.measure_text_with_font(lbl, font).x
+		lx := pr.x - lw - 8
+		ly := sy - fh * 0.5
+		if tick_label_fits(sy, pr.y, pr.y + pr.h, ly, fh, area.y, area.y + area.h)
+			&& lx >= area.x {
 			ctx.draw_text_with_font(lbl, lx, ly, lc, font)
 		}
 		y += step_y

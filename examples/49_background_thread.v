@@ -34,8 +34,8 @@ mut:
 
 // finish вызывается уже в ГЛАВНОМ потоке - тут можно всё.
 fn (mut w Work) finish(acc i64) {
-	w.status.text = 'Готово'
-	w.result.text = 'Сумма квадратов 1..40 = ${acc}'
+	w.status.text = 'Done'
+	w.result.text = 'Sum of squares 1..40 = ${acc}'
 	w.running = false
 }
 
@@ -52,7 +52,7 @@ fn heavy_work(app &vgui.App, work &Work) {
 		// позже, когда поток уже уйдёт дальше.
 		a.post(fn [mut w, i, total] () {
 			w.bar.set_value(f32(i) / f32(total))
-			w.status.text = 'Считаю... шаг ${i} из ${total}'
+			w.status.text = 'Computing... step ${i} of ${total}'
 		})
 	}
 	a.post(fn [mut w, acc] () {
@@ -64,9 +64,9 @@ fn main() {
 	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
-	mut win := vgui.create_window(title: 'Фоновый поток - app.post()')!
+	mut win := vgui.create_window(title: 'Background thread - app.post()')!
 
-	mut status := vgui.label('Нажмите «Посчитать» - работа пойдёт в фоне')
+	mut status := vgui.label('Press "Compute" - the work runs in the background')
 	mut result := vgui.label('')
 	result.color = vgui.Color{72, 199, 142, 255}
 	mut bar := vgui.progress_bar()
@@ -78,7 +78,7 @@ fn main() {
 		bar:    bar
 	}
 
-	mut start := vgui.button('Посчитать')
+	mut start := vgui.button('Compute')
 	start.on_click = fn [mut app, mut work] () {
 		if work.running {
 			return
@@ -86,7 +86,7 @@ fn main() {
 		work.running = true
 		work.result.text = ''
 		work.bar.set_value(0.0)
-		work.status.text = 'Запущено...'
+		work.status.text = 'Started...'
 		spawn heavy_work(app, work)
 	}
 

@@ -13,27 +13,27 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'TextArea - demo')!
 
-	mut status := vgui.label('Символов: 0')
+	mut status := vgui.label('Characters: 0')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Многострочное поле ввода. Колбэк on_change получает весь текст.
-	mut ta := vgui.text_area('Введите многострочный текст...')
-	ta.set_text('Первая строка.\nВторая строка.\n\nTextArea поддерживает перенос, выделение, undo/redo (Ctrl+Z).')
+	mut ta := vgui.text_area('Enter multi-line text...')
+	ta.set_text('First line.\nSecond line.\n\nTextArea supports wrapping, selection, undo/redo (Ctrl+Z).')
 	ta.on_change = fn [mut status] (text string) {
-		status.text = 'Символов: ${text.len}'
+		status.text = 'Characters: ${text.len}'
 	}
 
 	// Кнопки: дописать текст и прочитать
 	mut b_append := vgui.button('append_text()')
 	b_append.on_click = fn [mut ta] () {
-		ta.append_text('\n+ дописанная строка')
+		ta.append_text('\n+ appended line')
 	}
 
-	mut b_clear := vgui.button('Очистить')
+	mut b_clear := vgui.button('Clear')
 	b_clear.style = .outline
 	b_clear.on_click = fn [mut ta, mut status] () {
 		ta.set_text('')
-		status.text = 'Символов: 0'
+		status.text = 'Characters: 0'
 	}
 
 	mut row := vgui.create_hbox_fill()

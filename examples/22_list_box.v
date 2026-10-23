@@ -13,35 +13,35 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'ListBox - demo')!
 
-	mut status := vgui.label('Выбор: -')
+	mut status := vgui.label('Selection: -')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Список с прокруткой. on_select(idx, text), on_dbl_click(idx, text).
 	mut lb := vgui.list_box()
 	lb.add_items([
-		'Москва',
-		'Санкт-Петербург',
-		'Новосибирск',
-		'Екатеринбург',
-		'Казань',
-		'Нижний Новгород',
-		'Челябинск',
-		'Самара',
-		'Омск',
-		'Ростов-на-Дону',
+		'Moscow',
+		'Saint Petersburg',
+		'Novosibirsk',
+		'Yekaterinburg',
+		'Kazan',
+		'Nizhny Novgorod',
+		'Chelyabinsk',
+		'Samara',
+		'Omsk',
+		'Rostov-on-Don',
 	])
 	lb.on_select = fn [mut status] (idx int, text string) {
-		status.text = 'Выбрано: ${text} [${idx}]'
+		status.text = 'Selected: ${text} [${idx}]'
 		status.color = vgui.Color{66, 165, 245, 255}
 	}
 	lb.on_dbl_click = fn [mut status] (idx int, text string) {
-		status.text = 'Двойной клик: ${text}'
+		status.text = 'Double click: ${text}'
 		status.color = vgui.Color{72, 199, 142, 255}
 	}
 
 	mut btn := vgui.button('get_selected_text()')
 	btn.on_click = fn [mut lb, mut status] () {
-		status.text = 'Выбрано: "${lb.get_selected_text()}"'
+		status.text = 'Selected: "${lb.get_selected_text()}"'
 	}
 
 	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.

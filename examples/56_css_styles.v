@@ -15,30 +15,30 @@ import vgui
 const layout_vui = '
 hbox
   vbox .sidebar pad=10 gap=6 max=200
-    label "Проекты" bold
+    label "Projects" bold
     list #projects flex=1
-      column "Имя"
+      column "Name"
       item "vgui"
       item "vraw"
       item "vguipy"
   vbox pad=16 gap=12 flex=1
-    label "Стили CSS" size=20 bold
+    label "CSS styles" size=20 bold
     vbox .card pad=14 gap=8
-      label "Название"
-      input "Мой проект" hint="Название проекта"
-      label "Описание"
-      input hint="Пара слов о проекте"
+      label "Name"
+      input "My project" hint="Project name"
+      label "Description"
+      input hint="A few words about the project"
       hbox gap=8
-        checkbox "Публичный" checked
+        checkbox "Public" checked
         spacer flex=1
-        toggle "Тёмная тема" #dark
+        toggle "Dark theme" #dark
     progress value=65
     hbox gap=8
-      button "Удалить" .danger tooltip="Класс .danger"
+      button "Delete" .danger tooltip="Class .danger"
       spacer flex=1
-      button "Без стилей" #plain toggle
-      button "Сохранить" #save tooltip="Селектор #save"
-    label "Правьте examples/56_styles.css - окно обновится само" #hint
+      button "No styles" #plain toggle
+      button "Save" #save tooltip="Selector #save"
+    label "Edit examples/56_styles.css - the window updates by itself" #hint
 '
 
 // Запасной вариант, если пример запущен не из репозитория (файла рядом нет):
@@ -79,7 +79,7 @@ fn main() {
 	}
 	mut hint := ui.get[vgui.Label]('hint')!
 	if !os.exists(css_path) {
-		hint.text = 'Стили встроены в бинарник - hot-reload недоступен'
+		hint.text = 'Styles are embedded in the binary - hot reload is unavailable'
 	}
 
 	win.add_widget(ui.root)

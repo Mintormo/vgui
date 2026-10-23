@@ -13,23 +13,23 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'UI Scale - demo')!
 
-	mut status := vgui.label('Текущий масштаб: 1.0')
+	mut status := vgui.label('Current scale: 1.0')
 	status.color = vgui.Color{180, 180, 180, 255}
 	status.font_size = 16
 
 	// win.set_ui_scale(factor) масштабирует ВЕСЬ интерфейс окна:
 	// шрифты, отступы, размеры виджетов. Это логический масштаб поверх
 	// автоматического DPI-масштаба ОС. Удобно для доступности.
-	mut sample := vgui.label('Образец текста для масштабирования')
+	mut sample := vgui.label('Sample text for scaling')
 	sample.valign = .middle
 
-	mut sample_input := vgui.text_input('Поле тоже масштабируется...')
+	mut sample_input := vgui.text_input('The field scales too...')
 
 	mk_scale_btn := fn [mut win, mut status] (label string, scale f32) &vgui.Button {
 		mut b := vgui.button(label)
 		b.on_click = fn [mut win, mut status, scale, label] () {
 			win.set_ui_scale(scale)
-			status.text = 'Текущий масштаб: ${label}'
+			status.text = 'Current scale: ${label}'
 		}
 		return b
 	}
@@ -51,7 +51,7 @@ fn main() {
 	root.add(sample)
 	root.add(sample_input)
 	root.add(vgui.create_spacer(), flex: 1)
-	root.add(vgui.label('Выберите масштаб интерфейса:'))
+	root.add(vgui.label('Choose the interface scale:'))
 	root.add(row)
 
 	// Корень дерева виджетов окна; всё остальное вложено в него.

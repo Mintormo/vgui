@@ -13,13 +13,13 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'Slider - demo')!
 
-	mut status := vgui.label('Значение: -')
+	mut status := vgui.label('Value: -')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Базовый горизонтальный слайдер: (min, max, value)
 	mut s_basic := vgui.slider_horizontal(0, 100, 50)
 	s_basic.on_change = fn [mut status] (v f32) {
-		status.text = 'Громкость: ${v:.0f}'
+		status.text = 'Volume: ${v:.0f}'
 	}
 
 	// С отображением значения и шагом
@@ -28,7 +28,7 @@ fn main() {
 	s_step.show_value = true
 	s_step.show_ticks = true
 	s_step.on_change = fn [mut status] (v f32) {
-		status.text = 'Уровень: ${v:.0f}'
+		status.text = 'Level: ${v:.0f}'
 	}
 
 	// Свои цвета трека/заливки/ползунка
@@ -45,16 +45,16 @@ fn main() {
 	left.set_spacing(8)
 	left.add(status)
 	left.add(vgui.hseparator())
-	left.add(vgui.label('Базовый 0-100:'))
+	left.add(vgui.label('Basic 0-100:'))
 	left.add(s_basic)
-	left.add(vgui.label('Шаг=1 + тики:'))
+	left.add(vgui.label('Step=1 + ticks:'))
 	left.add(s_step)
-	left.add(vgui.label('Свои цвета:'))
+	left.add(vgui.label('Custom colors:'))
 	left.add(s_color)
 
 	mut right := vgui.create_vbox_fill()
 	right.set_spacing(4)
-	right.add(vgui.label('Верт.:'))
+	right.add(vgui.label('Vert.:'))
 	right.add(s_vert, flex: 1)
 
 	mut cols := vgui.create_hbox_fill()

@@ -13,12 +13,12 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'ContextMenu - demo')!
 
-	mut status := vgui.label('Команда: -')
+	mut status := vgui.label('Command: -')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Контекстное меню привязывается к виджету через attach()
 	// и открывается по правому клику по нему.
-	mut target := vgui.label('Кликните правой кнопкой по этой области')
+	mut target := vgui.label('Right-click in this area')
 	target.align = .center
 	target.valign = .middle
 
@@ -28,29 +28,29 @@ fn main() {
 
 	mut menu := vgui.context_menu()
 
-	mut c_cut := vgui.menu_action('Вырезать')
+	mut c_cut := vgui.menu_action('Cut')
 	c_cut.shortcut = 'Ctrl+X'
 	c_cut.on_click = fn [mut status] () {
-		status.text = 'Команда: Вырезать'
+		status.text = 'Command: Cut'
 	}
-	mut c_copy := vgui.menu_action('Копировать')
+	mut c_copy := vgui.menu_action('Copy')
 	c_copy.shortcut = 'Ctrl+C'
 	c_copy.on_click = fn [mut status] () {
-		status.text = 'Команда: Копировать'
+		status.text = 'Command: Copy'
 	}
-	mut c_paste := vgui.menu_action('Вставить')
+	mut c_paste := vgui.menu_action('Paste')
 	c_paste.shortcut = 'Ctrl+V'
 	c_paste.on_click = fn [mut status] () {
-		status.text = 'Команда: Вставить'
+		status.text = 'Command: Paste'
 	}
 
 	menu.add(c_cut)
 	menu.add(c_copy)
 	menu.add(c_paste)
 	menu.add(vgui.menu_separator())
-	mut c_check := vgui.menu_checkbox('Показывать сетку', true)
+	mut c_check := vgui.menu_checkbox('Show grid', true)
 	c_check.on_toggle = fn [mut status] (on bool) {
-		status.text = 'Сетка: ${on}'
+		status.text = 'Grid: ${on}'
 	}
 	menu.add(c_check)
 	menu.attach(panel)

@@ -21,10 +21,10 @@ fn main() {
 	sep_color.thickness = 2
 
 	// Горизонтальная компоновка с вертикальным разделителем
-	mut left := vgui.label('Слева')
+	mut left := vgui.label('Left')
 	left.valign = .middle
 	left.align = .center
-	mut right := vgui.label('Справа')
+	mut right := vgui.label('Right')
 	right.valign = .middle
 	right.align = .center
 
@@ -38,13 +38,13 @@ fn main() {
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(10)
-	root.add(vgui.label('Секция 1'))
+	root.add(vgui.label('Section 1'))
 	root.add(vgui.hseparator())
-	root.add(vgui.label('Секция 2'))
+	root.add(vgui.label('Section 2'))
 	root.add(sep_color)
-	root.add(vgui.label('Цветной разделитель сверху'))
+	root.add(vgui.label('Colored separator above'))
 	root.add(vgui.hseparator())
-	root.add(vgui.label('Вертикальный разделитель:'))
+	root.add(vgui.label('Vertical separator:'))
 	root.add(hrow)
 
 	// Корень дерева виджетов окна; всё остальное вложено в него.

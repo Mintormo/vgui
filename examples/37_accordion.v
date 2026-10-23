@@ -27,27 +27,27 @@ fn main() {
 	// accordion_multi()  — можно открыть несколько одновременно.
 	mut acc := vgui.accordion_single()
 
-	mut general := make_section('Общие настройки приложения.')
-	general.add(vgui.checkbox('Автозапуск'))
-	general.add(vgui.checkbox('Проверять обновления'))
+	mut general := make_section('General application settings.')
+	general.add(vgui.checkbox('Start automatically'))
+	general.add(vgui.checkbox('Check for updates'))
 
-	mut appearance := make_section('Настройки внешнего вида.')
-	appearance.add(vgui.toggle_switch('Тёмная тема'))
+	mut appearance := make_section('Appearance settings.')
+	appearance.add(vgui.toggle_switch('Dark theme'))
 
-	about := make_section('vgui — GUI-библиотека на языке V. Этот пример показывает виджет Accordion в режиме single.')
+	about := make_section('vgui is a GUI library for the V language. This example shows the Accordion widget in single mode.')
 
-	acc.add_section_expanded('Общие', general)
-	acc.add_section('Внешний вид', appearance)
-	acc.add_section('О программе', about)
+	acc.add_section_expanded('General', general)
+	acc.add_section('Appearance', appearance)
+	acc.add_section('About', about)
 	acc.on_change = fn (idx int, expanded bool) {
-		println('Секция ${idx}: expanded=${expanded}')
+		println('Section ${idx}: expanded=${expanded}')
 	}
 
 	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(8)
-	root.add(vgui.label('Кликните по заголовку секции:'))
+	root.add(vgui.label('Click a section header:'))
 	root.add(acc, flex: 1)
 
 	// Корень дерева виджетов окна; всё остальное вложено в него.

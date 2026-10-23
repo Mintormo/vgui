@@ -20,7 +20,7 @@ fn main() {
 	content.set_spacing(6)
 	content.set_padding(8)
 	for i in 1 .. 41 {
-		mut row := vgui.label('Элемент списка № ${i}')
+		mut row := vgui.label('List item #${i}')
 		row.valign = .middle
 		mut p := vgui.panel()
 		p.set_child(row)
@@ -35,7 +35,7 @@ fn main() {
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(8)
-	root.add(vgui.label('Прокрутите колесом мыши:'))
+	root.add(vgui.label('Scroll with the mouse wheel:'))
 	root.add(sb, flex: 1)
 
 	// Корень дерева виджетов окна; всё остальное вложено в него.

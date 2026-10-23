@@ -30,7 +30,7 @@ fn main() {
 	//
 	// ВНИМАНИЕ: рендерер шрифтов не рисует длинное тире и многие
 	// декоративные глифы, поэтому в надписях используем простой ASCII.
-	mut title := vgui.label('  Моё приложение')
+	mut title := vgui.label('  My application')
 	title.valign = .middle
 	title.color = vgui.Color{230, 230, 235, 255}
 
@@ -71,11 +71,11 @@ fn main() {
 	titlebar.add(btn_close)
 
 	// ── Тело окна ────────────────────────────────────────
-	mut body_text := vgui.label_wrap('Это окно без системной рамки.\n\n' +
-		'- Тащите за заголовок, чтобы переместить окно.\n' +
-		'- Двойной клик по заголовку - развернуть/восстановить.\n' +
-		'- Тяните за края, чтобы изменить размер.\n' +
-		'- Кнопки справа сверху: свернуть, развернуть, закрыть.')
+	mut body_text := vgui.label_wrap('This window has no system frame.\n\n' +
+		'- Drag the title bar to move the window.\n' +
+		'- Double-click the title bar to maximize/restore.\n' +
+		'- Drag the edges to resize.\n' +
+		'- Buttons at the top right: minimize, maximize, close.')
 	body_text.valign = .top
 	body_text.color = vgui.Color{200, 200, 205, 255}
 

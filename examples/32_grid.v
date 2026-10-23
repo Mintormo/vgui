@@ -13,7 +13,7 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'GridLayout - demo')!
 
-	mut status := vgui.label('Нажата кнопка: -')
+	mut status := vgui.label('Button pressed: -')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Сетка 3x3. add(widget, row, col); add_span — объединение ячеек.
@@ -32,17 +32,17 @@ fn main() {
 			label := '${r},${c}'
 			mut b := vgui.button(label)
 			b.on_click = fn [mut status, label] () {
-				status.text = 'Нажата кнопка: ${label}'
+				status.text = 'Button pressed: ${label}'
 			}
 			grid.add(b, r, c)
 		}
 	}
 
 	// Кнопка, занимающая всю нижнюю строку (col_span = 3)
-	mut wide := vgui.button('col_span = 3 (вся строка)')
+	mut wide := vgui.button('col_span = 3 (whole row)')
 	wide.style = .accent
 	wide.on_click = fn [mut status] () {
-		status.text = 'Нажата широкая кнопка'
+		status.text = 'Wide button pressed'
 	}
 
 	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.

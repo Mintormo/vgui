@@ -22,13 +22,13 @@ fn main() {
 	win.set_background_image(os.join_path(icons, 'IMG_1663.jpg'))
 	win.set_background_mode(.fill)
 
-	mut mode_label := vgui.label('Режим фона окна: Tile')
+	mut mode_label := vgui.label('Window background mode: Tile')
 	mode_label.color = vgui.Color{230, 230, 230, 255}
 
 	// Переключатель режимов фона окна. idx захватывается mut и сохраняется
 	// между вызовами замыкания.
 	mut idx := 0
-	mut btn_mode := vgui.button('Сменить режим фона')
+	mut btn_mode := vgui.button('Change background mode')
 	btn_mode.on_click = fn [mut win, mut mode_label, mut idx] () {
 		idx = (idx + 1) % 5
 		name := match idx {
@@ -53,7 +53,7 @@ fn main() {
 				'Stretch'
 			}
 		}
-		mode_label.text = 'Режим фона окна: ${name}'
+		mode_label.text = 'Window background mode: ${name}'
 	}
 
 	// 2) ImageBackground как ВИДЖЕТ в layout - баннер/логотип.
@@ -62,7 +62,7 @@ fn main() {
 	banner.mode = .fill
 	banner.bg_color = vgui.Color{40, 44, 52, 230}
 
-	mut hint := vgui.label('Виджеты рисуются поверх фонового изображения окна')
+	mut hint := vgui.label('Widgets are drawn on top of the window background image')
 	hint.color = vgui.Color{180, 180, 180, 255}
 
 	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.

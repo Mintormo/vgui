@@ -13,14 +13,14 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'ColorPicker - demo')!
 
-	mut status := vgui.label('Цвет: rgb(255, 0, 0)')
+	mut status := vgui.label('Color: rgb(255, 0, 0)')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Встроенный выбор цвета с HSV-палитрой и альфа-каналом.
 	mut cp := vgui.color_picker_with_color(vgui.Color{255, 0, 0, 255})
 	cp.show_alpha = true
 	cp.on_change = fn [mut status] (c vgui.Color) {
-		status.text = 'Цвет: rgba(${c.r}, ${c.g}, ${c.b}, ${c.a})'
+		status.text = 'Color: rgba(${c.r}, ${c.g}, ${c.b}, ${c.a})'
 		status.color = c
 	}
 

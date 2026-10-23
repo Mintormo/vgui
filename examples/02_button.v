@@ -13,25 +13,25 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'Button - demo')!
 
-	mut status := vgui.label('Нажмите кнопку...')
+	mut status := vgui.label('Press a button...')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Стили кнопок задаются через поле .style
 	mut b_normal := vgui.button('Normal')
 	b_normal.on_click = fn [mut status] () {
-		status.text = 'Normal нажата'
+		status.text = 'Normal pressed'
 	}
 
 	mut b_accent := vgui.button('Accent')
 	b_accent.style = .accent
 	b_accent.on_click = fn [mut status] () {
-		status.text = 'Accent нажата'
+		status.text = 'Accent pressed'
 	}
 
 	mut b_danger := vgui.button('Danger')
 	b_danger.style = .danger
 	b_danger.on_click = fn [mut status] () {
-		status.text = 'Danger нажата'
+		status.text = 'Danger pressed'
 	}
 
 	mut b_outline := vgui.button('Outline')

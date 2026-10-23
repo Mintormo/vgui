@@ -13,14 +13,13 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'Breadcrumbs - demo')!
 
-	mut status := vgui.label('Кликните по сегменту пути')
+	mut status := vgui.label('Click a path segment')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Хлебные крошки: цепочка навигации. on_click(index, text).
-	mut bc := vgui.breadcrumbs_with_items(['Главная', 'Документы', 'Проекты',
-		'vgui'])
+	mut bc := vgui.breadcrumbs_with_items(['Home', 'Documents', 'Projects', 'vgui'])
 	bc.on_click = fn [mut status, mut bc] (idx int, text string) {
-		status.text = 'Переход: ${text} [${idx}]'
+		status.text = 'Go to: ${text} [${idx}]'
 		status.color = vgui.Color{66, 165, 245, 255}
 		// Обрезаем путь до выбранного сегмента
 		items := bc.get_items()[..idx + 1]
@@ -28,10 +27,10 @@ fn main() {
 	}
 
 	// Кнопка добавляет новый уровень
-	mut btn := vgui.button('Войти глубже')
+	mut btn := vgui.button('Go deeper')
 	btn.on_click = fn [mut bc, mut status] () {
-		bc.push('Подпапка ${bc.count()}')
-		status.text = 'Добавлен уровень'
+		bc.push('Subfolder ${bc.count()}')
+		status.text = 'Level added'
 	}
 
 	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.

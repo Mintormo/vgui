@@ -33,11 +33,11 @@ fn main() {
 
 	plot.set_range(-2 * 3.14159, 2 * 3.14159, -1.5, 1.5)
 
-	mut b_reset := vgui.button('Сбросить вид')
+	mut b_reset := vgui.button('Reset view')
 	b_reset.on_click = fn [mut plot] () {
 		plot.reset_view()
 	}
-	mut b_fit := vgui.button('Вписать данные')
+	mut b_fit := vgui.button('Fit data')
 	b_fit.style = .outline
 	b_fit.on_click = fn [mut plot] () {
 		plot.fit_to_data()

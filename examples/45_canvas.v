@@ -109,7 +109,7 @@ fn main() {
 	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
-	mut win := vgui.create_window(title: 'Canvas - набор инструментов')!
+	mut win := vgui.create_window(title: 'Canvas - toolbox')!
 
 	w := 360
 	h := 260
@@ -124,11 +124,10 @@ fn main() {
 
 	mut st := &EditorState{}
 
-	mut status := vgui.label('Инструмент: Кисть. Холст ${w}x${h}')
+	mut status := vgui.label('Tool: Brush. Canvas ${w}x${h}')
 	status.color = vgui.Color{180, 180, 180, 255}
 
-	tool_names := ['Кисть', 'Карандаш', 'Ластик', 'Пипетка', 'Заливка',
-		'Линия', 'Прямоуг.']
+	tool_names := ['Brush', 'Pencil', 'Eraser', 'Picker', 'Fill', 'Line', 'Rect']
 
 	// ─── панель инструментов (кнопки нужны замыканию on_input для подсветки) ───
 	mut tools_row := vgui.create_hbox_fill()
@@ -141,7 +140,7 @@ fn main() {
 		tool_buttons << tb
 	}
 
-	mut size_label := vgui.label('Размер: 4')
+	mut size_label := vgui.label('Size: 4')
 	mut size_slider := vgui.slider_horizontal(1, 20, 4)
 	size_slider.step = 1
 
@@ -156,7 +155,7 @@ fn main() {
 			.hover {
 				if ev.in_image {
 					p := canvas.get_pixel(x, y)
-					status.text = '(${x}, ${y})  цвет (${p.r}, ${p.g}, ${p.b})'
+					status.text = '(${x}, ${y})  color (${p.r}, ${p.g}, ${p.b})'
 				}
 				return
 			}
@@ -167,7 +166,7 @@ fn main() {
 					} else {
 						canvas.zoom_out()
 					}
-					status.text = 'Масштаб: ${int(canvas.get_zoom() * 100)}%'
+					status.text = 'Zoom: ${int(canvas.get_zoom() * 100)}%'
 				} else {
 					mut nb := st.brush + (if ev.wheel_y > 0 { 1 } else { -1 })
 					nb = if nb < 1 {
@@ -178,7 +177,7 @@ fn main() {
 						nb
 					}
 					st.brush = nb
-					size_label.text = 'Размер: ${nb}'
+					size_label.text = 'Size: ${nb}'
 					size_slider.value = f32(nb)
 				}
 				return
@@ -190,7 +189,7 @@ fn main() {
 					for j in 0 .. tool_buttons.len {
 						tool_buttons[j].style = if j == st.tool { .accent } else { .outline }
 					}
-					status.text = 'Инструмент: ${tool_names[st.tool]}'
+					status.text = 'Tool: ${tool_names[st.tool]}'
 				} else if kc == k_lbracket || kc == k_rbracket {
 					mut nb := st.brush + (if kc == k_rbracket { 1 } else { -1 })
 					nb = if nb < 1 {
@@ -201,20 +200,20 @@ fn main() {
 						nb
 					}
 					st.brush = nb
-					size_label.text = 'Размер: ${nb}'
+					size_label.text = 'Size: ${nb}'
 					size_slider.value = f32(nb)
 				} else if kc == k_x_key {
 					tmp := st.primary
 					st.primary = st.secondary
 					st.secondary = tmp
-					status.text = 'Цвета: основной (${st.primary.r},${st.primary.g},${st.primary.b})  вторичный (${st.secondary.r},${st.secondary.g},${st.secondary.b})'
+					status.text = 'Colors: primary (${st.primary.r},${st.primary.g},${st.primary.b})  secondary (${st.secondary.r},${st.secondary.g},${st.secondary.b})'
 				} else if kc == k_esc && st.drawing && st.tool >= 5 {
 					if st.snap.len == canvas.pixels.len && st.snap.len > 0 {
 						copy(mut canvas.pixels, st.snap)
 						canvas.mark_dirty()
 					}
 					st.drawing = false
-					status.text = 'Фигура отменена'
+					status.text = 'Shape canceled'
 				}
 				return
 			}
@@ -250,7 +249,7 @@ fn main() {
 					} else {
 						st.primary = picked
 					}
-					status.text = 'Цвет: (${picked.r}, ${picked.g}, ${picked.b})'
+					status.text = 'Color: (${picked.r}, ${picked.g}, ${picked.b})'
 				}
 			}
 			4 { // заливка
@@ -302,13 +301,13 @@ fn main() {
 			for j in 0 .. tool_buttons.len {
 				tool_buttons[j].style = if j == i { .accent } else { .outline }
 			}
-			status.text = 'Инструмент: ${tname}'
+			status.text = 'Tool: ${tname}'
 		}
 	}
 	tool_buttons[0].style = .accent // кисть активна по умолчанию
 
 	// ─── палитра цветов (задаёт основной цвет) ───
-	palette_names := ['Чёрный', 'Красный', 'Зелёный', 'Синий', 'Белый']
+	palette_names := ['Black', 'Red', 'Green', 'Blue', 'White']
 	palette_cols := [vgui.Color{33, 33, 33, 255}, vgui.Color{229, 57, 53, 255},
 		vgui.Color{67, 160, 71, 255}, vgui.Color{30, 136, 229, 255}, vgui.Color{255, 255, 255, 255}]
 	mut palette := vgui.create_hbox_fill()
@@ -318,7 +317,7 @@ fn main() {
 		mut pb := vgui.button(pname)
 		pb.on_click = fn [mut st, mut status, pcol, pname] () {
 			st.primary = pcol
-			status.text = 'Основной цвет: ${pname}'
+			status.text = 'Primary color: ${pname}'
 		}
 		palette.add(pb, flex: 1)
 	}
@@ -326,7 +325,7 @@ fn main() {
 	// ─── размер кисти ───
 	size_slider.on_change = fn [mut st, mut size_label] (v f32) {
 		st.brush = int(v)
-		size_label.text = 'Размер: ${st.brush}'
+		size_label.text = 'Size: ${st.brush}'
 	}
 	mut size_row := vgui.create_hbox_fill()
 	size_row.set_spacing(8)
@@ -334,14 +333,14 @@ fn main() {
 	size_row.add(size_slider, flex: 1)
 
 	// ─── действия ───
-	mut b_clear := vgui.button('Очистить')
+	mut b_clear := vgui.button('Clear')
 	b_clear.style = .outline
 	b_clear.on_click = fn [mut canvas, mut status, bg] () {
 		canvas.fill(bg)
-		status.text = 'Холст очищен'
+		status.text = 'Canvas cleared'
 	}
 
-	mut b_invert := vgui.button('Инвертировать')
+	mut b_invert := vgui.button('Invert')
 	b_invert.on_click = fn [mut canvas, mut status] () {
 		for i := 0; i < canvas.pixels.len; i += 4 {
 			canvas.pixels[i] = u8(255 - canvas.pixels[i])
@@ -349,13 +348,13 @@ fn main() {
 			canvas.pixels[i + 2] = u8(255 - canvas.pixels[i + 2])
 		}
 		canvas.mark_dirty()
-		status.text = 'Инвертировано (${canvas.pixels.len} байт)'
+		status.text = 'Inverted (${canvas.pixels.len} bytes)'
 	}
 
-	filter_names := ['Изображения', 'Все файлы']
+	filter_names := ['Images', 'All files']
 	filter_patterns := ['png;jpg;jpeg;webp;gif;bmp;tiff', '*']
 
-	mut b_load := vgui.button('Загрузить...')
+	mut b_load := vgui.button('Load...')
 	b_load.on_click = fn [mut canvas, mut status, mut app, win, filter_names, filter_patterns] () {
 		path := vgui.native_open_file_dialog(win, mut app, vgui.NativeFileDialogConfig{
 			filter_names:    filter_names
@@ -365,13 +364,13 @@ fn main() {
 			return
 		}
 		if canvas.load_file(path) {
-			status.text = 'Загружено: ${path} (${canvas.width}x${canvas.height})'
+			status.text = 'Loaded: ${path} (${canvas.width}x${canvas.height})'
 		} else {
-			status.text = 'Не удалось загрузить: ${path}'
+			status.text = 'Could not load: ${path}'
 		}
 	}
 
-	mut b_save := vgui.button('Сохранить...')
+	mut b_save := vgui.button('Save...')
 	b_save.on_click = fn [mut canvas, mut status, mut app, win, filter_names, filter_patterns] () {
 		path := vgui.native_save_file_dialog(win, mut app, vgui.NativeFileDialogConfig{
 			default_name:    'canvas.png'
@@ -382,9 +381,9 @@ fn main() {
 			return
 		}
 		if canvas.save_file(path) {
-			status.text = 'Сохранено: ${path}'
+			status.text = 'Saved: ${path}'
 		} else {
-			status.text = 'Не удалось сохранить: ${path} (tiff не поддерживается на запись)'
+			status.text = 'Could not save: ${path} (writing tiff is not supported)'
 		}
 	}
 
@@ -396,29 +395,29 @@ fn main() {
 	actions.add(b_save, flex: 1)
 
 	// ─── навигация (зум/панорама) ───
-	mut b_fit := vgui.button('Вписать')
+	mut b_fit := vgui.button('Fit')
 	b_fit.style = .outline
 	b_fit.on_click = fn [mut canvas, mut status] () {
 		canvas.fit_to_view()
-		status.text = 'Масштаб: ${int(canvas.get_zoom() * 100)}% (холст ${canvas.width}x${canvas.height})'
+		status.text = 'Zoom: ${int(canvas.get_zoom() * 100)}% (canvas ${canvas.width}x${canvas.height})'
 	}
-	mut b_zin := vgui.button('Увеличить (+)')
+	mut b_zin := vgui.button('Zoom in (+)')
 	b_zin.style = .outline
 	b_zin.on_click = fn [mut canvas, mut status] () {
 		canvas.zoom_in()
-		status.text = 'Масштаб: ${int(canvas.get_zoom() * 100)}% (холст ${canvas.width}x${canvas.height})'
+		status.text = 'Zoom: ${int(canvas.get_zoom() * 100)}% (canvas ${canvas.width}x${canvas.height})'
 	}
-	mut b_zout := vgui.button('Уменьшить (-)')
+	mut b_zout := vgui.button('Zoom out (-)')
 	b_zout.style = .outline
 	b_zout.on_click = fn [mut canvas, mut status] () {
 		canvas.zoom_out()
-		status.text = 'Масштаб: ${int(canvas.get_zoom() * 100)}% (холст ${canvas.width}x${canvas.height})'
+		status.text = 'Zoom: ${int(canvas.get_zoom() * 100)}% (canvas ${canvas.width}x${canvas.height})'
 	}
 	mut b_100 := vgui.button('1:1')
 	b_100.style = .outline
 	b_100.on_click = fn [mut canvas, mut status] () {
 		canvas.set_zoom(1.0)
-		status.text = 'Масштаб: ${int(canvas.get_zoom() * 100)}% (холст ${canvas.width}x${canvas.height})'
+		status.text = 'Zoom: ${int(canvas.get_zoom() * 100)}% (canvas ${canvas.width}x${canvas.height})'
 	}
 	mut nav := vgui.create_hbox_fill()
 	nav.set_spacing(6)
@@ -427,9 +426,9 @@ fn main() {
 	nav.add(b_zout, flex: 1)
 	nav.add(b_100, flex: 1)
 
-	mut hint1 := vgui.label('ЛКМ - основной цвет, ПКМ - вторичный, Shift - ровные фигуры')
+	mut hint1 := vgui.label('LMB - primary color, RMB - secondary, Shift - regular shapes')
 	hint1.color = vgui.Color{140, 140, 140, 255}
-	mut hint2 := vgui.label('1-7 инструменты, [ ] размер, X обмен, Ctrl+колесо масштаб, средняя кнопка - панорама')
+	mut hint2 := vgui.label('1-7 tools, [ ] size, X swap, Ctrl+wheel zoom, middle button - pan')
 	hint2.color = vgui.Color{120, 120, 120, 255}
 
 	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.

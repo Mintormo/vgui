@@ -2,28 +2,28 @@
 // Одна строка - один элемент, вложенность - отступом; #id - имя для кода.
 vbox
   menubar
-    menu "Файл"
-      item "Новая заметка" icon=file-plus shortcut=Ctrl+N #new
-      item "Сохранить" icon=save shortcut=Ctrl+S #save_menu
+    menu "File"
+      item "New note" icon=file-plus shortcut=Ctrl+N #new
+      item "Save" icon=save shortcut=Ctrl+S #save_menu
       separator
-      item "Выход" icon=log-out #quit
-    menu "Вид"
-      check "Перенос строк" checked #wrap
+      item "Quit" icon=log-out #quit
+    menu "View"
+      check "Word wrap" checked #wrap
   vbox pad=12 gap=8 flex=1
     hbox gap=8 cross=center
-      input hint="Поиск по заметкам" #search flex=1
-      button "Сохранить" icon=save style=accent #save
-      toggle "Тёмная тема" #dark
+      input hint="Search notes" #search flex=1
+      button "Save" icon=save style=accent #save
+      toggle "Dark theme" #dark
     split ratio=0.3 flex=1
       list #notes
-        item "Покупки" icon=shopping-cart
-        item "Идеи для фото" icon=camera
-        item "Синтезатор: аккорды" icon=music
+        item "Shopping" icon=shopping-cart
+        item "Photo ideas" icon=camera
+        item "Synth: chords" icon=music
       tabs
-        tab "Текст" icon=file-text
-          textarea #text hint="Текст заметки"
-        tab "Просмотр" icon=eye
-          markdown "# Заметка\n\nВыберите заметку слева." #preview
+        tab "Text" icon=file-text
+          textarea #text hint="Note text"
+        tab "Preview" icon=eye
+          markdown "# Note\n\nSelect a note on the left." #preview
     hbox gap=8 cross=center
-      label "Готово" #status flex=1
-      badge "3 заметки" variant=neutral #count
+      label "Ready" #status flex=1
+      badge "3 notes" variant=neutral #count

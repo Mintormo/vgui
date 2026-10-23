@@ -16,22 +16,22 @@ fn main() {
 	// В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'ShortcutInput - configurable shortcuts', width: 520, height: 260)!
 
-	mut status := vgui.label('Нажмите сочетание пункта меню или задайте новое')
+	mut status := vgui.label("Press a menu item's shortcut or set a new one")
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Пункты меню - их сочетания настраиваются полями ниже
-	mut m_save := vgui.menu_action('Сохранить')
+	mut m_save := vgui.menu_action('Save')
 	m_save.shortcut = 'Ctrl+S'
 	m_save.on_click = fn [mut status] () {
-		status.text = 'Файл -> Сохранить'
+		status.text = 'File -> Save'
 	}
-	mut m_export := vgui.menu_action('Экспорт')
+	mut m_export := vgui.menu_action('Export')
 	m_export.shortcut = 'Ctrl+E'
 	m_export.on_click = fn [mut status] () {
-		status.text = 'Файл -> Экспорт'
+		status.text = 'File -> Export'
 	}
 	mut bar := vgui.menu_bar()
-	bar.add_menu('Файл', [m_save, m_export])
+	bar.add_menu('File', [m_save, m_export])
 
 	mut col := vgui.create_vbox_fill()
 	col.set_padding(12)
@@ -45,11 +45,11 @@ fn main() {
 		// Новое сочетание ('' - снято) - сразу в пункт меню
 		on_change := fn [mut it, mut status] (s string) {
 			it.shortcut = s
-			status.text = if s.len > 0 { '${it.text}: ${s}' } else { '${it.text}: без сочетания' }
+			status.text = if s.len > 0 { '${it.text}: ${s}' } else { '${it.text}: no shortcut' }
 		}
 		si.on_change = on_change
 		on_reject := fn [mut status] (s string) {
-			status.text = '${s} занято навигацией - выберите другое'
+			status.text = '${s} is used for navigation - choose another'
 		}
 		si.on_reject = on_reject
 		mut row := vgui.create_hbox_fill()

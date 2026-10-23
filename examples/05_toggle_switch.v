@@ -13,7 +13,7 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'ToggleSwitch - demo')!
 
-	mut status := vgui.label('Состояние: -')
+	mut status := vgui.label('State: -')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Переключатель с колбэком on_change
@@ -30,11 +30,11 @@ fn main() {
 	}
 
 	// Отключённый переключатель
-	mut ts3 := vgui.toggle_switch('Режим полёта (недоступен)')
+	mut ts3 := vgui.toggle_switch('Airplane mode (disabled)')
 	ts3.enabled = false
 
 	// Программное переключение
-	mut ts4 := vgui.toggle_switch('Управляемый кнопкой')
+	mut ts4 := vgui.toggle_switch('Controlled by a button')
 	mut btn := vgui.button('toggle()')
 	btn.on_click = fn [mut ts4, mut status] () {
 		ts4.toggle()

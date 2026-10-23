@@ -47,7 +47,7 @@ fn (d &TableData) cell(row int, col int) string {
 	}
 	return match col {
 		0 { 'SKU-${row:07d}' }
-		1 { 'Товар ${row % 997}' }
+		1 { 'Product ${row % 997}' }
 		else { '${(row * 37) % 10000}.00' }
 	}
 }
@@ -61,14 +61,14 @@ fn main() {
 		height: 640
 	)!
 
-	mut status := vgui.label('Выберите строку')
+	mut status := vgui.label('Select a row')
 
 	// ── Лог на миллион строк (ListBox) ──
 	mut log := &LogData{}
 	mut lb := vgui.list_box()
 	lb.multi_select = true
 	lb.add_column_full('№', 110, 50, true, .right)
-	lb.add_column('Сообщение', 360)
+	lb.add_column('Message', 360)
 	// Колбэк текста: только для видимых строк каждого кадра - должен быть быстрым.
 	lb.set_virtual(log.count, fn [log] (row int, col int) string {
 		n := log.line_no(row)
@@ -76,7 +76,7 @@ fn main() {
 			'${n}'
 		} else {
 			level := ['INFO', 'WARN', 'ERROR'][n % 3]
-			'${level}: событие номер ${n}'
+			'${level}: event number ${n}'
 		}
 	})
 	// Иконки строк - тоже колбэком: по уровню сообщения.
@@ -95,20 +95,20 @@ fn main() {
 	}
 	lb.on_select = fn [mut status, lb] (idx int, text string) {
 		n := lb.get_selection().len
-		status.text = 'Лог: строка ${idx}, номер ${text}, выбрано строк: ${n}'
+		status.text = 'Log: row ${idx}, number ${text}, rows selected: ${n}'
 	}
 
-	mut btn_more := vgui.button('Дописать 100 000 строк')
+	mut btn_more := vgui.button('Append 100,000 rows')
 	btn_more.on_click = fn [mut log, mut lb, mut status] () {
 		log.count += 100_000
 		// данных стало больше - сообщаем новое число строк, прокрутка остаётся
 		lb.set_virtual_count(log.count)
-		status.text = 'В логе ${log.count} строк'
+		status.text = '${log.count} rows in the log'
 	}
 
 	mut left := vgui.create_vbox_fill()
 	left.set_spacing(8)
-	left.add(vgui.label('Лог: 1 000 000 строк (ListBox)'))
+	left.add(vgui.label('Log: 1,000,000 rows (ListBox)'))
 	left.add(lb, flex: 1)
 	left.add(btn_more)
 
@@ -118,24 +118,24 @@ fn main() {
 	tbl.show_row_numbers = true
 	tbl.row_num_width = 80
 	tbl.editable = true
-	tbl.add_column('Артикул', 120)
-	tbl.add_column('Название', 140)
-	tbl.add_column_aligned('Цена', 90, .right)
+	tbl.add_column('SKU', 120)
+	tbl.add_column('Name', 140)
+	tbl.add_column_aligned('Price', 90, .right)
 	tbl.set_virtual(2_000_000, fn [data] (row int, col int) string {
 		return data.cell(row, col)
 	})
 	// Правка ячейки не хранится в виджете: кладём её в свои данные.
 	tbl.on_change = fn [mut data, mut status] (row int, col int, text string) {
 		data.edits['${row}:${col}'] = text
-		status.text = 'Таблица: изменена ячейка ${row}:${col} -> ${text}'
+		status.text = 'Table: cell ${row}:${col} changed -> ${text}'
 	}
 	tbl.on_select = fn [mut status] (row int, col int) {
-		status.text = 'Таблица: строка ${row}, колонка ${col}'
+		status.text = 'Table: row ${row}, column ${col}'
 	}
 
 	mut right := vgui.create_vbox_fill()
 	right.set_spacing(8)
-	right.add(vgui.label('Таблица: 2 000 000 строк (двойной щелчок - правка)'))
+	right.add(vgui.label('Table: 2,000,000 rows (double-click to edit)'))
 	right.add(tbl, flex: 1)
 
 	mut row := vgui.create_hbox_fill()

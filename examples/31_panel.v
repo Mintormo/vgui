@@ -16,7 +16,7 @@ fn main() {
 	// Panel — контейнер с фоном, рамкой, скруглением и отступом
 	// вокруг единственного ребёнка (set_child).
 
-	mut text := vgui.label_wrap('Panel задаёт фон, рамку, скругление углов и внутренний отступ вокруг вложенного виджета.')
+	mut text := vgui.label_wrap('Panel adds a background, a border, rounded corners and padding around the nested widget.')
 	text.valign = .middle
 
 	mut p_default := vgui.panel()
@@ -24,7 +24,7 @@ fn main() {
 	p_default.pad = 12
 
 	// Своя расцветка
-	mut inner := vgui.label('Своя расцветка фона и рамки')
+	mut inner := vgui.label('Custom background and border colors')
 	inner.align = .center
 	inner.valign = .middle
 	inner.color = vgui.Color{255, 255, 255, 255}

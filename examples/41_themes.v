@@ -18,7 +18,7 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'Themes - demo')!
 
-	mut status := vgui.label('Тема: Dark')
+	mut status := vgui.label('Theme: Dark')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Встроенные темы. win.set_theme(theme) применяет тему ко всему окну.
@@ -50,7 +50,7 @@ fn main() {
 	combo.set_selected(0)
 	combo.on_change = fn [mut win, mut status, themes] (idx int, text string) {
 		win.set_theme(themes[idx].theme)
-		status.text = 'Тема: ${text}'
+		status.text = 'Theme: ${text}'
 	}
 
 	// Набор виджетов, чтобы видеть, как тема влияет на их вид
@@ -60,9 +60,9 @@ fn main() {
 	mut accent := vgui.button('Accent')
 	accent.style = .accent
 	sample.add(accent)
-	sample.add(vgui.checkbox('Чекбокс'))
-	sample.add(vgui.toggle_switch('Переключатель'))
-	sample.add(vgui.text_input('Поле ввода...'))
+	sample.add(vgui.checkbox('Checkbox'))
+	sample.add(vgui.toggle_switch('Switch'))
+	sample.add(vgui.text_input('Input field...'))
 	mut pb := vgui.progress_bar()
 	pb.set_value(0.6)
 	sample.add(pb)
@@ -72,7 +72,7 @@ fn main() {
 	root.set_padding(16)
 	root.set_spacing(10)
 	root.add(status)
-	root.add(vgui.label('Выберите тему:'))
+	root.add(vgui.label('Choose a theme:'))
 	root.add(combo)
 	root.add(vgui.hseparator())
 	root.add(sample, flex: 1)

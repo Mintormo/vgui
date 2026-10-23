@@ -27,7 +27,7 @@ mut:
 
 fn (mut c Counter) tick() {
 	c.n++
-	c.label.text = '${c.name}: кликов ${c.n}'
+	c.label.text = '${c.name}: ${c.n} clicks'
 }
 
 // open_dialog создаёт и показывает модальный диалог поверх parent.
@@ -38,14 +38,14 @@ fn open_dialog(parent &vgui.Window, mut app vgui.App, title string) {
 		parent: unsafe { parent }
 	) or { return }
 
-	mut msg := vgui.label_wrap('Пока я открыт, моё окно заблокировано, ' +
-		'а соседнее - нет. Попробуйте покликать там.')
+	mut msg := vgui.label_wrap('While I am open, my window is blocked, ' +
+		'but the other one is not. Try clicking there.')
 
 	mut btn_row := vgui.create_hbox_fill()
 	btn_row.set_spacing(10)
 	btn_row.set_padding(0)
 	btn_row.add(vgui.create_spacer(), flex: 1)
-	mut close_btn := vgui.button('Закрыть')
+	mut close_btn := vgui.button('Close')
 	close_btn.on_click = fn [mut dlg] () {
 		dlg.close_with_result(0)
 	}
@@ -67,41 +67,41 @@ fn main() {
 	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app()!
 
-	mut win1 := vgui.create_window(title: 'Окно 1')!
-	mut win2 := vgui.create_window(title: 'Окно 2')!
+	mut win1 := vgui.create_window(title: 'Window 1')!
+	mut win2 := vgui.create_window(title: 'Window 2')!
 
 	mut c1 := &Counter{
-		label: vgui.label('Окно 1: кликов 0')
-		name:  'Окно 1'
+		label: vgui.label('Window 1: 0 clicks')
+		name:  'Window 1'
 	}
 	mut c2 := &Counter{
-		label: vgui.label('Окно 2: кликов 0')
-		name:  'Окно 2'
+		label: vgui.label('Window 2: 0 clicks')
+		name:  'Window 2'
 	}
 
-	mut tick1 := vgui.button('Посчитать клик')
+	mut tick1 := vgui.button('Count a click')
 	tick1.on_click = fn [mut c1] () {
 		c1.tick()
 	}
-	mut tick2 := vgui.button('Посчитать клик')
+	mut tick2 := vgui.button('Count a click')
 	tick2.on_click = fn [mut c2] () {
 		c2.tick()
 	}
 
-	mut open1 := vgui.button('Открыть модальный диалог')
+	mut open1 := vgui.button('Open a modal dialog')
 	open1.on_click = fn [mut app, win1] () {
-		open_dialog(win1, mut app, 'Диалог окна 1')
+		open_dialog(win1, mut app, 'Window 1 dialog')
 	}
-	mut open2 := vgui.button('Открыть модальный диалог')
+	mut open2 := vgui.button('Open a modal dialog')
 	open2.on_click = fn [mut app, win2] () {
-		open_dialog(win2, mut app, 'Диалог окна 2')
+		open_dialog(win2, mut app, 'Window 2 dialog')
 	}
 
 	// Диалог без родителя блокирует все окна - так вели себя все модальные
 	// диалоги до появления областей модальности.
-	mut open_global := vgui.button('Диалог без родителя (блокирует всё)')
+	mut open_global := vgui.button('Dialog without a parent (blocks everything)')
 	open_global.on_click = fn [mut app] () {
-		open_dialog(unsafe { nil }, mut app, 'Модальный для всего приложения')
+		open_dialog(unsafe { nil }, mut app, 'Modal for the whole application')
 	}
 
 	mut root1 := vgui.create_vbox_fill()

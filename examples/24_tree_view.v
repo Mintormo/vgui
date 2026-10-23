@@ -13,7 +13,7 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'TreeView - demo')!
 
-	mut status := vgui.label('Узел: -')
+	mut status := vgui.label('Node: -')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Дерево строится из узлов TreeNode. add_child возвращает новый узел.
@@ -32,15 +32,15 @@ fn main() {
 	tv.add_root(project)
 
 	tv.on_select = fn [mut status] (node &vgui.TreeNode) {
-		status.text = 'Выбран: ${node.text}'
+		status.text = 'Selected: ${node.text}'
 		status.color = vgui.Color{66, 165, 245, 255}
 	}
 
-	mut b_expand := vgui.button('Развернуть всё')
+	mut b_expand := vgui.button('Expand all')
 	b_expand.on_click = fn [mut tv] () {
 		tv.expand_all()
 	}
-	mut b_collapse := vgui.button('Свернуть всё')
+	mut b_collapse := vgui.button('Collapse all')
 	b_collapse.style = .outline
 	b_collapse.on_click = fn [mut tv] () {
 		tv.collapse_all()

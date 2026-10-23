@@ -39,9 +39,9 @@ fn main() {
 	row1.add(b_err)
 	row1.add(vgui.create_spacer(), flex: 1)
 
-	mut count_label := vgui.label('Непрочитанных:')
+	mut count_label := vgui.label('Unread:')
 	count_label.valign = .middle
-	mut dot_label := vgui.label('Статус (точка):')
+	mut dot_label := vgui.label('Status (dot):')
 	dot_label.valign = .middle
 
 	mut row2 := vgui.create_hbox_fill()
@@ -60,7 +60,7 @@ fn main() {
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(12)
-	root.add(vgui.label('Варианты бейджей:'))
+	root.add(vgui.label('Badge variants:'))
 	root.add(row1)
 	root.add(vgui.hseparator())
 	root.add(row2)

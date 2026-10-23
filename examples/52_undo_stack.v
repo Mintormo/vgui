@@ -77,35 +77,35 @@ fn main() {
 	btn_double.on_click = fn [mut stack, mut doc] () {
 		stack.push(double_cmd(mut doc))
 	}
-	mut btn_triple := vgui.button('+1 трижды')
+	mut btn_triple := vgui.button('+1 three times')
 	btn_triple.on_click = fn [mut stack, mut doc] () {
-		stack.begin_group('+1 трижды')
+		stack.begin_group('+1 three times')
 		for _ in 0 .. 3 {
 			stack.push(add_cmd(mut doc, 1, '+1', 0))
 		}
 		stack.end_group()
 	}
 
-	mut btn_undo := vgui.button('Отменить')
+	mut btn_undo := vgui.button('Undo')
 	btn_undo.on_click = fn [mut stack] () {
 		stack.undo()
 	}
-	mut btn_redo := vgui.button('Повторить')
+	mut btn_redo := vgui.button('Redo')
 	btn_redo.on_click = fn [mut stack] () {
 		stack.redo()
 	}
-	mut btn_save := vgui.button('Сохранить')
+	mut btn_save := vgui.button('Save')
 	btn_save.on_click = fn [mut stack] () {
 		stack.set_clean()
 	}
 
 	refresh := fn [mut stack, mut doc, mut value, mut history, mut btn_undo, mut btn_redo, mut win] () {
-		value.text = 'Значение: ${doc.value}'
+		value.text = 'Value: ${doc.value}'
 		btn_undo.enabled = stack.can_undo()
 		btn_redo.enabled = stack.can_redo()
-		btn_undo.text = 'Отменить ${stack.undo_text()}'.trim_space()
-		btn_redo.text = 'Повторить ${stack.redo_text()}'.trim_space()
-		history.text = 'Шаг ${stack.index()} из ${stack.count()}'
+		btn_undo.text = 'Undo ${stack.undo_text()}'.trim_space()
+		btn_redo.text = 'Redo ${stack.redo_text()}'.trim_space()
+		history.text = 'Step ${stack.index()} of ${stack.count()}'
 		mark := if stack.is_clean() { '' } else { ' *' }
 		win.set_title('UndoStack - demo${mark}')
 		win.invalidate_all()

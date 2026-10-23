@@ -13,14 +13,14 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'Spinner - demo')!
 
-	mut status := vgui.label('Spinner крутится...')
+	mut status := vgui.label('Spinner is spinning...')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Индикатор загрузки. Анимируется, пока spinning = true.
 	mut sp_arc := vgui.spinner()
 
 	// Спиннер с текстом рядом
-	mut sp_text := vgui.spinner_with_text('Загрузка...')
+	mut sp_text := vgui.spinner_with_text('Loading...')
 
 	// Управление через start() / stop()
 	mut sp_ctl := vgui.spinner()
@@ -28,10 +28,10 @@ fn main() {
 	btn.on_click = fn [mut sp_ctl, mut status] () {
 		if sp_ctl.is_spinning() {
 			sp_ctl.stop()
-			status.text = 'Остановлен'
+			status.text = 'Stopped'
 		} else {
 			sp_ctl.start()
-			status.text = 'Запущен'
+			status.text = 'Running'
 		}
 	}
 

@@ -13,27 +13,27 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'MenuButton - demo')!
 
-	mut status := vgui.label('Действие: -')
+	mut status := vgui.label('Action: -')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Кнопка с выпадающим меню действий (MenuItem).
-	mut mb := vgui.menu_button('Действия')
+	mut mb := vgui.menu_button('Actions')
 
-	mut a_new := vgui.menu_action('Создать')
+	mut a_new := vgui.menu_action('Create')
 	a_new.shortcut = 'Ctrl+N'
 	a_new.on_click = fn [mut status] () {
-		status.text = 'Действие: Создать'
+		status.text = 'Action: Create'
 	}
 
-	mut a_open := vgui.menu_action('Открыть...')
+	mut a_open := vgui.menu_action('Open...')
 	a_open.shortcut = 'Ctrl+O'
 	a_open.on_click = fn [mut status] () {
-		status.text = 'Действие: Открыть'
+		status.text = 'Action: Open'
 	}
 
-	mut a_save := vgui.menu_action('Сохранить')
+	mut a_save := vgui.menu_action('Save')
 	a_save.on_click = fn [mut status] () {
-		status.text = 'Действие: Сохранить'
+		status.text = 'Action: Save'
 	}
 
 	mb.add(a_new)

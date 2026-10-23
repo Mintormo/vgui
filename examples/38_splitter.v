@@ -13,20 +13,20 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'Splitter - demo')!
 
-	mut status := vgui.label('Перетащите разделитель между панелями')
+	mut status := vgui.label('Drag the divider between the panels')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Splitter делит область на две части с перетаскиваемой границей.
 	// splitter_horizontal() — граница вертикальна (левая/правая панели).
 
-	mut left_lbl := vgui.label('Левая панель')
+	mut left_lbl := vgui.label('Left panel')
 	left_lbl.align = .center
 	left_lbl.valign = .middle
 	mut left := vgui.panel()
 	left.set_child(left_lbl)
 	left.bg = vgui.Color{40, 53, 70, 255}
 
-	mut right_lbl := vgui.label('Правая панель')
+	mut right_lbl := vgui.label('Right panel')
 	right_lbl.align = .center
 	right_lbl.valign = .middle
 	mut right := vgui.panel()
@@ -38,7 +38,7 @@ fn main() {
 	sp.set_second(right)
 	sp.set_ratio(0.4)
 	sp.on_resize = fn [mut status] (ratio f32) {
-		status.text = 'Соотношение: ${ratio:.2f}'
+		status.text = 'Ratio: ${ratio:.2f}'
 	}
 
 	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.

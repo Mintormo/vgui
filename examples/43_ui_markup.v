@@ -28,7 +28,7 @@ fn main() {
 
 	mut save := ui.get[vgui.Button]('save')!
 	save.on_click = fn [mut status, text] () {
-		status.text = 'Сохранено: ${text.get_text().len} симв.'
+		status.text = 'Saved: ${text.get_text().len} chars'
 	}
 	notes.on_select = fn [mut text] (_ int, title string) {
 		text.set_text('${title}\n\n')

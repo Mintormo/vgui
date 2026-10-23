@@ -18,27 +18,27 @@ fn main() {
 	mut pg := vgui.property_grid()
 	pg.set_app(app)
 
-	mut g_general := pg.add_group('Общие')
-	g_general.add_string('Название', 'Мой проект')
-	g_general.add_int('Версия', 3)
-	g_general.add_bool('Включено', true)
-	g_general.add_choice('Тема', ['Тёмная', 'Светлая', 'Monokai'], 0)
+	mut g_general := pg.add_group('General')
+	g_general.add_string('Name', 'My project')
+	g_general.add_int('Version', 3)
+	g_general.add_bool('Enabled', true)
+	g_general.add_choice('Theme', ['Dark', 'Light', 'Monokai'], 0)
 
-	mut g_view := pg.add_group('Вид')
-	g_view.add_color('Цвет фона', vgui.Color{30, 30, 30, 255})
-	g_view.add_float('Прозрачность', 0.85)
-	g_view.add_date('Дата сборки', 2026, 6, 25)
+	mut g_view := pg.add_group('View')
+	g_view.add_color('Background color', vgui.Color{30, 30, 30, 255})
+	g_view.add_float('Opacity', 0.85)
+	g_view.add_date('Build date', 2026, 6, 25)
 
-	mut g_paths := pg.add_group('Пути')
-	g_paths.add_folder_path('Каталог', '/home/igor/projects')
-	g_paths.add_file_path('Иконка', 'icon.png')
+	mut g_paths := pg.add_group('Paths')
+	g_paths.add_folder_path('Folder', '/home/igor/projects')
+	g_paths.add_file_path('Icon', 'icon.png')
 
-	mut status := vgui.label('Прочитать значение:')
+	mut status := vgui.label('Read a value:')
 	status.color = vgui.Color{180, 180, 180, 255}
 
-	mut btn := vgui.button('get_string("Название")')
+	mut btn := vgui.button('get_string("Name")')
 	btn.on_click = fn [mut pg, mut status] () {
-		status.text = 'Название = "${pg.get_string('Название')}"'
+		status.text = 'Name = "${pg.get_string('Name')}"'
 		status.color = vgui.Color{66, 165, 245, 255}
 	}
 

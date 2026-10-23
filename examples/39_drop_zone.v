@@ -13,20 +13,20 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'DropZone - demo')!
 
-	mut status := vgui.label('Перетащите файл из проводника в область ниже')
+	mut status := vgui.label('Drag a file from the file manager onto the area below')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Зона приёма drag-and-drop. on_drop_file срабатывает на брошенный файл.
 	// click_to_browse = true: клик по зоне открывает диалог выбора файла,
 	// результат приходит в тот же on_drop_file.
-	mut dz := vgui.drop_zone('Перетащите файлы сюда\nили кликните для выбора')
+	mut dz := vgui.drop_zone('Drop files here\nor click to choose')
 	dz.click_to_browse = true
 	dz.on_drop_file = fn [mut status] (path string) {
-		status.text = 'Файл: ${path}'
+		status.text = 'File: ${path}'
 		status.color = vgui.Color{72, 199, 142, 255}
 	}
 	dz.on_drop_text = fn [mut status] (text string) {
-		status.text = 'Текст: ${text}'
+		status.text = 'Text: ${text}'
 		status.color = vgui.Color{66, 165, 245, 255}
 	}
 

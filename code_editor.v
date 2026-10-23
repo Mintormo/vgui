@@ -294,6 +294,17 @@ fn (e &CodeEditor) block_state_at(hl &KeywordHighlighter, idx int) bool {
 	return if idx < cache.block_states.len { cache.block_states[idx] } else { false }
 }
 
+// syntax_palette - палитра подсветки под фон редактора (bg_color или фон темы):
+// светлый фон - светлая палитра, тёмный - тёмная (syntax_palette_for). Обычный текст -
+// цветом текста редактора, как и без подсветки. Токены со своим цветом палитру не
+// используют (SyntaxToken.resolve_color).
+fn (e &CodeEditor) syntax_palette(ctx &RenderContext) SyntaxPalette {
+	bg := if e.bg_color.a > 0 { e.bg_color } else { ctx.theme.eff_ce_bg() }
+	mut pal := syntax_palette_for(bg)
+	pal.plain = if e.text_color.a > 0 { e.text_color } else { ctx.theme.eff_ce_text() }
+	return pal
+}
+
 // set_highlighter подключает подсветку синтаксиса (nil отключает). Редактор
 // хранит голый указатель, не владеет объектом: владелец обязан держать его живым.
 pub fn (mut e CodeEditor) set_highlighter(h &SyntaxHighlighter) {
@@ -860,6 +871,7 @@ fn (e &CodeEditor) draw_minimap(mut ctx RenderContext) {
 	has_hl := unsafe { e.highlighter != nil }
 	tc := if e.text_color.a > 0 { e.text_color } else { ctx.theme.text_primary }
 	dim := tc.with_alpha(160)
+	pal := e.syntax_palette(ctx)
 
 	for i in 0 .. e.lines.len {
 		ly := mr.y + f32(i) * mm_lh - mm_scroll
@@ -892,7 +904,7 @@ fn (e &CodeEditor) draw_minimap(mut ctx RenderContext) {
 				tw := f32(tok.text.runes().len) * char_w
 				trimmed := tok.text.trim_space()
 				if trimmed.len > 0 {
-					ctx.fill_rect(Rect{ox, ly, tw, bar_h}, tok.color.with_alpha(180))
+					ctx.fill_rect(Rect{ox, ly, tw, bar_h}, tok.resolve_color(pal).with_alpha(180))
 				}
 				ox += tw
 				if ox > mr.x + mr.w {
@@ -1055,6 +1067,9 @@ pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
 	ctx.push_clip(cr)
 
 	tc := if e.text_color.a > 0 { e.text_color } else { ctx.theme.eff_ce_text() }
+	// Палитра подсветки - под текущий фон и тему (считается каждый кадр: тему могли
+	// сменить на ходу).
+	pal := e.syntax_palette(ctx)
 	sel_c := if e.selection_color.a > 0 {
 		e.selection_color
 	} else {
@@ -1129,7 +1144,7 @@ pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
 				for tok in tokens {
 					tok_text := ce_expand_tabs(tok.text, e.tab_size)
 					tok_w := ctx.measure_text_with_font(tok_text, font).x
-					ctx.draw_text_with_font(tok_text, offset_x, ty, tok.color, font)
+					ctx.draw_text_with_font(tok_text, offset_x, ty, tok.resolve_color(pal), font)
 					offset_x += tok_w
 				}
 			} else {

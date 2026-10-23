@@ -13,13 +13,13 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'CheckBox - demo')!
 
-	mut status := vgui.label('Состояние: -')
+	mut status := vgui.label('State: -')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Обычный чекбокс с колбэком on_change
-	mut cb1 := vgui.checkbox('Включить уведомления')
+	mut cb1 := vgui.checkbox('Enable notifications')
 	cb1.on_change = fn [mut status] (checked bool) {
-		status.text = 'Уведомления: ${checked}'
+		status.text = 'Notifications: ${checked}'
 		status.color = if checked {
 			vgui.Color{72, 199, 142, 255}
 		} else {
@@ -28,15 +28,15 @@ fn main() {
 	}
 
 	// Отмечен по умолчанию
-	mut cb2 := vgui.checkbox('Отмечен по умолчанию')
+	mut cb2 := vgui.checkbox('Checked by default')
 	cb2.checked = true
 
 	// Отключённый чекбокс
-	mut cb3 := vgui.checkbox('Недоступен (enabled = false)')
+	mut cb3 := vgui.checkbox('Disabled (enabled = false)')
 	cb3.enabled = false
 
 	// Программное управление: set_checked / toggle / is_checked
-	mut cb4 := vgui.checkbox('Управляемый кнопками')
+	mut cb4 := vgui.checkbox('Controlled by buttons')
 
 	mut b_toggle := vgui.button('toggle()')
 	b_toggle.on_click = fn [mut cb4, mut status] () {

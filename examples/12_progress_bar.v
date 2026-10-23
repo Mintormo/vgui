@@ -13,7 +13,7 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'ProgressBar - demo')!
 
-	mut status := vgui.label('Прогресс: 40%')
+	mut status := vgui.label('Progress: 40%')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Линейный прогресс-бар. Значение 0.0..1.0 через set_value().
@@ -34,13 +34,13 @@ fn main() {
 	b_minus.on_click = fn [mut pb, mut status] () {
 		v := vgui.clamp_f32(pb.get_value() - 0.1, 0, 1)
 		pb.set_value(v)
-		status.text = 'Прогресс: ${v * 100:.0f}%'
+		status.text = 'Progress: ${v * 100:.0f}%'
 	}
 	mut b_plus := vgui.button('+10%')
 	b_plus.on_click = fn [mut pb, mut status] () {
 		v := vgui.clamp_f32(pb.get_value() + 0.1, 0, 1)
 		pb.set_value(v)
-		status.text = 'Прогресс: ${v * 100:.0f}%'
+		status.text = 'Progress: ${v * 100:.0f}%'
 	}
 
 	mut btn_row := vgui.create_hbox_fill()
@@ -54,12 +54,12 @@ fn main() {
 	root.set_spacing(10)
 	root.add(status)
 	root.add(vgui.hseparator())
-	root.add(vgui.label('Линейный:'))
+	root.add(vgui.label('Linear:'))
 	root.add(pb)
 	root.add(btn_row)
-	root.add(vgui.label('Круговой:'))
+	root.add(vgui.label('Circular:'))
 	root.add(pb_circ)
-	root.add(vgui.label('Неопределённый:'))
+	root.add(vgui.label('Indeterminate:'))
 	root.add(pb_indet)
 
 	// Корень дерева виджетов окна; всё остальное вложено в него.

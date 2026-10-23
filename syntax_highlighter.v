@@ -10,12 +10,98 @@ module vgui
 // (пробелы и знаки тоже входят в токены). Единственная готовая реализация - KeywordHighlighter
 // (ключевые слова/типы/встроенные функции + строки, числа, однострочные комментарии), для
 // V, C и Python есть готовые фабрики. Свою подсветку можно подключить, реализовав интерфейс.
+//
+// Цвета и тема. Токен несёт вид (SyntaxKind) и, по желанию, свой цвет. Без своего цвета
+// (альфа 0) виджет берёт цвет вида из палитры, подобранной под его фон
+// (syntax_palette_for: на тёмном фоне - тёмная палитра, на светлом - светлая), а обычный
+// текст рисует цветом текста темы. Поэтому подсветка следует за темой и её сменой на
+// ходу. KeywordHighlighter по умолчанию своих цветов не задаёт; заданный *_color
+// перекрывает палитру (как раньше).
 
-// Кусок строки text, который рисуется цветом color.
+// SyntaxKind - вид куска строки: по нему выбирается цвет из палитры.
+pub enum SyntaxKind {
+	plain // обычный текст, пробелы, знаки
+	keyword
+	type_name
+	builtin
+	string_lit
+	comment
+	number
+}
+
+// Кусок строки text. color - свой цвет куска; альфа 0 - «не задан», тогда цвет вида kind
+// из палитры (resolve_color).
 pub struct SyntaxToken {
 pub:
 	text  string
-	color Color
+	color Color = Color{0, 0, 0, 0} // у Color альфа по умолчанию 255 - «не задан» явно
+	kind  SyntaxKind
+}
+
+// resolve_color - цвет, которым рисовать токен: свой, если задан, иначе из палитры.
+pub fn (t SyntaxToken) resolve_color(p &SyntaxPalette) Color {
+	return if t.color.a > 0 { t.color } else { p.color_of(t.kind) }
+}
+
+// SyntaxPalette - цвета видов токенов (SyntaxKind) для одного фона.
+pub struct SyntaxPalette {
+pub mut:
+	plain      Color
+	keyword    Color
+	type_name  Color
+	builtin    Color
+	string_lit Color
+	comment    Color
+	number     Color
+}
+
+// color_of - цвет вида kind.
+pub fn (p &SyntaxPalette) color_of(kind SyntaxKind) Color {
+	return match kind {
+		.plain { p.plain }
+		.keyword { p.keyword }
+		.type_name { p.type_name }
+		.builtin { p.builtin }
+		.string_lit { p.string_lit }
+		.comment { p.comment }
+		.number { p.number }
+	}
+}
+
+// syntax_palette_dark - палитра для тёмного фона (в духе One Dark; прежние цвета
+// KeywordHighlighter по умолчанию).
+pub fn syntax_palette_dark() SyntaxPalette {
+	return SyntaxPalette{
+		plain:      Color{220, 220, 220, 255} // light gray
+		keyword:    Color{198, 120, 221, 255} // purple
+		type_name:  Color{230, 192, 123, 255} // yellow
+		builtin:    Color{97, 175, 239, 255}  // blue
+		string_lit: Color{152, 195, 121, 255} // green
+		comment:    Color{92, 99, 112, 255}   // gray
+		number:     Color{209, 154, 102, 255} // orange
+	}
+}
+
+// syntax_palette_light - палитра для светлого фона (в духе One Light): те же оттенки,
+// но темнее, чтобы читались на белом.
+pub fn syntax_palette_light() SyntaxPalette {
+	return SyntaxPalette{
+		plain:      Color{56, 58, 66, 255}
+		keyword:    Color{166, 38, 164, 255}
+		type_name:  Color{193, 132, 1, 255}
+		builtin:    Color{64, 120, 242, 255}
+		string_lit: Color{80, 161, 79, 255}
+		comment:    Color{160, 161, 167, 255}
+		number:     Color{152, 104, 1, 255}
+	}
+}
+
+// syntax_palette_for - палитра под фон bg: светлый фон (относительная яркость по
+// Rec. 709 больше половины) - светлая палитра, иначе тёмная. Фон, а не имя темы:
+// так верный выбор получают и свои темы, и виджет с собственным bg_color.
+pub fn syntax_palette_for(bg Color) SyntaxPalette {
+	luma := 0.2126 * f32(bg.r) + 0.7152 * f32(bg.g) + 0.0722 * f32(bg.b)
+	return if luma > 127.5 { syntax_palette_light() } else { syntax_palette_dark() }
 }
 
 // Разбор одной строки (без перевода строки) на токены. Реализация обязана вернуть токены, тексты
@@ -29,8 +115,9 @@ pub interface SyntaxHighlighter {
 // ═══════════════════════════════════════════════════════
 
 // Универсальный подсветчик по спискам слов. keywords/types/builtins - списки слов трёх
-// категорий (всё остальное - default_color); *_color - палитра по умолчанию в стиле тёмной темы
-// line_comment - начало однострочного комментария (пустая
+// категорий (всё остальное - обычный текст, default_color). *_color - свои цвета видов;
+// по умолчанию не заданы (альфа 0), и цвет берётся из палитры под фон виджета
+// (SyntaxPalette, см. шапку файла). line_comment - начало однострочного комментария (пустая
 // строка - нет комментариев). block_start/block_end - границы блочного комментария (пустые -
 // блочных нет). Блочный комментарий тянется через строки, поэтому учитывает его
 // tokenize_state (состояние «внутри комментария» на входе и выходе строки); CodeEditor
@@ -41,13 +128,13 @@ pub mut:
 	keywords      []string
 	types         []string
 	builtins      []string
-	keyword_color Color  = Color{198, 120, 221, 255} // purple
-	type_color    Color  = Color{230, 192, 123, 255} // yellow
-	builtin_color Color  = Color{97, 175, 239, 255}  // blue
-	string_color  Color  = Color{152, 195, 121, 255} // green
-	comment_color Color  = Color{92, 99, 112, 255}   // gray
-	number_color  Color  = Color{209, 154, 102, 255} // orange
-	default_color Color  = Color{220, 220, 220, 255} // light gray
+	keyword_color Color  = Color{0, 0, 0, 0}
+	type_color    Color  = Color{0, 0, 0, 0}
+	builtin_color Color  = Color{0, 0, 0, 0}
+	string_color  Color  = Color{0, 0, 0, 0}
+	comment_color Color  = Color{0, 0, 0, 0}
+	number_color  Color  = Color{0, 0, 0, 0}
+	default_color Color  = Color{0, 0, 0, 0}
 	line_comment  string = '//'
 	block_start   string = '/*'
 	block_end     string = '*/'
@@ -99,7 +186,6 @@ pub fn python_highlighter() &KeywordHighlighter {
 		// В Python блочных комментариев нет (а '/*' - не начало комментария).
 		block_start:  ''
 		block_end:    ''
-		string_color: Color{152, 195, 121, 255}
 	}
 }
 
@@ -161,6 +247,7 @@ pub fn (h &KeywordHighlighter) tokenize_state(line string, in_block bool) ([]Syn
 				tokens << SyntaxToken{
 					text:  line
 					color: h.comment_color
+					kind:  .comment
 				}
 			}
 			return tokens, true
@@ -169,6 +256,7 @@ pub fn (h &KeywordHighlighter) tokenize_state(line string, in_block bool) ([]Syn
 		tokens << SyntaxToken{
 			text:  line[..i]
 			color: h.comment_color
+			kind:  .comment
 		}
 	}
 
@@ -183,6 +271,7 @@ pub fn (h &KeywordHighlighter) tokenize_state(line string, in_block bool) ([]Syn
 				tokens << SyntaxToken{
 					text:  line[i..j]
 					color: h.comment_color
+					kind:  .comment
 				}
 				i = j
 				continue
@@ -190,6 +279,7 @@ pub fn (h &KeywordHighlighter) tokenize_state(line string, in_block bool) ([]Syn
 			tokens << SyntaxToken{
 				text:  line[i..]
 				color: h.comment_color
+				kind:  .comment
 			}
 			return tokens, true
 		}
@@ -199,6 +289,7 @@ pub fn (h &KeywordHighlighter) tokenize_state(line string, in_block bool) ([]Syn
 				tokens << SyntaxToken{
 					text:  line[i..]
 					color: h.comment_color
+					kind:  .comment
 				}
 				return tokens, false
 			}
@@ -224,6 +315,7 @@ pub fn (h &KeywordHighlighter) tokenize_state(line string, in_block bool) ([]Syn
 			tokens << SyntaxToken{
 				text:  line[i..j]
 				color: h.string_color
+				kind:  .string_lit
 			}
 			i = j
 			continue
@@ -262,6 +354,7 @@ pub fn (h &KeywordHighlighter) tokenize_state(line string, in_block bool) ([]Syn
 			tokens << SyntaxToken{
 				text:  line[i..j]
 				color: h.number_color
+				kind:  .number
 			}
 			i = j
 			continue
@@ -276,17 +369,22 @@ pub fn (h &KeywordHighlighter) tokenize_state(line string, in_block bool) ([]Syn
 			word := line[i..j]
 
 			mut color := h.default_color
+			mut kind := SyntaxKind.plain
 			if word in h.keywords {
 				color = h.keyword_color
+				kind = .keyword
 			} else if word in h.types {
 				color = h.type_color
+				kind = .type_name
 			} else if word in h.builtins {
 				color = h.builtin_color
+				kind = .builtin
 			}
 
 			tokens << SyntaxToken{
 				text:  word
 				color: color
+				kind:  kind
 			}
 			i = j
 			continue

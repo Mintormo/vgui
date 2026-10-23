@@ -13,25 +13,24 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'ComboBox - demo')!
 
-	mut status := vgui.label('Выбор: -')
+	mut status := vgui.label('Selection: -')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Выпадающий список. Колбэк on_change получает (индекс, текст).
 	mut city := vgui.combo_box()
-	city.add_items(['Москва', 'Санкт-Петербург', 'Новосибирск',
-		'Екатеринбург', 'Казань'])
+	city.add_items(['Moscow', 'Saint Petersburg', 'Novosibirsk', 'Yekaterinburg', 'Kazan'])
 	city.set_selected(0)
 	city.on_change = fn [mut status] (idx int, text string) {
-		status.text = 'Город [${idx}]: ${text}'
+		status.text = 'City [${idx}]: ${text}'
 		status.color = vgui.Color{66, 165, 245, 255}
 	}
 
 	// Список с подсказкой-плейсхолдером (ничего не выбрано)
 	mut lang := vgui.combo_box()
-	lang.placeholder = '— выберите язык —'
+	lang.placeholder = '- choose a language -'
 	lang.add_items(['V', 'Python', 'Rust', 'Go', 'C'])
 	lang.on_change = fn [mut status] (idx int, text string) {
-		status.text = 'Язык: ${text}'
+		status.text = 'Language: ${text}'
 	}
 
 	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
@@ -40,9 +39,9 @@ fn main() {
 	root.set_spacing(10)
 	root.add(status)
 	root.add(vgui.hseparator())
-	root.add(vgui.label('Город:'))
+	root.add(vgui.label('City:'))
 	root.add(city)
-	root.add(vgui.label('Язык (с placeholder):'))
+	root.add(vgui.label('Language (with placeholder):'))
 	root.add(lang)
 
 	// Корень дерева виджетов окна; всё остальное вложено в него.

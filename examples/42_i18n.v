@@ -57,7 +57,7 @@ fn main() {
 	})
 
 	vgui.set_fallback_locale('en')
-	vgui.set_locale('ru')
+	vgui.set_locale('en')
 
 	mut title := vgui.label('')
 	title.font_style = .bold
@@ -81,13 +81,13 @@ fn main() {
 
 	// Переключатель языка
 	mut lang := vgui.combo_box()
-	lang.add_items(['Русский (ru)', 'English (en)', 'Deutsch (de)'])
+	lang.add_items(['English (en)', 'Русский (ru)', 'Deutsch (de)'])
 	lang.set_selected(0)
 	lang.on_change = fn [mut state] (idx int, _ string) {
 		locale := match idx {
-			1 { 'en' }
+			1 { 'ru' }
 			2 { 'de' }
-			else { 'ru' }
+			else { 'en' }
 		}
 		vgui.set_locale(locale)
 		state.retranslate()

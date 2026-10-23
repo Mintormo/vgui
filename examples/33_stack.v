@@ -16,7 +16,7 @@ fn main() {
 	// Stack накладывает детей друг на друга (z-порядок: добавленные позже
 	// рисуются сверху). Удобно для оверлеев, бейджей поверх контента и т.п.
 
-	mut bg := vgui.label('Фоновый слой')
+	mut bg := vgui.label('Background layer')
 	bg.align = .center
 	bg.valign = .middle
 	bg.color = vgui.Color{255, 255, 255, 255}
@@ -40,7 +40,7 @@ fn main() {
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(8)
-	root.add(vgui.label('Бейдж наложен поверх синей панели:'))
+	root.add(vgui.label('A badge on top of a blue panel:'))
 	root.add(stack, flex: 1)
 
 	// Корень дерева виджетов окна; всё остальное вложено в него.

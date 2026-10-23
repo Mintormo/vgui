@@ -92,7 +92,7 @@ fn main() {
 		tracks << ease_track(e.str(), e)
 	}
 
-	mut btn := vgui.button('Туда-обратно')
+	mut btn := vgui.button('Back and forth')
 	btn.on_click = fn [mut tracks, mut win] () {
 		for mut t in tracks {
 			t.target = 1 - t.target

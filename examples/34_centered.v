@@ -17,7 +17,7 @@ fn main() {
 	// create_centered_fill(child_w, child_h) — ребёнок фиксированного размера
 	// по центру, остальное пространство пустое.
 
-	mut card_text := vgui.label_wrap('Эта карточка размером 240x120 всегда остаётся по центру окна при изменении его размера.')
+	mut card_text := vgui.label_wrap('This 240x120 card always stays in the center of the window when it is resized.')
 	card_text.align = .center
 	card_text.valign = .middle
 	card_text.color = vgui.Color{255, 255, 255, 255}

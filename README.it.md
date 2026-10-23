@@ -200,7 +200,7 @@ cd "$USERPROFILE/.vmodules/vgui" && ~/v/v -cc gcc run examples/59_showcase.v
 ## Esempi
 
 [`examples/`](examples) contiene 58 piccoli programmi, uno per widget o
-funzionalità (la loro interfaccia è in russo), più
+funzionalità, più
 [`59_showcase.v`](examples/59_showcase.v) con tutto in una finestra.
 
 ```bash

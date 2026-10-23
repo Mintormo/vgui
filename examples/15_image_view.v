@@ -18,7 +18,7 @@ fn main() {
 	// работал независимо от текущего каталога запуска.
 	img := os.join_path(os.dir(@FILE), '..', 'assets', 'icons', 'home.png')
 
-	mut status := vgui.label('Колесо мыши — зум, перетаскивание — панорама')
+	mut status := vgui.label('Mouse wheel - zoom, drag - pan')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// ImageView с режимом масштабирования .fit (вписать целиком).

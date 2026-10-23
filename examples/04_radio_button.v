@@ -13,42 +13,42 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'RadioButton - demo')!
 
-	mut status := vgui.label('Выбор: -')
+	mut status := vgui.label('Selection: -')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Кнопки одной группы объединяются полем .radio_group:
 	// выбор одной автоматически снимает выбор остальных в группе.
-	mut r1 := vgui.radio_button('Маленький')
+	mut r1 := vgui.radio_button('Small')
 	r1.radio_group = 'size'
 	r1.selected = true
 	r1.on_change = fn [mut status] (sel bool) {
 		if sel {
-			status.text = 'Размер: маленький'
+			status.text = 'Size: small'
 		}
 	}
 
-	mut r2 := vgui.radio_button('Средний')
+	mut r2 := vgui.radio_button('Medium')
 	r2.radio_group = 'size'
 	r2.on_change = fn [mut status] (sel bool) {
 		if sel {
-			status.text = 'Размер: средний'
+			status.text = 'Size: medium'
 		}
 	}
 
-	mut r3 := vgui.radio_button('Большой')
+	mut r3 := vgui.radio_button('Large')
 	r3.radio_group = 'size'
 	r3.on_change = fn [mut status] (sel bool) {
 		if sel {
-			status.text = 'Размер: большой'
+			status.text = 'Size: large'
 		}
 	}
 
 	// Вторая независимая группа
-	mut c1 := vgui.radio_button('Светлая тема')
+	mut c1 := vgui.radio_button('Light theme')
 	c1.radio_group = 'theme'
 	c1.selected = true
 
-	mut c2 := vgui.radio_button('Тёмная тема')
+	mut c2 := vgui.radio_button('Dark theme')
 	c2.radio_group = 'theme'
 
 	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
@@ -57,11 +57,11 @@ fn main() {
 	root.set_spacing(8)
 	root.add(status)
 	root.add(vgui.hseparator())
-	root.add(vgui.label('Группа "size":'))
+	root.add(vgui.label('Group "size":'))
 	root.add(r1)
 	root.add(r2)
 	root.add(r3)
-	root.add(vgui.label('Группа "theme":'))
+	root.add(vgui.label('Group "theme":'))
 	root.add(c1)
 	root.add(c2)
 

@@ -64,29 +64,6 @@ fn theme_index() int {
 	}
 }
 
-// set_palette подбирает цвета подсветки под фон темы: палитра KeywordHighlighter
-// по умолчанию рассчитана на тёмный фон, на светлом обычный текст не виден
-fn set_palette(mut hl vgui.KeywordHighlighter, th vgui.Theme) {
-	if int(th.bg.r) + int(th.bg.g) + int(th.bg.b) > 3 * 128 {
-		hl.keyword_color = vgui.Color{166, 38, 164, 255}
-		hl.type_color = vgui.Color{193, 132, 1, 255}
-		hl.builtin_color = vgui.Color{64, 120, 242, 255}
-		hl.string_color = vgui.Color{80, 161, 79, 255}
-		hl.comment_color = vgui.Color{160, 161, 167, 255}
-		hl.number_color = vgui.Color{152, 104, 1, 255}
-		hl.default_color = vgui.Color{56, 58, 66, 255}
-	} else {
-		d := vgui.KeywordHighlighter{}
-		hl.keyword_color = d.keyword_color
-		hl.type_color = d.type_color
-		hl.builtin_color = d.builtin_color
-		hl.string_color = d.string_color
-		hl.comment_color = d.comment_color
-		hl.number_color = d.number_color
-		hl.default_color = d.default_color
-	}
-}
-
 // heading - заголовок группы в правой колонке
 fn heading(text string) &vgui.Label {
 	mut l := vgui.label(text)
@@ -157,10 +134,9 @@ fn main() {
 	left.add(lb, flex: 2)
 
 	// Середина - вкладки (код, таблица) и график
-	mut hl := vgui.v_highlighter()
-	set_palette(mut hl, themes[start].theme)
+	// Цвета подсветки редактор сам подбирает под фон темы
 	mut ed := vgui.code_editor()
-	ed.set_highlighter(hl)
+	ed.set_highlighter(vgui.v_highlighter())
 	ed.set_text(sample_code)
 
 	mut table := vgui.table_view()
@@ -193,8 +169,7 @@ fn main() {
 		theme_cb.add_icon_item(th.name, vgui.item_icon(th.icon))
 	}
 	theme_cb.set_selected(start)
-	theme_cb.on_change = fn [mut app, mut hl, themes, mut status] (idx int, name string) {
-		set_palette(mut hl, themes[idx].theme)
+	theme_cb.on_change = fn [mut app, themes, mut status] (idx int, name string) {
 		app.set_theme(themes[idx].theme)
 		status.text = 'Theme: ${name}'
 	}

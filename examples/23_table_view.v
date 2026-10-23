@@ -13,7 +13,7 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'TableView - demo')!
 
-	mut status := vgui.label('Ячейка: -')
+	mut status := vgui.label('Cell: -')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Таблица: колонки задаются add_column(title, width), строки add_row([...]).
@@ -21,14 +21,14 @@ fn main() {
 	// на выделенной ячейке открывают инлайн-редактор (Esc - отмена).
 	mut t := vgui.table_view()
 	t.editable = true
-	t.add_column('Имя', 160)
-	t.add_column('Возраст', 90)
-	t.add_column('Город', 160)
+	t.add_column('Name', 160)
+	t.add_column('Age', 90)
+	t.add_column('City', 160)
 
-	t.add_row(['Иван', '46', 'Москва'])
-	t.add_row(['Анна', '32', 'Казань'])
-	t.add_row(['Пётр', '28', 'Самара'])
-	t.add_row(['Мария', '41', 'Омск'])
+	t.add_row(['John', '46', 'Moscow'])
+	t.add_row(['Anna', '32', 'Kazan'])
+	t.add_row(['Peter', '28', 'Samara'])
+	t.add_row(['Mary', '41', 'Omsk'])
 
 	// Колонку "Имя" запрещаем менять поячеечно: set_cell_editable(row, col, false).
 	for r in 0 .. t.row_count() {
@@ -36,12 +36,12 @@ fn main() {
 	}
 
 	t.on_select = fn [mut t, mut status] (row int, col int) {
-		ro := if t.get_cell_editable(row, col) { '' } else { ' (только чтение)' }
-		status.text = 'Ячейка [${row}, ${col}] = "${t.get_cell(row, col)}"${ro}'
+		ro := if t.get_cell_editable(row, col) { '' } else { ' (read-only)' }
+		status.text = 'Cell [${row}, ${col}] = "${t.get_cell(row, col)}"${ro}'
 		status.color = vgui.Color{66, 165, 245, 255}
 	}
 	t.on_change = fn [mut status] (row int, col int, text string) {
-		status.text = 'Изменено [${row}, ${col}] -> "${text}"'
+		status.text = 'Changed [${row}, ${col}] -> "${text}"'
 		status.color = vgui.Color{72, 199, 142, 255}
 	}
 

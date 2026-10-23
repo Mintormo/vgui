@@ -13,7 +13,7 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'Spinbox - demo')!
 
-	mut status := vgui.label('Значение: -')
+	mut status := vgui.label('Value: -')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Целочисленный счётчик с диапазоном и шагом
@@ -21,7 +21,7 @@ fn main() {
 	sp1.set_range(0, 100)
 	sp1.set_value(10)
 	sp1.on_change = fn [mut status] (v int) {
-		status.text = 'Количество: ${v}'
+		status.text = 'Quantity: ${v}'
 	}
 
 	// Шаг = 5
@@ -48,13 +48,13 @@ fn main() {
 	root.set_spacing(8)
 	root.add(status)
 	root.add(vgui.hseparator())
-	root.add(vgui.label('Диапазон 0-100, шаг 1:'))
+	root.add(vgui.label('Range 0-100, step 1:'))
 	root.add(sp1)
-	root.add(vgui.label('Шаг = 5:'))
+	root.add(vgui.label('Step = 5:'))
 	root.add(sp2)
-	root.add(vgui.label('Суффикс " %":'))
+	root.add(vgui.label('Suffix " %":'))
 	root.add(sp3)
-	root.add(vgui.label('Префикс/суффикс:'))
+	root.add(vgui.label('Prefix/suffix:'))
 	root.add(sp4)
 
 	// Корень дерева виджетов окна; всё остальное вложено в него.

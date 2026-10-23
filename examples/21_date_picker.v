@@ -13,13 +13,13 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'DatePicker - demo')!
 
-	mut status := vgui.label('Дата: -')
+	mut status := vgui.label('Date: -')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Встроенный календарь. Колбэк on_change(year, month, day).
 	mut dp := vgui.date_picker_ymd(2026, 6, 25)
 	dp.on_change = fn [mut status] (y int, m int, d int) {
-		status.text = 'Выбрано: ${d:02d}.${m:02d}.${y}'
+		status.text = 'Selected: ${y}-${m:02d}-${d:02d}'
 		status.color = vgui.Color{66, 165, 245, 255}
 	}
 

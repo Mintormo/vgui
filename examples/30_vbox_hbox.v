@@ -39,9 +39,9 @@ fn main() {
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
 	root.set_spacing(8)
-	root.add(vgui.label('add(w) - блок по высоте своей подписи:'))
-	root.add(color_panel('блок по содержимому', vgui.Color{84, 110, 122, 255}))
-	root.add(vgui.label('HBox с flex-долями 1:2:1:'))
+	root.add(vgui.label('add(w) - block as tall as its label:'))
+	root.add(color_panel('block sized by content', vgui.Color{84, 110, 122, 255}))
+	root.add(vgui.label('HBox with flex shares 1:2:1:'))
 	root.add(hrow, flex: 1)
 
 	// Корень дерева виджетов окна; всё остальное вложено в него.

@@ -24,7 +24,7 @@ fn main() {
 	// App - один на процесс: инициализирует SDL, шрифты и тему, владеет главным циклом.
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
-	mut win := vgui.create_window(title: 'Авто-раскладка (measure)')!
+	mut win := vgui.create_window(title: 'Auto layout (measure)')!
 
 	// ─── Строка 1: иконка + метка + кнопка ───────────────
 	//
@@ -37,9 +37,9 @@ fn main() {
 	row1.set_spacing(8)
 	row1.set_cross_align(.center) // по вертикали — по центру, а не на всю высоту
 	row1.add(ic)
-	row1.add(vgui.label('add(w): ширина по содержимому'))
+	row1.add(vgui.label('add(w): width from content'))
 	row1.add(vgui.create_spacer(), flex: 1)
-	row1.add(vgui.button('Кнопка'))
+	row1.add(vgui.button('Button'))
 
 	// ─── Строка 2: кнопки разной длины ───────────────────
 	//
@@ -48,8 +48,7 @@ fn main() {
 	mut row2 := vgui.create_hbox_fill()
 	row2.set_spacing(8)
 	row2.set_cross_align(.center)
-	for text in ['ОК', 'Отмена', 'Сохранить как…',
-		'Применить ко всем'] {
+	for text in ['OK', 'Cancel', 'Save as…', 'Apply to all'] {
 		row2.add(vgui.button(text), min: 90)
 	}
 	row2.add(vgui.create_spacer(), flex: 1)
@@ -60,7 +59,7 @@ fn main() {
 	// кнопки встают по-разному.
 	mut row3 := vgui.create_hbox_fill()
 	row3.set_spacing(8)
-	row3.add(vgui.label('align:\nвыравнивание\nпоперёк оси'))
+	row3.add(vgui.label('align:\ncross-axis\nalignment'))
 	row3.add(vgui.button('start'), align: .start)
 	row3.add(vgui.button('center'), align: .center)
 	row3.add(vgui.button('end'), align: .end)
@@ -76,7 +75,7 @@ fn main() {
 	form.set_spacing(8, 8)
 	form.set_col_auto(0)
 	form.set_col_weight(1, 1)
-	labels := ['Имя:', 'Электронная почта:', 'Комментарий:']
+	labels := ['Name:', 'Email:', 'Comment:']
 	for i, text in labels {
 		mut l := vgui.label(text)
 		l.valign = .middle

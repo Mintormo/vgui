@@ -22,26 +22,26 @@ fn main() {
 	// Окно верхнего уровня. В заголовке - дефис-минус: глиф длинного тире не рендерится.
 	mut win := vgui.create_window(title: 'TabBox - demo')!
 
-	mut status := vgui.label('Активная вкладка: 0')
+	mut status := vgui.label('Active tab: 0')
 	status.color = vgui.Color{180, 180, 180, 255}
 
 	// Вкладки. add_tab(title, widget) — каждая вкладка содержит свой виджет.
 	mut tabs := vgui.tab_box()
 
-	mut form := make_page('Содержимое первой вкладки.')
-	form.add(vgui.text_input('Поле ввода...'))
+	mut form := make_page('Content of the first tab.')
+	form.add(vgui.text_input('Input field...'))
 
-	mut info := make_page('Вторая вкладка с другим содержимым. Переключайтесь кликом по заголовкам сверху.')
+	mut info := make_page('The second tab with different content. Switch tabs by clicking the headers above.')
 
-	mut settings := make_page('Третья вкладка — настройки.')
-	settings.add(vgui.checkbox('Опция A'))
-	settings.add(vgui.checkbox('Опция B'))
+	mut settings := make_page('The third tab - settings.')
+	settings.add(vgui.checkbox('Option A'))
+	settings.add(vgui.checkbox('Option B'))
 
-	tabs.add_tab('Форма', form)
-	tabs.add_tab('Инфо', info)
-	tabs.add_tab('Настройки', settings)
+	tabs.add_tab('Form', form)
+	tabs.add_tab('Info', info)
+	tabs.add_tab('Settings', settings)
 	tabs.on_change = fn [mut status] (idx int, title string) {
-		status.text = 'Активная вкладка: ${idx} (${title})'
+		status.text = 'Active tab: ${idx} (${title})'
 		status.color = vgui.Color{66, 165, 245, 255}
 	}
 
