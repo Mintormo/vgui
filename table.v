@@ -125,7 +125,7 @@ pub mut:
 	dnd         &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
 	focused     bool
 	hovered     bool
-	focus_anim  Anim = anim_smooth(anim_tau_focus)
+	focus_anim  Anim = anim_role(.focus)
 	focus_group int
 	// Behavior
 	editable            bool // global edit toggle
@@ -201,6 +201,10 @@ pub mut:
 	is_virtual    bool
 	virtual_count int
 	virtual_text  fn (row int, col int) string = unsafe { nil }
+	// Модель данных (models.v, set_model): виртуальный режим поверх неё и
+	// версия модели, которую вид уже видел (sync_model).
+	model     ?TableModel
+	model_ver u64
 }
 
 // ─── Constructors ──────────────────────────────────────
@@ -387,6 +391,7 @@ pub fn (mut t TableView) clear_rows() {
 	t.is_virtual = false
 	t.virtual_count = 0
 	t.virtual_text = unsafe { nil }
+	t.model = none
 	t.sel_row = -1
 	t.sel_col = -1
 	t.hover_row = -1
@@ -1275,6 +1280,7 @@ fn (t &TableView) draw_header(mut ctx RenderContext, vp Rect, hdr_bg Color, hdr_
 // могло уменьшиться). Строки и колонки вне видимой области пропускаются, а
 // перебор строк прерывается при выходе за нижний край (rows упорядочены по Y).
 pub fn (mut t TableView) draw(mut ctx RenderContext) {
+	t.sync_model()
 	en := ctx.is_enabled(t.enabled)
 	if !t.visible || t.columns.len == 0 {
 		return
@@ -1559,6 +1565,7 @@ pub fn (mut t TableView) handle_event(event &GuiEvent, app &App) bool {
 	if !t.visible || !t.enabled || t.columns.len == 0 {
 		return false
 	}
+	t.sync_model()
 
 	ctx_ptr := app.get_active_ctx()
 

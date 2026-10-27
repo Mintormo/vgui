@@ -45,6 +45,7 @@ vgui - самостоятельная библиотека, ничего не з
 - PlotView: подписи делений не выходят за рамку
 - ListBox: сортировка строк (`auto_sort`)
 - Виртуальный режим ListBox и TableView (`set_virtual`); шапка колонок
+- Реактивные данные: Observable и модели (`models.v`, `model_views.v`)
 - ScrollBox: несколько детей стопкой
 - Splitter: панель держит размер в пикселях (`keep`)
 - Диалог не больше экрана (`Dialog.show`, `ScrollBox.fit_content`)
@@ -583,6 +584,10 @@ scancode клавиши, которая печатает этот символ �
 
 Тесты — `anim_test.v`: кривые, совпадение со старым `k`, независимость от fps (два кадра по 8 мс = один на 16), прилипание и смена цели, твин и потолок шага, один шаг за кадр, расчёт `anim_dt` в `render()`, и регрессия «виджет с гаснущим кольцом фокуса просит следующий кадр» по всем девяти виджетам (проверена мутацией).
 
+**Темп переходов — в теме (с 27.10.2026).** У `Anim` есть роль `role AnimRole` (`.custom` по умолчанию, `.focus`/`.hover`/`.toggle`/`.press`). Встроенные виджеты создают свои `Anim` через `anim_role(.focus)` (или `Anim{role: .hover, epsilon: ...}`), и `step()` перед шагом берёт постоянную времени роли из `ctx.theme.anim` (`AnimTiming{focus_ms, hover_ms, toggle_ms, press_ms, speed}`; по умолчанию — прежние `anim_tau_*`, так что вид не изменился, снапшоты те же). `speed` действует на **все** `Anim` окна, в том числе `.custom` и `.tween`: шаг умножается на него, `speed <= 0` — сразу в цель («уменьшить движение»). Константы `anim_tau_*` остались: это значения по умолчанию и для своих `Anim` приложения. Менять темп — `Window.set_anim_timing(t)` / `App.set_anim_timing(t)` (приложение — всем окнам, включая окна со своей темой: темп — настройка пользователя, а не часть вида) или полем `anim` своей темы. Новому встроенному виджету — `anim_role`, а не `anim_smooth(anim_tau_*)`, иначе тема его темп не изменит. Тест — `timeline_test.v` (`test_theme_anim_timing`).
+
+**Анимация из приложения — `Timeline` (`timeline.v`, с 27.10.2026).** `Anim` — число внутри виджета; `Timeline` — для кода приложения: набор дорожек `TimelineTrack{delay_ms, duration_ms, from, to, easing, on_value}` на одной шкале. `tl.add(delay, dur, from, to, easing, fn (v f32))`, `tl.then(gap, ...)` — дорожка после конца всех уже добавленных, `tl.on_done`, `tl.loop`, `stop`/`rewind`; `app.play(tl)` или короткое `app.animate(dur, from, to, easing, cb)`. Дорожка отдаёт значение на каждом кадре и последний раз — ровно `to` (даже если кадр перескочил через конец); дорожка, ещё не начавшаяся из-за задержки, значение не трогает. **Свойств «позиция» и «прозрачность» у виджетов нет** (раскладка без пикселей, намеренно) — анимируется любое число, а что с ним делать, решает колбэк (ratio `Splitter`, процент `ProgressBar`, цвет). Играет App: `render_all()` перед кадром зовёт `step_timelines()` — шаг по часам `now_ms()` с прошлого шага (первый — от момента `play`, не от прошлого кадра), не больше `anim_max_dt`; пока шкала идёт, `needs_animation_now()` = true, и все окна перерисовываются целиком (`invalidate_all_windows`): колбэки могли поменять любые виджеты, а сеттеры кадр не инвалидируют. `tl.advance(dt)` — шаг без App (тесты, запись по кадрам). Пример — `examples/53_animation.v`, тесты — `timeline_test.v`. C-ABI `vgui_timeline_*`, `vgui_app_play`, `vgui_*_set_anim_timing` (значения — FLOAT-диспетчер, конец — CLICK), Python — `vguipy.Timeline`, `Easing`, `AnimTiming`.
+
 ## Тема приложения и окон
 
 `AppConfig.theme` — тема приложения. `WindowConfig.theme` и `DialogConfig.theme` — `?Theme`,
@@ -942,6 +947,20 @@ C-ABI и Python (с 16.10.2026): `vgui_list_box_set_virtual`/`vgui_table_view_se
 режим: колбэк с ответом»). В Python - `set_virtual(count, text_fn)`, `set_virtual_count`,
 `clear_virtual`, `is_virtual`, у ListBox ещё `set_virtual_icons`; пример - `vguipy/examples/57_virtual_rows.py`.
 Сортируемых колонок (`on_sort`) в Python по-прежнему нет.
+
+## Реактивные данные: Observable и модели (`models.v`, `model_views.v`)
+
+С 27.10.2026. Раньше связь «данные → виджет» была ручной: поменял данные — сам обнови виджет и сам попроси перерисовку окна.
+
+**`Observable[T]`** — значение с подписчиками: `observable(v)`, `get()`, `set(v)` (равное текущему — без уведомлений), `subscribe(fn (T)) u64`, `bind(f)` — то же, но `f` сразу получает текущее значение, `unsubscribe(id)`. Подписчики зовутся по порядку подписки, по копии списка (отписка из колбэка безопасна). Обобщённый тип собирается новым компилятором V (проверено на `string` и `int`).
+
+**Модели.** `TableModel` (`row_count`, `cell_text(row, col)`, `version`) — для `ListBox` и `TableView`; `TreeModel` (`child_ids(parent)` с корнями под `''`, `item_text(id)`, `version`) — для `TreeView`. Своя модель встраивает `ModelBase` (даёт `version()` и `changed()`; встроенная структура удовлетворяет интерфейсу). Готовая — `RowsModel` (`rows_model([][]string)`, `append`/`insert`/`remove`/`set_row`/`set_cell`/`set_rows`/`clear`).
+
+**Виды.** `TableView.set_model(m)` / `ListBox.set_model(m)` — поверх виртуального режима (раздел выше): текст видимых ячеек спрашивается у модели на каждом кадре, а `sync_model()` в начале `draw()` и `handle_event()` сверяет `version()` и при новой версии зовёт `set_virtual_count(m.row_count())` (выбор, правка и прокрутка правятся там же). Всё, чего нет в виртуальном режиме, нет и у модели (свои цвета ячеек, `auto_sort`...). `clear()`/`clear_rows()`/`set_virtual` снимают модель (поле `model ?TableModel`). `TreeView.set_tree_model(m)` узлы хранит, поэтому при новой версии **перестраивает их целиком** (`rebuild_from_model`): раскрытие и выбор запоминаются по `TreeNode.tag` (= id модели) и восстанавливаются, прокрутка сохраняется; новые узлы свёрнуты, исчезнувший выбранный узел — выбора нет (`on_select` не зовётся). Дерево строится целиком, не лениво; глубже `tree_model_max_depth` (64) узлы не строятся — защита от цикла в модели.
+
+**Перерисовка без окна.** Модели и `Observable` своих окон не знают (указателя на окно у виджета нет намеренно). Каждое изменение зовёт `notify_data_changed()` — глобальный флаг `g_data_changed`; `needs_animation_now()` при нём просит кадр, а `render_all()` снимает флаг (`take_data_changed`) и перерисовывает все окна (`invalidate_all_windows`). Изменение из обработчика события или из `app.post()` видно на ближайшем кадре. Своя модель без `ModelBase` зовёт `notify_data_changed()` сама.
+
+Пример — `examples/61_data_binding.v`, тесты — `models_test.v`. Python: `vguipy.Observable`, `vguipy.RowsModel` и `widget.set_model` на стороне Python поверх `set_virtual` (модель сама шлёт видам новое число строк), перерисовка — `vgui_notify_data_changed`.
 
 ## ScrollBox: несколько детей стопкой
 
@@ -1517,10 +1536,14 @@ SDL, светлая тема по умолчанию, `anim_fixed_dt` (аним�
 перезаписать эталоны, посмотреть их глазами и закоммитить. **Намеренное изменение вида —
 обновить эталоны в том же коммите.**
 
+Сцены, зависящие от даты, подменяют «сегодня» (`set_today_override`, `clock.v`): `snapshot_pickers_test.v` снимает Calendar, поля DatePicker/ColorPicker, **содержимое** модальных диалогов выбора даты и цвета (`dp_dialog_content` / `cp_dialog_content` — построение вынесено из модального цикла, тест кладёт его в обычное окно) и открытое правым кликом контекстное меню. Этот снапшот сразу нашёл два бага диалога цвета: ширина превью мерилась по английским «Old»/«New», и «Стало» обрезалось; подписи и заголовки были зашиты под тёмную тему.
+
 Тесты — `testkit_test.v` (ввод доходит до виджетов, в т.ч. при `ui_scale` 1.5, круг
 «записать — совпало — разошлось»), `snapshot_test.v`. На `testkit` переведены
 `item_icon_test.v`, `modal_scope_events_test.v`, захват кадра в `render_dirty_test.v` и
-`canvas_detail_test.v`.
+`canvas_detail_test.v`, а 27.10.2026 — `dbl_click_test.v`, `wheel_hover_test.v`, `list_box_wheel_test.v`,
+`curve_editor_test.v`, клики в `property_grid_test.v` и `accordion_fit_test.v`. Прямой `dispatch_event_with_app`
+оставлен там, где проверяется он сам (`hover_dirty_test.v`, `render_dirty_test.v`, `arrange_test.v`).
 
 ## Разметка интерфейса (.vui)
 

@@ -28,11 +28,11 @@ pub mut:
 	dnd         &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
 	hovered     bool
 	focus_anim  Anim = Anim{
-		tau_ms:  anim_tau_focus
+		role:    .focus
 		epsilon: 0.02
 	}
 	slide_anim  Anim = Anim{
-		tau_ms:  anim_tau_hover
+		role:    .hover
 		epsilon: 0.02
 	}
 	pressed     bool // левая кнопка нажата над виджетом; действие - по mouse_up

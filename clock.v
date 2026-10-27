@@ -3,6 +3,8 @@
 @[has_globals]
 module vgui
 
+import time
+
 // ═══════════════════════════════════════════════════════
 // Часы интерфейса — единственный источник «сейчас» для виджетов.
 // ═══════════════════════════════════════════════════════
@@ -58,4 +60,24 @@ pub fn advance_clock(ms u64) {
 // чтобы часы со временем стали своими у окна.
 pub fn (ctx &RenderContext) now_ms() u64 {
 	return now_ms()
+}
+
+// g_today_override: год, месяц, день «сегодня» для календарей; год 0 - настоящая
+// дата. Отдельно от g_clock_override_ms: тот - мс от старта SDL, а не дата.
+__global g_today_override = [3]int{}
+
+// today - сегодняшняя дата (год, месяц 1-12, день 1-31) по локальному времени
+// или подменённая set_today_override. Её берут DatePicker и Calendar (подсветка
+// «сегодня», кнопка «Сегодня»): иначе их снапшот менялся бы каждый день.
+pub fn today() (int, int, int) {
+	if g_today_override[0] > 0 {
+		return g_today_override[0], g_today_override[1], g_today_override[2]
+	}
+	now := time.now()
+	return now.year, now.month, now.day
+}
+
+// set_today_override задаёт «сегодня» для тестов (y <= 0 - снять подмену).
+pub fn set_today_override(y int, m int, d int) {
+	g_today_override = [y, m, d]!
 }

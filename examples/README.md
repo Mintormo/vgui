@@ -117,12 +117,13 @@ v run examples/01_label.v
 | `49_background_thread.v` | Фоновый поток и свой цикл — `app.post()`, `pump_events()`/`render_all()` |
 | `50_modal_scope.v` | Область модальности — модальный диалог блокирует только своё окно |
 | `52_undo_stack.v` | Стек отмены приложения — `UndoStack`, `UndoCommand`, слияние `merge_id`, группы, `set_clean` |
-| `53_animation.v` | Анимации своего виджета — `Anim`: `.tween` + `Easing` (8 кривых), `.smooth` для hover, `mark_anim_rect` |
+| `53_animation.v` | Анимации своего виджета — `Anim`: `.tween` + `Easing` (8 кривых), `.smooth` для hover, `mark_anim_rect`; анимация из приложения — `Timeline` (дорожки, `then`), `app.play` |
 | `54_item_icons.v` | Иконки элементов — `ItemIcon` (Lucide, файл, байты) в меню, дереве, списке, вкладках, ComboBox, MenuButton, Accordion |
 | `55_disabled_state.v` | Неактивное состояние — `enabled = false` у виджета, у контейнера (гасит всё содержимое, флаги детей не трогает) и у пункта меню |
 | `56_css_styles.v` | Стили CSS (`56_styles.css`) — селекторы по типу, `.классу`, `#id`, предкам, состояния `:hover`/`:selected`, `:root` и переменные; файл перечитывается при сохранении |
 | `57_virtual_rows.v` | Виртуальный режим `ListBox`/`TableView` (`set_virtual`) — лог на 1 000 000 строк с иконками и сортировкой, таблица на 2 000 000 строк с правкой через `on_change`; текст ячеек — колбэком только для видимых строк |
 | `58_shortcut_input.v` | Поле ввода сочетания `ShortcutInput` — настраиваемые сочетания пунктов меню: щелчок и нажатие, Esc — отмена, Backspace — снять, стрелки заняты (`on_reject`); сочетание по месту клавиши, в любой раскладке |
+| `61_data_binding.v` | Реактивные данные — `RowsModel` в `TableView` и `ListBox` (`set_model`), подпись через `Observable.bind`; правки модели видны без `invalidate` |
 
 ### Витрина
 | Файл | Виджет |

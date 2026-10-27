@@ -71,10 +71,10 @@ pub mut:
 	dismissing bool
 	dismissed  bool
 	// Animation
-	show_anim Anim = anim_smooth(anim_tau_focus)
+	show_anim Anim = anim_role(.focus)
 	// dismiss_anim идёт 1 -> 0 (стартует с 1: полностью видимо); show_anim идёт 0 -> 1. Видимость = произведение обоих
 	dismiss_anim Anim = Anim{
-		tau_ms:  anim_tau_focus
+		role:    .focus
 		epsilon: 0.01
 		value:   1
 		goal:    1

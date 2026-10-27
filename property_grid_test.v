@@ -57,29 +57,19 @@ fn test_choice_is_picked_from_menu() {
 	win.add_widget(pg)
 	win.render()
 
-	// Двойной клик по ячейке значения - как у пользователя, через окно.
+	// Двойной клик по ячейке значения и выбор стрелками - настоящим путём
+	// (testkit: очередь SDL -> process_events -> окно -> оверлей меню).
 	r := pg.row_rect(0)
-	dbl := GuiEvent{
-		typ:       .mouse_dbl_click
-		mouse_x:   pg.split_x() + 10
-		mouse_y:   r.y + r.h / 2
-		mouse_btn: .left
-	}
-	// Как pump_events: на время раздачи события активный контекст - окно.
-	app.active_ctx = &win.ctx
-	win.dispatch_event_with_app(&dbl, app)
-	app.active_ctx = unsafe { nil }
+	x := pg.split_x() + 10
+	y := r.y + r.h / 2
+	sim_click(mut app, win, x, y, .left, 1, 0)
+	sim_click(mut app, win, x, y, .left, 2, 0)
 	assert unsafe { pg.choice_menu != nil }
 	assert pg.choice_menu.is_open()
 	assert !pg.editing, 'для .choice текстовый редактор не открывается'
-	ev := win.ctx.overlay_ev
-	down := GuiEvent{
-		typ:     .key_down
-		keycode: sdl_k_down
-	}
-	ev(&down, app)
-	ev(&down, app)
-	ev(&GuiEvent{ typ: .key_down, keycode: sdl_k_return }, app)
+	sim_key(mut app, win, sdl_k_down, 0)
+	sim_key(mut app, win, sdl_k_down, 0)
+	sim_key(mut app, win, sdl_k_return, 0)
 	assert choice.choice_idx == 1
 	assert log.names == ['mode']
 	assert !pg.choice_menu.is_open()

@@ -168,7 +168,7 @@ pub mut:
 		limit: ce_max_undo
 	}
 	drag                  bool // левая кнопка зажата в тексте: движение мыши тянет выделение
-	focus_anim            Anim = anim_smooth(anim_tau_focus)
+	focus_anim            Anim = anim_role(.focus)
 	focus_group           int
 	vsb_dragging          bool
 	vsb_hovered           bool

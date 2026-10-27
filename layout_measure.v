@@ -901,8 +901,12 @@ pub fn (a &CpArea) measure(ctx &RenderContext) SizeHint {
 // свою подпись (отступ 4 с двух сторон), высота - стандартного контрола
 pub fn (p &CpPreview) measure(ctx &RenderContext) SizeHint {
 	font := ctx.get_font_immut(.regular, 0)
-	half := max_f32(ctx.measure_text_with_font('Old', font).x, ctx.measure_text_with_font('New',
-		font).x) + 8
+	// Мерить надо те же переведённые подписи, что рисует draw (tr('cp.old') /
+	// tr('cp.new')): раньше мерились английские 'Old'/'New', и русское «Стало»
+	// обрезалось клипом до «Стал» (нашёл снапшот dialog_color).
+	old_w := ctx.measure_text_with_font(tr('cp.old'), font).x
+	new_w := ctx.measure_text_with_font(tr('cp.new'), font).x
+	half := max_f32(old_w, new_w) + 8
 	h := ctx.control_h()
 	return SizeHint{
 		w:        half * 2

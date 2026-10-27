@@ -138,13 +138,8 @@ fn test_fit_content_in_scroll_box_scrolls_and_clicks_below_fold() {
 	settle(mut win)
 	last := p1[3]
 	assert last.bounds.y + last.bounds.h <= 200 + 0.5
-	ev := GuiEvent{
-		typ:       .mouse_down
-		mouse_btn: .left
-		mouse_x:   last.bounds.x + 5
-		mouse_y:   last.bounds.y + 5
-	}
-	win.dispatch_event_with_app(&ev, app)
+	// Нажатие настоящим путём (testkit): окно -> ScrollBox -> Accordion -> ребёнок.
+	sim_press(mut app, win, last.bounds.x + 5, last.bounds.y + 5, .left, 1, 0)
 	assert last.clicks == 1
 
 	win.cleanup()

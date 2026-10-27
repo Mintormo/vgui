@@ -41,14 +41,20 @@ mut:
 	releases int
 }
 
-fn ce_mouse(mut win Window, app &App, typ EventType, btn MouseButton, x f32, y f32) {
-	ev := GuiEvent{
-		typ:       typ
-		mouse_btn: btn
-		mouse_x:   x
-		mouse_y:   y
+// ce_mouse - событие мыши настоящим путём (testkit: очередь SDL -> process_events
+// -> окно): так проверяется и деление координат на масштаб, и то, что окно
+// доставляет нажатия, движение и двойной клик до редактора.
+fn ce_mouse(mut win Window, mut app App, typ EventType, btn MouseButton, x f32, y f32) {
+	match typ {
+		.mouse_down { sim_press(mut app, win, x, y, btn, 1, 0) }
+		.mouse_up { sim_release(mut app, win, x, y, btn, 0) }
+		.mouse_move { sim_move(mut app, win, x, y, 0) }
+		.mouse_dbl_click {
+			sim_click(mut app, win, x, y, btn, 1, 0)
+			sim_click(mut app, win, x, y, btn, 2, 0)
+		}
+		else {}
 	}
-	win.dispatch_event_with_app(&ev, app)
 }
 
 fn test_curve_editor_mouse() {
@@ -75,40 +81,40 @@ fn test_curve_editor_mouse() {
 	}
 
 	// Клик на пустом месте - новая точка, перетаскивание, отпускание
-	ce_mouse(mut win, app, .mouse_down, .left, sx(0.5), sy(0.2))
+	ce_mouse(mut win, mut app, .mouse_down, .left, sx(0.5), sy(0.2))
 	assert ce.points.len == 3
 	assert ce.drag_pt == 1
-	ce_mouse(mut win, app, .mouse_move, .none_, sx(0.5), sy(0.8))
+	ce_mouse(mut win, mut app, .mouse_move, .none_, sx(0.5), sy(0.8))
 	assert abs_f32(ce.points[1].y - 0.8) < 0.01
 	assert cnt.releases == 0
-	ce_mouse(mut win, app, .mouse_up, .left, sx(0.5), sy(0.8))
+	ce_mouse(mut win, mut app, .mouse_up, .left, sx(0.5), sy(0.8))
 	assert cnt.releases == 1
 	assert cnt.changes >= 2
 	assert !ce.is_identity()
 
 	// Крайняя точка двигается только по вертикали
-	ce_mouse(mut win, app, .mouse_down, .left, sx(0), sy(0))
+	ce_mouse(mut win, mut app, .mouse_down, .left, sx(0), sy(0))
 	assert ce.drag_pt == 0
-	ce_mouse(mut win, app, .mouse_move, .none_, sx(0.3), sy(0.1))
+	ce_mouse(mut win, mut app, .mouse_move, .none_, sx(0.3), sy(0.1))
 	assert ce.points[0].x == 0
 	assert abs_f32(ce.points[0].y - 0.1) < 0.01
-	ce_mouse(mut win, app, .mouse_up, .left, sx(0.3), sy(0.1))
+	ce_mouse(mut win, mut app, .mouse_up, .left, sx(0.3), sy(0.1))
 
 	// Внутренняя точка не перескакивает соседей
-	ce_mouse(mut win, app, .mouse_down, .left, sx(0.5), sy(0.8))
-	ce_mouse(mut win, app, .mouse_move, .none_, sx(1.2), sy(0.8))
+	ce_mouse(mut win, mut app, .mouse_down, .left, sx(0.5), sy(0.8))
+	ce_mouse(mut win, mut app, .mouse_move, .none_, sx(1.2), sy(0.8))
 	assert ce.points[1].x < ce.points[2].x
-	ce_mouse(mut win, app, .mouse_up, .left, sx(0.9), sy(0.8))
+	ce_mouse(mut win, mut app, .mouse_up, .left, sx(0.9), sy(0.8))
 
 	// Правый клик по внутренней точке - удаление; по крайней - нет
 	p := ce.points[1]
-	ce_mouse(mut win, app, .mouse_down, .right, sx(p.x), sy(p.y))
+	ce_mouse(mut win, mut app, .mouse_down, .right, sx(p.x), sy(p.y))
 	assert ce.points.len == 2
-	ce_mouse(mut win, app, .mouse_down, .right, sx(1), sy(1))
+	ce_mouse(mut win, mut app, .mouse_down, .right, sx(1), sy(1))
 	assert ce.points.len == 2
 
 	// Двойной клик - сброс в диагональ
-	ce_mouse(mut win, app, .mouse_dbl_click, .left, sx(0.4), sy(0.9))
+	ce_mouse(mut win, mut app, .mouse_dbl_click, .left, sx(0.4), sy(0.9))
 	assert ce.is_identity()
 
 	win.cleanup()

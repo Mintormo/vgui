@@ -37,6 +37,44 @@ pub const anim_tau_hover = f32(75) // k = 0.2: наведение, развор�
 pub const anim_tau_toggle = f32(58) // k = 0.25: отметка флажка/радио
 pub const anim_tau_press = f32(47) // k = 0.3: нажатие
 
+// AnimRole — какой переход анимирует Anim встроенного виджета. Для ролей,
+// кроме .custom, постоянная времени .smooth берётся не из поля tau_ms, а
+// из темы окна (theme.anim, AnimTiming) в момент шага: так тема задаёт
+// «темп» всего интерфейса, а не константы, зашитые в виджеты.
+pub enum AnimRole {
+	custom // своё tau_ms / duration_ms (Anim из приложения)
+	focus  // фокус, появление
+	hover  // наведение, разворот
+	toggle // отметка флажка/радио, тумблер
+	press  // нажатие
+}
+
+// AnimTiming — переходы темы (Theme.anim): постоянные времени .smooth по
+// ролям (мс до ~63% пути) и общий множитель скорости. По умолчанию -
+// прежние константы anim_tau_*, то есть вид интерфейса не меняется.
+pub struct AnimTiming {
+pub mut:
+	focus_ms  f32 = anim_tau_focus
+	hover_ms  f32 = anim_tau_hover
+	toggle_ms f32 = anim_tau_toggle
+	press_ms  f32 = anim_tau_press
+	// speed - множитель времени для ВСЕХ Anim окна: 2 - вдвое быстрее,
+	// 0.5 - вдвое медленнее, 0 (и меньше) - без анимаций, сразу в цель
+	// («уменьшить движение» для тех, кому анимации мешают).
+	speed f32 = 1
+}
+
+// tau - постоянная времени роли (для .custom - 0, её не используют).
+pub fn (t AnimTiming) tau(role AnimRole) f32 {
+	return match role {
+		.custom { 0 }
+		.focus { t.focus_ms }
+		.hover { t.hover_ms }
+		.toggle { t.toggle_ms }
+		.press { t.press_ms }
+	}
+}
+
 // AnimMode — закон движения Anim к цели (см. шапку файла).
 pub enum AnimMode {
 	smooth
@@ -106,10 +144,12 @@ pub fn ease(e Easing, t_ f32) f32 {
 // Значение по умолчанию (Anim{}) — .smooth с tau_hover, стоит в 0.
 pub struct Anim {
 pub mut:
-	mode        AnimMode = .smooth
-	tau_ms      f32      = anim_tau_hover // .smooth
-	duration_ms f32      = 200            // .tween
-	easing      Easing   = .out_cubic     // .tween
+	mode AnimMode = .smooth
+	// role != .custom - tau_ms берётся из темы окна в step() (AnimRole)
+	role        AnimRole
+	tau_ms      f32    = anim_tau_hover // .smooth
+	duration_ms f32    = 200            // .tween
+	easing      Easing = .out_cubic     // .tween
 	// .smooth: ближе этого к цели — значение прилипает к ней, анимация
 	// закончена. Для величин порядка 0..1.
 	epsilon f32 = 0.005
@@ -132,6 +172,15 @@ mut:
 pub fn anim_smooth(tau_ms f32) Anim {
 	return Anim{
 		tau_ms: tau_ms
+	}
+}
+
+// anim_role — следование за целью в темпе темы для перехода role
+// (AnimRole): так создают Anim встроенные виджеты.
+pub fn anim_role(role AnimRole) Anim {
+	return Anim{
+		role:   role
+		tau_ms: AnimTiming{}.tau(role)
 	}
 }
 
@@ -194,7 +243,17 @@ pub fn (mut a Anim) step(ctx &RenderContext) bool {
 		}
 		a.last_frame = ctx.frame_no
 	}
-	a.advance(ctx.anim_dt)
+	// Переходы темы (theme.anim): темп роли и общий множитель скорости.
+	timing := ctx.theme.anim
+	if a.role != .custom {
+		a.tau_ms = timing.tau(a.role)
+	}
+	if timing.speed <= 0 {
+		// Анимации выключены темой - сразу в цель.
+		a.snap(a.goal)
+		return false
+	}
+	a.advance(ctx.anim_dt * timing.speed)
 	return a.animating()
 }
 

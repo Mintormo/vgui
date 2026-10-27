@@ -83,6 +83,10 @@ pub mut:
 	// whose only job is to wake WaitEventTimeout immediately.
 	posted     chan Posted
 	wake_event u32
+	// Идущие шкалы анимации приложения (timeline.v, app.play) и время их
+	// прошлого шага по часам now_ms().
+	timelines        []&Timeline
+	timeline_last_ms u64
 }
 
 // Инициализирует SDL (видео + события) и SDL_ttf и возвращает приложение. Ошибка SDL_Init/TTF_Init
@@ -354,6 +358,15 @@ fn frame_budget_ms(target_fps int) u64 {
 
 // needs_animation_now — есть ли окно/диалог, просящее следующий кадр.
 fn (app &App) needs_animation_now() bool {
+	// Шкалы приложения (timeline.v) двигаются только в render_all - пока
+	// они идут, кадры нужны, даже если ни один виджет не анимируется.
+	if app.timelines.len > 0 {
+		return true
+	}
+	// Данные моделей/Observable изменились (models.v) - нужен кадр.
+	if g_data_changed {
+		return true
+	}
 	for w in app.windows {
 		if w.open && w.ctx.needs_animation {
 			return true
@@ -783,6 +796,15 @@ pub fn (mut app App) render_all() {
 				}
 			}
 		}
+	}
+	// Шкалы анимации приложения - до кадра: их колбэки меняют виджеты, и
+	// кадр должен показать уже новые значения (step_timelines сам
+	// инвалидирует окна).
+	app.step_timelines()
+	// Изменились данные моделей или Observable (models.v): они не знают своих
+	// окон, поэтому перерисовываются все.
+	if take_data_changed() {
+		app.invalidate_all_windows()
 	}
 	for mut w in app.windows {
 		w.render()

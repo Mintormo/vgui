@@ -103,7 +103,7 @@ pub mut:
 	sel_b             int = -1
 	scroll_x          f32
 	drag              bool
-	focus_t           Anim  = anim_smooth(anim_tau_focus)
+	focus_t           Anim  = anim_role(.focus)
 	cursor_color      Color = Color{0, 0, 0, 0}
 	flat              bool
 	input_filter      string

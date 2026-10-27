@@ -84,7 +84,7 @@ pub mut:
 	vscroll_drag_off f32
 	hscroll_drag     bool
 	hscroll_drag_off f32
-	focus_t          Anim = anim_smooth(anim_tau_focus)
+	focus_t          Anim = anim_role(.focus)
 	flat             bool
 	// undo/redo
 	history UndoHistory[TaUndoEntry] = UndoHistory[TaUndoEntry]{

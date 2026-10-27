@@ -132,7 +132,7 @@ PATH="$HOME/soft/v:$PATH" ./examples/build.sh
 `bounds`, обязан звать `mark_anim_rect(reason, bounds)`, а не `mark_anim` - иначе наведение мышью снова
 перерисовывает всё окно. `mouse_move` - единственное событие, которое НЕ зовёт `invalidate_all()`: у него
 точечный путь `Window.invalidate_hover_change`. Сеттеры виджетов кадр не инвалидируют - в своём цикле зовите
-`Window.invalidate*`. Анимации виджетов - только через `Anim` (`anim.v`, «Анимации»): `a.update(цель, ctx)`
+`Window.invalidate*`. Анимации виджетов - только через `Anim` (`anim.v`, «Анимации»; встроенным - `anim_role(.focus|.hover|...)`, темп из `theme.anim`): `a.update(цель, ctx)`
 в `draw()`/`arrange()`, пока вернула true - `mark_anim_rect`; не `x += (цель - x) * k` (зависит от fps).
 Тесты, рисующие кадры подряд, ставят `win.ctx.anim_fixed_dt`. Новый путь рисования сам выставляет blend
 mode. Масштаб рендера выставляется заново после каждого `SDL_SetRenderTarget`; HiDPI проверять через

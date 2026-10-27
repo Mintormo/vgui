@@ -122,7 +122,7 @@ pub mut:
 	hovered     bool
 	hover_index int = -1
 	// // Анимация кольца фокуса (Anim, anim.v) - шагается в draw().
-	focus_anim   Anim = anim_smooth(anim_tau_focus)
+	focus_anim   Anim = anim_role(.focus)
 	focus_group  int
 	scroll_speed f32              = 30
 	on_select    fn (int, string) = unsafe { nil }
@@ -201,7 +201,11 @@ pub mut:
 	is_virtual    bool
 	virtual_count int
 	virtual_text  fn (row int, col int) string = unsafe { nil }
-	virtual_icon  fn (row int) ItemIcon        = unsafe { nil }
+	// Модель данных (models.v, set_model): виртуальный режим поверх неё и
+	// версия модели, которую вид уже видел (sync_model).
+	model        ?TableModel
+	model_ver    u64
+	virtual_icon fn (row int) ItemIcon = unsafe { nil }
 	// ── Перетаскивание строк (dnd.v, PROJECT.md «Перетаскивание между виджетами») ──
 	// drag_rows - строку можно утащить мышью в другую цель: данные
 	// DragData{kind: lb_drag_kind, text: текст строки, index: номер строки}.
@@ -746,6 +750,7 @@ pub fn (mut lb ListBox) clear() {
 	lb.virtual_count = 0
 	lb.virtual_text = unsafe { nil }
 	lb.virtual_icon = unsafe { nil }
+	lb.model = none
 	lb.selected = -1
 	lb.scroll_y = 0
 	lb.scroll_x = 0
@@ -1620,6 +1625,7 @@ pub fn (mut lb ListBox) arrange(mut ctx RenderContext) {
 // линия при перетаскивании границы) -> строки внутри clip(viewport) -> полосы прокрутки.
 // Виджеты-ячейки здесь только рисуются: их bounds уже выставил arrange().
 pub fn (mut lb ListBox) draw(mut ctx RenderContext) {
+	lb.sync_model()
 	en := ctx.is_enabled(lb.enabled)
 	if !lb.visible {
 		return
@@ -1854,6 +1860,7 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 	if !lb.visible || !lb.enabled {
 		return false
 	}
+	lb.sync_model()
 
 	// ── Column resize drag in progress ──
 	if lb.col_resizing {

@@ -43,11 +43,11 @@ pub mut:
 	focused  bool
 	// Анимации наведения и фокуса: плавно 0..1, управляют "ореолом" вокруг ручки и кольцом фокуса.
 	focus_anim  Anim = Anim{
-		tau_ms:  anim_tau_focus
+		role:    .focus
 		epsilon: 0.02
 	}
 	hover_anim  Anim = Anim{
-		tau_ms:  anim_tau_hover
+		role:    .hover
 		epsilon: 0.02
 	}
 	focus_group int

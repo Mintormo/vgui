@@ -11,16 +11,11 @@ import os
 // Запуск: v test vgui/list_box_wheel_test.v (из v/, SDL_VIDEODRIVER=dummy)
 // ═══════════════════════════════════════════════════════
 
-fn wheel_at(mut win Window, app &App, x f32, y f32, dy f32) {
-	win.ctx.mouse_x = x
-	win.ctx.mouse_y = y
-	ev := GuiEvent{
-		typ:     .mouse_wheel
-		wheel_y: dy
-		mouse_x: x
-		mouse_y: y
-	}
-	win.dispatch_event_with_app(&ev, app)
+// wheel_at - колесо в точке настоящим путём (testkit): событие колеса SDL не
+// несёт координат, окно адресует его по последней позиции мыши - sim_wheel
+// сначала двигает указатель туда.
+fn wheel_at(mut win Window, mut app App, x f32, y f32, dy f32) {
+	sim_wheel(mut app, win, x, y, 0, dy, 0)
 }
 
 fn test_list_box_h_wheel_without_focus_and_edges() {
@@ -51,27 +46,27 @@ fn test_list_box_h_wheel_without_focus_and_edges() {
 	cy := lb.bounds.y + lb.bounds.h / 2
 
 	// Без фокуса: колесо вниз - список вправо, родитель на месте
-	wheel_at(mut win, app, cx, cy, -1)
+	wheel_at(mut win, mut app, cx, cy, -1)
 	assert lb.scroll_x > 0
 	assert sb.scroll_y == 0
 
 	// До правого края и дальше: родитель не прокручивается
 	for _ in 0 .. 100 {
-		wheel_at(mut win, app, cx, cy, -1)
+		wheel_at(mut win, mut app, cx, cy, -1)
 	}
 	assert lb.scroll_x == lb.max_scroll_x()
 	assert sb.scroll_y == 0
 
 	// Обратно до левого края и дальше - тоже
 	for _ in 0 .. 100 {
-		wheel_at(mut win, app, cx, cy, 1)
+		wheel_at(mut win, mut app, cx, cy, 1)
 	}
 	assert lb.scroll_x == 0
 	assert sb.scroll_y == 0
 
 	// wheel = false - колесо уходит родителю
 	lb.wheel = false
-	wheel_at(mut win, app, cx, cy, -1)
+	wheel_at(mut win, mut app, cx, cy, -1)
 	assert lb.scroll_x == 0
 	assert sb.scroll_y > 0
 

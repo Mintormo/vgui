@@ -41,7 +41,7 @@ pub mut:
 	dnd         &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
 	focus_group int
 	focus_anim  Anim = Anim{
-		tau_ms:  anim_tau_focus
+		role:    .focus
 		epsilon: 0.02
 	} // animated focus ring strength (0..1)
 	hovered_dec bool // hover state for decrement button

@@ -1,6 +1,7 @@
 module main
 
-// Пример 53. Anim: анимируемое число для своих виджетов (tween, easing, smooth).
+// Пример 53. Anim: анимируемое число для своих виджетов (tween, easing, smooth),
+// и Timeline: анимация из приложения - несколько чисел по одной шкале.
 //
 // Запуск (из корня репозитория):
 //   ~/soft/v/v run examples/53_animation.v
@@ -100,6 +101,26 @@ fn main() {
 		win.invalidate_all() // сеттеры кадр не просят - запустить анимацию
 	}
 
+	// Timeline - анимация из кода приложения, без своего виджета: две дорожки
+	// на одной шкале. Первая полоса заполняется за 800 мс, а следом (then,
+	// после паузы 150 мс) вторая уходит обратно к нулю. Колбэк
+	// получает число на каждом кадре и сам ставит его виджету; app.play сам
+	// просит кадры и перерисовывает окно, пока шкала идёт.
+	mut bar_a := vgui.progress_bar()
+	mut bar_b := vgui.progress_bar()
+	bar_b.set_percent(100)
+	mut btn_tl := vgui.button('Play timeline')
+	btn_tl.on_click = fn [mut app, mut bar_a, mut bar_b] () {
+		mut tl := vgui.timeline()
+		tl.add(0, 800, 0, 100, .out_cubic, fn [mut bar_a] (v f32) {
+			bar_a.set_percent(v)
+		})
+		tl.then(150, 600, 100, 0, .in_out_quad, fn [mut bar_b] (v f32) {
+			bar_b.set_percent(v)
+		})
+		app.play(tl)
+	}
+
 	// Корневой вертикальный контейнер: растягивается на всё окно, дети идут сверху вниз.
 	mut root := vgui.create_vbox_fill()
 	root.set_padding(16)
@@ -108,6 +129,9 @@ fn main() {
 		root.add(t)
 	}
 	root.add(btn, align: .start)
+	root.add(bar_a)
+	root.add(bar_b)
+	root.add(btn_tl, align: .start)
 	// Корень дерева виджетов окна; всё остальное вложено в него.
 	win.add_widget(root)
 	// Регистрируем окно в App; app.run() блокирует до закрытия всех окон.

@@ -99,7 +99,7 @@ pub mut:
 	tooltip     string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	dnd         &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
 	focused     bool
-	focus_anim  Anim = anim_smooth(anim_tau_focus)
+	focus_anim  Anim = anim_role(.focus)
 	focus_group int
 	// Sizing
 	// Высота заголовка вкладок: 0 - стандартная высота контрола темы

@@ -1,7 +1,5 @@
 module vgui
 
-import time
-
 // ═══════════════════════════════════════════════════════
 // DatePicker — date selection widget with calendar popup
 // Shows current date as text button. Click opens a dialog
@@ -33,13 +31,13 @@ pub mut:
 	on_change fn (int, int, int) = unsafe { nil }
 }
 
-// date_picker создаёт виджет с сегодняшней датой (локальное время, time.now()).
+// date_picker создаёт виджет с сегодняшней датой (локальное время, today() из clock.v).
 pub fn date_picker() &DatePicker {
-	now := time.now()
+	y, m, d := today()
 	return &DatePicker{
-		year:  now.year
-		month: now.month
-		day:   now.day
+		year:  y
+		month: m
+		day:   d
 	}
 }
 
@@ -230,10 +228,10 @@ pub mut:
 // any callback (e.g. a button's on_click), it is not tied to a DatePicker
 // widget. When config year/month/day are 0, today's date is used.
 pub fn date_dialog(parent &Window, mut app App, cfg DateDialogConfig) (int, int, int, bool) {
-	now := time.now()
-	y := if cfg.year > 0 { cfg.year } else { now.year }
-	m := if cfg.month > 0 { cfg.month } else { now.month }
-	d := if cfg.day > 0 { cfg.day } else { now.day }
+	ty, tm, td := today()
+	y := if cfg.year > 0 { cfg.year } else { ty }
+	m := if cfg.month > 0 { cfg.month } else { tm }
+	d := if cfg.day > 0 { cfg.day } else { td }
 	title := if cfg.title.len > 0 { cfg.title } else { tr('dp.title') }
 	return dp_run_dialog(parent, mut app, y, m, d, title)
 }
@@ -281,6 +279,48 @@ fn dp_open_dialog(mut dp DatePicker, app &App) {
 	}
 }
 
+// dp_dialog_content строит содержимое модального календаря: сетка дней (DpArea) и ряд кнопок
+// «Сегодня» / OK / Отмена, которые пишут в state. Отдельно от dp_run_dialog, чтобы содержимое можно
+// было показать и снять снапшотом без модального цикла (snapshot_pickers_test.v).
+fn dp_dialog_content(mut state DpState) &VBox {
+	mut area := &DpArea{
+		state: state
+	}
+
+	mut btn_today := button(tr('btn.today'))
+	btn_today.style = .flat
+	btn_today.on_click = fn [mut state] () {
+		state.year, state.month, state.day = today()
+	}
+
+	mut btn_ok := button(tr('btn.ok'))
+	btn_ok.style = .accent
+	btn_ok.on_click = fn [mut state] () {
+		state.confirmed = true
+	}
+
+	mut btn_cancel := button(tr('btn.cancel'))
+	btn_cancel.on_click = fn [mut state] () {
+		state.cancelled = true
+	}
+
+	mut btn_row := create_hbox_fill()
+	btn_row.set_spacing(6)
+	btn_row.set_padding(0)
+	btn_row.add(btn_today)
+	btn_row.add(create_spacer(), flex: 1)
+	btn_row.add(btn_ok)
+	btn_row.add(btn_cancel)
+
+	mut main := create_vbox_fill()
+	main.set_spacing(4)
+	main.set_padding(10)
+	main.add(area)
+	main.add(btn_row)
+
+	return main
+}
+
 // ─── Shared modal dialog implementation ────────────────
 
 // dp_run_dialog - общая реализация модального календаря для виджета и date_dialog. Создаёт Dialog
@@ -314,44 +354,7 @@ fn dp_run_dialog(parent &Window, mut app App, year int, month int, day int, titl
 	}) or { return year, month, day, false }
 	state.dlg_ptr = dlg
 
-	mut area := &DpArea{
-		state: state
-	}
-
-	mut btn_today := button(tr('btn.today'))
-	btn_today.style = .flat
-	btn_today.on_click = fn [mut state] () {
-		now := time.now()
-		state.year = now.year
-		state.month = now.month
-		state.day = now.day
-	}
-
-	mut btn_ok := button(tr('btn.ok'))
-	btn_ok.style = .accent
-	btn_ok.on_click = fn [mut state] () {
-		state.confirmed = true
-	}
-
-	mut btn_cancel := button(tr('btn.cancel'))
-	btn_cancel.on_click = fn [mut state] () {
-		state.cancelled = true
-	}
-
-	mut btn_row := create_hbox_fill()
-	btn_row.set_spacing(6)
-	btn_row.set_padding(0)
-	btn_row.add(btn_today)
-	btn_row.add(create_spacer(), flex: 1)
-	btn_row.add(btn_ok)
-	btn_row.add(btn_cancel)
-
-	mut main := create_vbox_fill()
-	main.set_spacing(4)
-	main.set_padding(10)
-	main.add(area)
-	main.add(btn_row)
-
+	main := dp_dialog_content(mut state)
 	dlg.add_widget(main)
 	app.add_dialog(dlg)
 	dlg.show()

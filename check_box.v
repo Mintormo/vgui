@@ -29,8 +29,8 @@ pub mut:
 	tooltip     string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
 	dnd         &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
 	hovered     bool
-	focus_anim  Anim = anim_smooth(anim_tau_focus)
-	check_anim  Anim = anim_smooth(anim_tau_toggle)
+	focus_anim  Anim = anim_role(.focus)
+	check_anim  Anim = anim_role(.toggle)
 	pressed     bool // левая кнопка нажата над виджетом; действие - по mouse_up
 	focus_group int
 	box_size    f32       = 18

@@ -85,6 +85,10 @@ pub mut:
 	focus_ring_inset f32   = 2.0
 	// ── Modal backdrop ────────────────────────────────
 	modal_backdrop_color Color = Color{0, 0, 0, 90}
+	// ── Animations ────────────────────────────────────
+	// Скорости переходов встроенных виджетов (наведение, фокус, нажатие,
+	// флажки) и общий множитель скорости - AnimTiming, anim.v.
+	anim AnimTiming
 
 	// ══════════════════════════════════════════════════
 	// Per-widget overrides  (a=0 → inherit from core)

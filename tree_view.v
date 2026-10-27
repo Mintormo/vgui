@@ -215,18 +215,22 @@ pub mut:
 	size_cache_ok   bool
 	// Колесо мыши: false - виджет его не берёт (прокрутка уходит
 	// контейнеру, например панели в ScrollBox)
-	wheel       bool = true
-	bounds      Rect
-	roots       []&TreeNode
-	selected    &TreeNode = unsafe { nil }
-	visible     bool      = true
-	enabled     bool      = true
-	tooltip     string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
-	dnd         &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
-	focused     bool
-	hovered     bool
-	focus_anim  Anim = anim_smooth(anim_tau_focus)
-	focus_group int
+	wheel    bool = true
+	bounds   Rect
+	roots    []&TreeNode
+	selected &TreeNode = unsafe { nil }
+	// Модель дерева (models.v, set_tree_model) и её версия, по которой узлы
+	// построены последний раз (sync_model перестраивает их при новой).
+	tree_model     ?TreeModel
+	tree_model_ver u64
+	visible        bool = true
+	enabled        bool = true
+	tooltip        string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	dnd            &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
+	focused        bool
+	hovered        bool
+	focus_anim     Anim = anim_role(.focus)
+	focus_group    int
 	// Appearance
 	select_style TreeSelectStyle = .full_row
 	item_height  f32             = 22
@@ -1026,6 +1030,7 @@ fn (tv &TreeView) draw_hdash(x1 f32, x2 f32, y f32, c Color, mut ctx RenderConte
 // выделение/наведение -> стрелка -> иконка -> текст или поле ввода; (5) полосы
 // прокрутки поверх.
 pub fn (mut tv TreeView) draw(mut ctx RenderContext) {
+	tv.sync_model()
 	en := ctx.is_enabled(tv.enabled)
 	if !tv.visible {
 		return
@@ -1298,6 +1303,7 @@ pub fn (mut tv TreeView) handle_event(event &GuiEvent, app &App) bool {
 	if !tv.visible || !tv.enabled {
 		return false
 	}
+	tv.sync_model()
 
 	ctx_ptr := app.get_active_ctx()
 

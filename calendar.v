@@ -3,8 +3,6 @@
 @[has_globals]
 module vgui
 
-import time
-
 // ═══════════════════════════════════════════════════════════
 // Calendar — full-page calendar widget with month/year views
 //
@@ -108,10 +106,9 @@ fn cal_month_name_full(m int) string {
 	return cal_month_names_full[m - 1]
 }
 
-// cal_today - сегодняшняя дата (год, месяц, день) по локальным часам.
+// cal_today - сегодняшняя дата (год, месяц, день) по часам интерфейса (today(), clock.v).
 fn cal_today() (int, int, int) {
-	now := time.now()
-	return now.year, int(now.month), now.day
+	return today()
 }
 
 // cal_add_days - сдвиг даты на n дней (n может быть отрицательным) пошагово по месяцам,

@@ -81,8 +81,8 @@ pub mut:
 	// Animation
 	hover_anim       Anim // action zone hover
 	arrow_hover_anim Anim // arrow zone hover
-	press_anim       Anim = anim_smooth(anim_tau_press)
-	focus_anim       Anim = anim_smooth(anim_tau_focus)
+	press_anim       Anim = anim_role(.press)
+	focus_anim       Anim = anim_role(.focus)
 	// Menu state (reuses MenuState from menu.v)
 	// state.levels / state.open — открытые уровни меню; owner = адрес виджета (ключ слота оверлея)
 	state MenuState

@@ -82,8 +82,8 @@ pub mut:
 	on_click     fn () = unsafe { nil }
 	// Animation: значения 0..1, двигаются в draw() через Anim.update
 	hover_anim  Anim
-	press_anim  Anim = anim_smooth(anim_tau_press)
-	focus_anim  Anim = anim_smooth(anim_tau_focus)
+	press_anim  Anim = anim_role(.press)
+	focus_anim  Anim = anim_role(.focus)
 	active_anim Anim // smooth animation for toggle active state
 	focus_group int
 	no_focus    bool // if true, button is excluded from focus chain and focus

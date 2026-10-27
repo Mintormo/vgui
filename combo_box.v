@@ -54,7 +54,7 @@ pub mut:
 	hovered     bool
 	hover_index int = -1
 	// Плавная подсветка рамки/кольцо фокуса, 0..1 (см. Anim).
-	focus_anim  Anim = anim_smooth(anim_tau_focus)
+	focus_anim  Anim = anim_role(.focus)
 	focus_group int
 	item_height f32 = 26
 	// размер иконки пункта и зазор до текста (если у пунктов есть иконки)

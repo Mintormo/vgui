@@ -310,47 +310,11 @@ fn cp_open_dialog(mut cp ColorPicker, app &App) {
 	}
 }
 
-// ─── Shared modal dialog implementation ────────────────
-
-// cp_run_dialog строит диалог и крутит вложенный цикл событий, пока пользователь
-// не нажмёт OK/Cancel или не закроет окно. Возвращает (цвет, подтверждено);
-// при отмене/закрытии - текущее состояние цвета, но confirmed == false (вызывающий
-// обязан смотреть на флаг). Настройки окна (шрифты, тема, масштаб) копируются
-// у родителя. Временный диалог сам освобождает ресурсы на выходе
-// (remove_dialog + win.cleanup) - см. PROJECT.md, «Временные модальные диалоги
-// освобождают себя сами». Если создать окно не удалось - (initial, false).
-fn cp_run_dialog(parent &Window, mut app App, initial Color, show_alpha bool, title string) (Color, bool) {
-	if unsafe { parent == nil } {
-		return initial, false
-	}
-
-	mut state := &CpState{
-		original: initial
-		current:  initial
-		app_ptr:  unsafe { app }
-	}
-	h, s, v := cp_rgb_to_hsv(initial.r, initial.g, initial.b)
-	state.hue = h
-	state.sat = s
-	state.val = v
-	state.alpha = f32(initial.a) / 255.0
-	state.show_alpha = show_alpha
-
-	mut dlg := create_dialog(DialogConfig{
-		title:     title
-		parent:    unsafe { parent }
-		theme:     parent.ctx.theme
-		font_path: parent.config.font_path
-		mono_path: parent.config.mono_path
-		font_data: parent.config.font_data
-		mono_data: parent.config.mono_data
-		font_size: parent.config.font_size
-		mono_size: parent.config.mono_size
-		ui_scale:  parent.ctx.ui_scale
-	}) or { return initial, false }
-
-	state.dlg_ptr = dlg
-
+// cp_dialog_content строит содержимое диалога выбора цвета: поле SV и полоса тона (CpArea), колонка
+// полей HSV/RGBA, превью «было/стало», hex-поле, OK/Отмена. Всё пишет в state (и запоминает в нём поля
+// ввода для синхронизации из модального цикла). Отдельно от cp_run_dialog, чтобы содержимое можно было
+// показать и снять снапшотом без модального цикла (snapshot_pickers_test.v).
+fn cp_dialog_content(mut state CpState) &VBox {
 	mut area := &CpArea{
 		state: state
 	}
@@ -446,11 +410,10 @@ fn cp_run_dialog(parent &Window, mut app App, initial Color, show_alpha bool, ti
 
 	// ── helper: make a label+input pair row ──
 	// Ниже - три замыкания-фабрики строк правой колонки (подпись+поле, заголовок секции).
-	lbl_color := Color{180, 180, 180, 255}
-
-	make_lbl := fn [lbl_color] (text string) &Label {
+	// Цвета подписей и заголовков - из темы (Label с color.a == 0): раньше они были
+	// зашиты под тёмную тему и в светлой почти не читались (снапшот dialog_color).
+	make_lbl := fn (text string) &Label {
 		mut l := label(text)
-		l.color = lbl_color
 		l.align = .right
 		l.valign = .middle
 		return l
@@ -471,7 +434,6 @@ fn cp_run_dialog(parent &Window, mut app App, initial Color, show_alpha bool, ti
 	make_title_row := fn (text string) &HBox {
 		mut title := label(text)
 		title.font_style = .bold
-		title.color = Color{140, 200, 255, 255}
 		title.align = .left
 		title.valign = .middle
 		title.pad = 0
@@ -521,7 +483,7 @@ fn cp_run_dialog(parent &Window, mut app App, initial Color, show_alpha bool, ti
 	mut btn_row := create_hbox_fill()
 	btn_row.set_spacing(6)
 	btn_row.set_padding(0)
-	// Ширина превью - по подписям "Old"/"New" (CpPreview.measure)
+	// Ширина превью - по переведённым подписям «было»/«стало» (CpPreview.measure)
 	btn_row.add(preview)
 	btn_row.add(hex_input, flex: 1)
 	btn_row.add(btn_ok)
@@ -540,6 +502,52 @@ fn cp_run_dialog(parent &Window, mut app App, initial Color, show_alpha bool, ti
 	main.add(mid_row, flex: 1)
 	main.add(hseparator())
 	main.add(btn_row)
+
+	return main
+}
+
+// ─── Shared modal dialog implementation ────────────────
+
+// cp_run_dialog строит диалог и крутит вложенный цикл событий, пока пользователь
+// не нажмёт OK/Cancel или не закроет окно. Возвращает (цвет, подтверждено);
+// при отмене/закрытии - текущее состояние цвета, но confirmed == false (вызывающий
+// обязан смотреть на флаг). Настройки окна (шрифты, тема, масштаб) копируются
+// у родителя. Временный диалог сам освобождает ресурсы на выходе
+// (remove_dialog + win.cleanup) - см. PROJECT.md, «Временные модальные диалоги
+// освобождают себя сами». Если создать окно не удалось - (initial, false).
+fn cp_run_dialog(parent &Window, mut app App, initial Color, show_alpha bool, title string) (Color, bool) {
+	if unsafe { parent == nil } {
+		return initial, false
+	}
+
+	mut state := &CpState{
+		original: initial
+		current:  initial
+		app_ptr:  unsafe { app }
+	}
+	h, s, v := cp_rgb_to_hsv(initial.r, initial.g, initial.b)
+	state.hue = h
+	state.sat = s
+	state.val = v
+	state.alpha = f32(initial.a) / 255.0
+	state.show_alpha = show_alpha
+
+	mut dlg := create_dialog(DialogConfig{
+		title:     title
+		parent:    unsafe { parent }
+		theme:     parent.ctx.theme
+		font_path: parent.config.font_path
+		mono_path: parent.config.mono_path
+		font_data: parent.config.font_data
+		mono_data: parent.config.mono_data
+		font_size: parent.config.font_size
+		mono_size: parent.config.mono_size
+		ui_scale:  parent.ctx.ui_scale
+	}) or { return initial, false }
+
+	state.dlg_ptr = dlg
+
+	main := cp_dialog_content(mut state)
 
 	dlg.add_widget(main)
 	app.add_dialog(dlg)

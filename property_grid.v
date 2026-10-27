@@ -270,7 +270,7 @@ pub mut:
 	dnd         &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
 	hovered     bool
 	focused     bool
-	focus_anim  Anim = anim_smooth(anim_tau_focus)
+	focus_anim  Anim = anim_role(.focus)
 	focus_group int
 	// selected — выделенная строка (nil — нет); edit_prop/edit_text_input — свойство в редакторе и его временное поле ввода; choice_menu — выпадающий список вариантов свойства .choice (open_choice_menu)
 	selected              &Property = unsafe { nil }
