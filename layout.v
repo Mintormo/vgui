@@ -172,6 +172,10 @@ pub fn measure_widget(w &Widget, ctx &RenderContext) SizeHint {
 			if c.css_box.has_size && c.css_box.owner == addr {
 				hint = css_apply_size(hint, &c.css_box)
 			}
+			// внешний отступ - место вокруг виджета, после его размеров
+			if c.css_box.has_margin && c.css_box.owner == addr {
+				hint = css_add_margin(hint, c.css_box.margin)
+			}
 			hint = hint.clamped()
 			c.css_leave_layout(saved)
 		} else {

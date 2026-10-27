@@ -150,6 +150,10 @@ mut:
 	has_gap bool
 	gap_row f32
 	gap_col f32
+	// внешний отступ (margin): measure_widget прибавляет его к размеру,
+	// arrange_child/place_child вычитают из выданного прямоугольника
+	has_margin bool
+	margin     CssInsets
 	// размеры (width, min-width...): -1 - не заданы; применяет measure_widget
 	// (css_apply_size)
 	has_size bool
@@ -180,6 +184,55 @@ fn css_apply_size(h SizeHint, b &CssBox) SizeHint {
 		r.v_policy = .fixed
 	}
 	return r
+}
+
+// css_add_margin прибавляет внешний отступ к SizeHint: контейнер отводит
+// виджету место вместе с отступом, а сам виджет получит прямоугольник без
+// него (place_child). width/min-/max- из CSS - размер самого виджета, как
+// в CSS, поэтому отступ прибавляется после css_apply_size.
+fn css_add_margin(h SizeHint, m CssInsets) SizeHint {
+	mut r := h
+	mh := m.horizontal()
+	mv := m.vertical()
+	r.w += mh
+	r.min_w += mh
+	if r.max_w < size_unbounded {
+		r.max_w += mh
+	}
+	r.h += mv
+	r.min_h += mv
+	if r.max_h < size_unbounded {
+		r.max_h += mv
+	}
+	return r
+}
+
+// css_margin_of — внешний отступ виджета w из таблицы стилей окна (нет
+// правил о раскладке или margin не задан - нули). Зовут контейнеры, когда
+// выдают ребёнку прямоугольник: в этот момент текущий виджет - сам
+// контейнер, поэтому ребёнок на время проверки кладётся на стек предков
+// (вход и выход, как в measure_widget).
+fn css_margin_of(w &Widget, ctx &RenderContext) CssInsets {
+	if !ctx.css_layout_active() {
+		return CssInsets{}
+	}
+	addr := widget_object_addr(w)
+	mut c := unsafe { &RenderContext(ctx) }
+	saved := c.css_enter_layout(addr, css_tags_of(w))
+	m := if c.css_box.has_margin && c.css_box.owner == addr {
+		c.css_box.margin
+	} else {
+		CssInsets{}
+	}
+	c.css_leave_layout(saved)
+	return m
+}
+
+// place_child выставляет ребёнку прямоугольник r за вычетом его margin из
+// CSS. Контейнеры, раздающие bounds в layout() (hbox/vbox, grid), зовут её
+// вместо set_widget_bounds; arrange_child делает то же сама.
+fn place_child(mut w Widget, r Rect, ctx &RenderContext) {
+	set_widget_bounds(mut w, r.inset(css_margin_of(&w, ctx)))
 }
 
 // css_limit_axis — одна ось: (желаемый, min, max, задано ли из CSS).
@@ -328,7 +381,8 @@ fn (mut ctx RenderContext) css_enter_layout(addr voidptr, tags CssTags) CssLayou
 			}
 		}
 	}
-	if ctx.css_box.has_pad || ctx.css_box.has_gap || ctx.css_box.has_size {
+	if ctx.css_box.has_pad || ctx.css_box.has_gap || ctx.css_box.has_size
+		|| ctx.css_box.has_margin {
 		ctx.css_box.owner = addr
 		ctx.css_box.kind = kind
 	}
@@ -482,7 +536,8 @@ pub fn (mut ctx RenderContext) draw_child(mut w Widget) {
 			}
 		}
 	}
-	if ctx.css_box.has_pad || ctx.css_box.has_gap || ctx.css_box.has_size {
+	if ctx.css_box.has_pad || ctx.css_box.has_gap || ctx.css_box.has_size
+		|| ctx.css_box.has_margin {
 		ctx.css_box.owner = addr
 		ctx.css_box.kind = kind
 	}

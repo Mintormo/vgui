@@ -263,3 +263,74 @@ fn test_sizes_limit_layout() {
 	assert fixed_btn.bounds.w != 150
 	assert short_list.bounds.h == rest.bounds.h
 }
+
+fn test_margin_errors() {
+	assert css_err('.a { margin: -4; }').contains('неотрицательных')
+	assert css_err('.a { margin: 1 2 3 4 5; }').contains('от 1 до 4')
+	assert css_err(':root { margin: 4; }').contains('неприменимо к :root')
+	assert css_err('input { margin: 4 8; } .x { margin: 0; }') == '', 'margin есть у любого виджета'
+}
+
+// margin: место вокруг виджета. Контейнер отводит его вместе с отступом
+// (measure), а виджет получает прямоугольник без него - в vbox и hbox (по
+// обеим осям), в grid, у ребёнка panel (arrange_child).
+fn test_margin_in_containers() {
+	mut t := new_test_ui(width: 500, height: 500)!
+	defer {
+		t.close()
+	}
+	mut root := create_vbox_fill()
+	root.set_spacing(0)
+	mut a := button('A')
+	mut b := button('B')
+	b.css.classes = ['m']
+	mut c := button('C')
+	root.add(a)
+	root.add(b)
+	root.add(c)
+	mut row := create_hbox_fill()
+	row.set_spacing(0)
+	mut x := label('x')
+	mut y := label('y')
+	y.css.classes = ['side']
+	row.add(x)
+	row.add(y)
+	root.add(row)
+	mut grid := create_grid(2, 1)
+	grid.set_spacing(0, 0)
+	mut g0 := label('0')
+	mut g1 := label('1')
+	g1.css.classes = ['side']
+	grid.add(g0, 0, 0)
+	grid.add(g1, 0, 1)
+	root.add(grid)
+	mut pan := panel()
+	pan.pad = 0
+	mut inner := label('in')
+	inner.css.classes = ['m']
+	pan.set_child(inner)
+	root.add(pan)
+	t.app.set_stylesheet(parse_stylesheet('
+		.m { margin: 10 20 30 40; }
+		.side { margin: 0 0 0 15; }
+	', 't.css')!)
+	t.add(root)
+	t.frame()
+	// vbox: сверху 10, снизу 30 до следующего; поперёк - слева 40, справа 20
+	assert b.bounds.y - (a.bounds.y + a.bounds.h) == 10
+	assert c.bounds.y - (b.bounds.y + b.bounds.h) == 30
+	rb := root.box.bounds
+	assert b.bounds.x == rb.x + 40
+	assert b.bounds.x + b.bounds.w == rb.x + rb.w - 20
+	assert b.bounds.h == a.bounds.h, 'margin не меняет размер самого виджета'
+	// hbox и grid: отступ слева
+	assert y.bounds.x - (x.bounds.x + x.bounds.w) == 15
+	assert g1.bounds.x - (g0.bounds.x + g0.bounds.w) == 15
+	// panel: ребёнок со своим margin, панель выросла на него
+	assert inner.bounds.x == pan.bounds.x + 40 && inner.bounds.y == pan.bounds.y + 10
+	assert pan.bounds.h == inner.bounds.h + 40
+	// без стилей - вплотную
+	t.app.set_stylesheet(unsafe { nil })
+	t.frame()
+	assert b.bounds.y == a.bounds.y + a.bounds.h
+}

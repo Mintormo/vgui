@@ -50,7 +50,8 @@ button:hover { background: rgba(124, 58, 237, 0.18); }
 #save, .danger { min-width: 96; }
 
 toggle:checked { background: var(--brand); }
-progress { fill-color: #16a34a; }
+/* margin: полоса прогресса отодвинута от карточки сверху и снизу */
+progress { fill-color: #16a34a; margin: 6 0; }
 
 /* Подсказка внизу - курсивом */
 #hint { font-style: italic; color: #7c6f99; }

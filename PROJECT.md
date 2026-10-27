@@ -1692,7 +1692,16 @@ menu             { background: #222; }                     /* попап - ко�
 `label`; `gap` (`строки [колонки]`) — у `vbox`, `hbox`, `grid` (у vbox берётся первое число, у hbox —
 второе). Из CSS они сильнее `pad=`/`gap=` разметки и `set_padding`/`set_spacing`. Размеры `width`,
 `height`, `min-width`, `max-width`, `min-height`, `max-height` (одно число) — у любого элемента, кроме
-`:root` и попапов.
+`:root` и попапов. `margin` (1–4 числа) — у любого элемента, кроме `:root` и попапов.
+
+- **`margin` — место вокруг виджета**: `measure_widget` прибавляет его к hint (после размеров: `width` —
+  размер самого виджета, как в CSS; `css_add_margin`), а контейнер, выдавая ребёнку прямоугольник,
+  вычитает (`place_child`: hbox/vbox и grid в `layout()`, остальные — через `arrange_child`, который
+  зовёт её сам). Отрисовка и клики идут по уменьшенным bounds — им ничего знать не нужно. Отступ
+  ребёнка контейнер узнаёт `css_margin_of`: ребёнок на время проверки кладётся на стек предков (в этот
+  момент текущий виджет — контейнер). Соседние margin складываются (не «схлопываются», как в CSS) и
+  добавляются к `gap`. Не действует там, где bounds раздаются мимо `arrange_child`: корни окна, ячейки
+  ListBox/ComboBox. Отрицательных отступов нет — наложения виджетов раскладка не поддерживает.
 
 - **Размеры — ограничения `SizeHint`**, общие для всех виджетов: их накладывает `measure_widget` поверх
   `measure()` (`css_apply_size`), виджеты о них не знают. Порядок как в CSS: `width` фиксирует (min = max,
@@ -1709,7 +1718,7 @@ menu             { background: #222; }                     /* попап - ко�
   **добавляет** к выбранному виджетом (жирный заголовок таблицы от `font-weight: normal` обычным не станет,
   `normal` снимает только жирность, заданную CSS выше). У моно курсива нет. `draw_text*` и
   `MarkdownView` (`default_font_size`) тоже идут через него.
-- **Отступы и размеры — не тема, а `ctx.css_box`** (`CssBox`): не наследуются, у каждого виджета свои, сбрасываются
+- **Отступы, margin и размеры — не тема, а `ctx.css_box`** (`CssBox`): не наследуются, у каждого виджета свои, сбрасываются
   при входе в каждый виджет. `owner` — адрес виджета, которому они заданы: виджет читает их
   `ctx.css_pad_of(себя, свой_pad)` / `css_gap_of`, поэтому внутренняя часть составного виджета,
   нарисованная мимо `draw_child`, не возьмёт отступы владельца. `BoxLayout` лежит полем в `HBox`/`VBox`,
@@ -1764,7 +1773,7 @@ menu             { background: #222; }                     /* попап - ко�
 состояния. Ошибки громкие, с местом: неизвестный тип/свойство/состояние (с перечнем допустимых свойств),
 неверный тип значения, `!important`, `@media`, незакрытый блок, дубль свойства в блоке.
 
-**Ограничения (намеренно, пока):** нет `margin`, семейства шрифта
+**Ограничения (намеренно, пока):** нет семейства шрифта
 файлом (только `monospace`/`sans-serif` из набора окна), padding у полей ввода; нет состояний предков
 (`.panel:hover button`), `:not()`, `+`/`~`, атрибутов; переменные не каскадируются; попапы стилизуются
 только корневыми правилами. C-ABI — vgui-capi/PROJECT.md, «Стили CSS»; Python — vguipy/PROJECT.md, «Стили CSS».
@@ -1774,7 +1783,7 @@ menu             { background: #222; }                     /* попап - ко�
 
 | Тип | Свойства (`:состояние свойство` — поле для состояния) |
 |---|---|
-| любой | `font-size`, `font-weight`, `font-style`, `font-family`, `width`, `height`, `min-`/`max-width`, `min-`/`max-height` (не в `:root`), `color`, `:disabled color`, `secondary-color`, `placeholder-color`, `accent-color` (+ `:hover`, `:pressed`), `accent-text-color`, `border-radius`, `focus-ring-color`, `focus-ring-width`, `scrollbar-color` (+ `:hover`, `:pressed`), `scrollbar-track-color`, `success-/warning-/error-/info-color`, `shadow-color` |
+| любой | `font-size`, `font-weight`, `font-style`, `font-family`, `width`, `height`, `min-`/`max-width`, `min-`/`max-height`, `margin` (не в `:root`), `color`, `:disabled color`, `secondary-color`, `placeholder-color`, `accent-color` (+ `:hover`, `:pressed`), `accent-text-color`, `border-radius`, `focus-ring-color`, `focus-ring-width`, `scrollbar-color` (+ `:hover`, `:pressed`), `scrollbar-track-color`, `success-/warning-/error-/info-color`, `shadow-color` |
 | `:root` | всё общее + `background`, `surface-color`, `panel-background`, `border-color`, `input-background`, `input-border-color`, `modal-backdrop-color` |
 | `button`, `menubutton` | `background` (+ `:hover`, `:pressed`, `:disabled`), `color`, `border-color` (+ `:disabled`); button — `padding` (поля вокруг текста для `measure()`) |
 | `label` | общие + `padding` |
@@ -1801,7 +1810,7 @@ menu             { background: #222; }                     /* попап - ко�
 
 Тесты шрифтов, отступов и размеров — `css_layout_test.v`: разбор и ошибки, начертания, раскладка детей
 по padding/gap, шрифт при измерении, курсор поля ввода по CSS-шрифту при клике, width/min-/max- (и у
-ребёнка с весом).
+ребёнка с весом), margin в vbox/hbox/grid/panel.
 
 Тесты — `css_test.v`: разбор и ~20 видов ошибок, полнота таблицы, каскад, сопоставление селекторов
 (включая возврат при `>`), метки и .vui, живая отрисовка (цвет пикселей, восстановление темы, заливка,

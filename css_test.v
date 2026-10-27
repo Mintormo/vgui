@@ -90,9 +90,9 @@ fn test_theme_field_escape_hatch() {
 fn test_prop_table_fields_exist() {
 	for key, fields in css_prop_table {
 		for f in fields {
-			// @padding/@gap/@width... - отступы и размеры виджета (CssBox), не поля Theme
+			// @padding/@gap/@margin/@width... - отступы и размеры виджета (CssBox), не поля Theme
 			if f.starts_with('@') {
-				assert f in [css_padding_field, css_gap_field] || f in css_size_fields, '${key}: неизвестное поле ${f}'
+				assert f in [css_padding_field, css_gap_field, css_margin_field] || f in css_size_fields, '${key}: неизвестное поле ${f}'
 				continue
 			}
 			assert css_theme_has_field(f), '${key}: в Theme нет поля ${f}'

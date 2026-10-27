@@ -98,8 +98,9 @@ pub fn arrange_widget(mut w Widget, mut ctx RenderContext) {
 }
 
 // arrange_child выставляет ребёнку bounds и раскладывает его поддерево.
+// Прямоугольник уменьшается на margin ребёнка из CSS (place_child).
 fn arrange_child(mut w Widget, r Rect, mut ctx RenderContext) {
-	set_widget_bounds(mut w, r)
+	place_child(mut w, r, ctx)
 	arrange_widget(mut w, mut ctx)
 }
 

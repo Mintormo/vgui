@@ -200,7 +200,8 @@ fn (mut b BoxLayout) layout(ctx &RenderContext) {
 			r = Rect{inner.x + cross_off, pos, cross_sz, sz}
 		}
 
-		set_widget_bounds(mut b.children[i].widget, r)
+		// за вычетом margin ребёнка из CSS (место под него учтено в measure)
+		place_child(mut b.children[i].widget, r, ctx)
 
 		pos += sz
 		if i < b.children.len - 1 {

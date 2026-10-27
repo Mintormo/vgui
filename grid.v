@@ -282,7 +282,8 @@ fn (mut g GridLayout) layout(ctx &RenderContext) {
 		ch += f32(row_end - c.row - 1) * sy
 
 		r := Rect{cx, cy, cw, ch}
-		set_widget_bounds(mut g.cells[i].widget, r)
+		// за вычетом margin ячейки из CSS
+		place_child(mut g.cells[i].widget, r, ctx)
 	}
 }
 

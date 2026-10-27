@@ -104,6 +104,11 @@ const css_fill_field = '@fill'
 const css_padding_field = '@padding'
 const css_gap_field = '@gap'
 
+// css_margin_field — внешний отступ (margin): CssBox, не наследуется. Его
+// прибавляет к размеру measure_widget, а вычитает из выданного контейнером
+// прямоугольника arrange_child/place_child (css_apply.v).
+const css_margin_field = '@margin'
+
 // css_size_fields — размеры виджета (width, min-width...): тоже CssBox, не
 // наследуются; их применяет measure_widget к SizeHint любого виджета.
 const css_size_fields = ['@width', '@height', '@min-width', '@max-width', '@min-height', '@max-height']
@@ -111,7 +116,8 @@ const css_size_fields = ['@width', '@height', '@min-width', '@max-width', '@min-
 // css_layout_fields — поля, от которых зависит раскладка: объявление с ними
 // применяют и measure/arrange/события (CssDecl.layout), а не только draw.
 const css_layout_fields = ['font_size', 'font_bold', 'font_italic', 'font_mono', css_padding_field,
-	css_gap_field, '@width', '@height', '@min-width', '@max-width', '@min-height', '@max-height']
+	css_gap_field, css_margin_field, '@width', '@height', '@min-width', '@max-width', '@min-height',
+	'@max-height']
 
 // css_font_keywords — допустимые слова свойств font-weight/-style/-family:
 // поле Theme -> слово -> включить начертание (true) или снять заданное выше (false).
@@ -171,6 +177,7 @@ const css_prop_table = {
 	'*:/max-width':                      ['@max-width']
 	'*:/min-height':                     ['@min-height']
 	'*:/max-height':                     ['@max-height']
+	'*:/margin':                         [css_margin_field]
 	// ── :root — общая тема окна ──
 	'root:/background':                  ['bg']
 	'root:/surface-color':               ['surface']
@@ -395,7 +402,7 @@ fn css_lookup_fields(typ string, pseudo string, prop string) []string {
 	}
 	fields := css_prop_table['*:${pseudo}/${prop}'] or { return []string{} }
 	// размеры - свойство виджета, у окна целиком (:root) их нет
-	if typ == 'root' && fields.any(it in css_size_fields) {
+	if typ == 'root' && fields.any(it in css_size_fields || it == css_margin_field) {
 		return []string{}
 	}
 	return fields
@@ -414,9 +421,9 @@ fn css_props_for(typ string, pseudo string) []string {
 			continue
 		}
 		prop := key.all_after('/')
-		// размеры к :root неприменимы (css_lookup_fields) - не предлагать
+		// размеры и margin к :root неприменимы (css_lookup_fields) - не предлагать
 		if typ == 'root' && prop in ['width', 'height', 'min-width', 'max-width', 'min-height',
-			'max-height'] {
+			'max-height', 'margin'] {
 			continue
 		}
 		if prop !in out {
@@ -507,6 +514,23 @@ fn css_check_value(fields []string, prop string, value CssValue) ! {
 	}
 }
 
+// css_parse_insets — значение padding/margin, как в CSS: 1 число - все
+// стороны, 2 - верх/низ и лево/право, 3 - верх, лево/право, низ, 4 - верх,
+// право, низ, лево. Отрицательные не допускаются (наложение виджетов
+// раскладка vgui не поддерживает).
+fn css_parse_insets(v CssValue) !CssInsets {
+	n := v.nums
+	if n.len == 0 || n.len > 4 || n.any(it < 0) {
+		return error('ожидается от 1 до 4 неотрицательных чисел (верх право низ лево), а не ${v.raw}')
+	}
+	return match n.len {
+		1 { CssInsets{n[0], n[0], n[0], n[0]} }
+		2 { CssInsets{n[0], n[1], n[0], n[1]} }
+		3 { CssInsets{n[0], n[1], n[2], n[1]} }
+		else { CssInsets{n[0], n[1], n[2], n[3]} }
+	}
+}
+
 // css_write_field — запись значения объявления: в поле Theme (обычные поля и
 // начертания шрифта) или в отступы текущего виджета (@padding, @gap). Ошибка -
 // значение не подходит полю (проверяется при разборе, при отрисовке её уже
@@ -514,19 +538,12 @@ fn css_check_value(fields []string, prop string, value CssValue) ! {
 fn css_write_field(mut t Theme, mut box CssBox, field string, v CssValue) ! {
 	match field {
 		css_padding_field {
-			// как в CSS: 1 число - все стороны, 2 - верх/низ и лево/право,
-			// 3 - верх, лево/право, низ, 4 - верх, право, низ, лево
-			n := v.nums
-			if n.len == 0 || n.len > 4 || n.any(it < 0) {
-				return error('ожидается от 1 до 4 неотрицательных чисел (верх право низ лево), а не ${v.raw}')
-			}
-			box.pad = match n.len {
-				1 { CssInsets{n[0], n[0], n[0], n[0]} }
-				2 { CssInsets{n[0], n[1], n[0], n[1]} }
-				3 { CssInsets{n[0], n[1], n[2], n[1]} }
-				else { CssInsets{n[0], n[1], n[2], n[3]} }
-			}
+			box.pad = css_parse_insets(v)!
 			box.has_pad = true
+		}
+		css_margin_field {
+			box.margin = css_parse_insets(v)!
+			box.has_margin = true
 		}
 		css_gap_field {
 			// `gap: 8` - между строками и колонками, `gap: 8 16` - строки, колонки
