@@ -261,6 +261,7 @@ Qt/GTK/WPF интегрированы с UIA (Windows), AT-SPI (Linux), NSAccess
       Ctrl+Z окна со `UndoStack` (сейчас пункты меню/кнопки зовут
       `stack.undo()` сами) и слияние ввода по словам вместо «правка = шаг»
 - [ ] **Backend-абстракция** — всё прибито к SDL3; нативные виджеты / GPU-бэкенд
+      (план выноса SDL из виджетов за `RenderContext` — [`docs/backend_abstraction.md`](docs/backend_abstraction.md), 27.10.2026)
 - [ ] **Windows** — V-часть собирается кросс-компиляцией на Linux (09.10.2026,
       MinGW + SDL3 из MSYS2; так собирается vraw), пути в файловом диалоге
       поправлены, язык — из `SDL_GetPreferredLocales`. Осталось: запуск на
