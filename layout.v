@@ -69,6 +69,11 @@ pub mut:
 	max_h    f32        = size_unbounded
 	h_policy SizePolicy = .preferred
 	v_policy SizePolicy = .preferred
+	// css_w / css_h — ограничения по оси заданы таблицей стилей (width,
+	// min-width...; css_apply_size). Их уважает и ребёнок с весом в
+	// hbox/vbox (child_main_item), который свой hint по главной оси не берёт.
+	css_w bool
+	css_h bool
 }
 
 // clamped приводит hint к самосогласованному виду:
@@ -161,7 +166,13 @@ pub fn measure_widget(w &Widget, ctx &RenderContext) SizeHint {
 			// get_font_immut)
 			mut c := unsafe { &RenderContext(ctx) }
 			saved := c.css_enter_layout(addr, css_tags)
-			hint = w.measure(ctx).clamped()
+			hint = w.measure(ctx)
+			// размеры из CSS (width, min-width...) - поверх того, что
+			// виджет попросил сам
+			if c.css_box.has_size && c.css_box.owner == addr {
+				hint = css_apply_size(hint, &c.css_box)
+			}
+			hint = hint.clamped()
 			c.css_leave_layout(saved)
 		} else {
 			hint = w.measure(ctx).clamped()

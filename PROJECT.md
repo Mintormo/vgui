@@ -1686,11 +1686,22 @@ menu             { background: #222; }                     /* попап - ко�
 `draw()` (особое «поле» `@fill`); скругление — только если правило задало `border-radius`. У `panel`
 `background` — это `panel_bg`.
 
-**Шрифты и отступы** (с 27.10.2026). Свойства `font-size` (число), `font-weight` (`bold`/`normal`),
+**Шрифты, отступы и размеры** (с 27.10.2026). Свойства `font-size` (число), `font-weight` (`bold`/`normal`),
 `font-style` (`italic`/`normal`), `font-family` (`monospace`/`sans-serif`) — у любого элемента и в `:root`;
 `padding` (1–4 числа, порядок CSS: верх право низ лево) — у `vbox`, `hbox`, `grid`, `panel`, `button`,
 `label`; `gap` (`строки [колонки]`) — у `vbox`, `hbox`, `grid` (у vbox берётся первое число, у hbox —
-второе). Из CSS они сильнее `pad=`/`gap=` разметки и `set_padding`/`set_spacing`.
+второе). Из CSS они сильнее `pad=`/`gap=` разметки и `set_padding`/`set_spacing`. Размеры `width`,
+`height`, `min-width`, `max-width`, `min-height`, `max-height` (одно число) — у любого элемента, кроме
+`:root` и попапов.
+
+- **Размеры — ограничения `SizeHint`**, общие для всех виджетов: их накладывает `measure_widget` поверх
+  `measure()` (`css_apply_size`), виджеты о них не знают. Порядок как в CSS: `width` фиксирует (min = max,
+  политика `.fixed`), `max-` ограничивает сверху, `min-` побеждает `max-`. Ось, ограниченная стилем,
+  помечается (`SizeHint.css_w`/`css_h`): **ребёнок с весом** (`add(w, flex:)`) в hbox/vbox свой hint
+  вдоль главной оси не берёт, но эти ограничения уважает (`child_main_item`) — стиль сильнее веса.
+  Работают там, где контейнер смотрит на hint: hbox/vbox (обе оси, поперёк — `align_cross`), авто-дорожки
+  `grid`, окно «по содержимому». Не работают: ячейка grid с весом, ребёнок `panel`/`stack`/`scroll` (им
+  отдаётся вся внутренняя область), корень окна (весь экран).
 
 - **Шрифт — поля темы** (`font_size`, `font_bold`, `font_italic`, `font_mono`) и наследуется поддеревом,
   как цвет. Его читает `get_font`: `font_size` заменяет размер окна только при `size <= 0` (явный размер
@@ -1698,7 +1709,7 @@ menu             { background: #222; }                     /* попап - ко�
   **добавляет** к выбранному виджетом (жирный заголовок таблицы от `font-weight: normal` обычным не станет,
   `normal` снимает только жирность, заданную CSS выше). У моно курсива нет. `draw_text*` и
   `MarkdownView` (`default_font_size`) тоже идут через него.
-- **Отступы — не тема, а `ctx.css_box`** (`CssBox`): не наследуются, у каждого виджета свои, сбрасываются
+- **Отступы и размеры — не тема, а `ctx.css_box`** (`CssBox`): не наследуются, у каждого виджета свои, сбрасываются
   при входе в каждый виджет. `owner` — адрес виджета, которому они заданы: виджет читает их
   `ctx.css_pad_of(себя, свой_pad)` / `css_gap_of`, поэтому внутренняя часть составного виджета,
   нарисованная мимо `draw_child`, не возьмёт отступы владельца. `BoxLayout` лежит полем в `HBox`/`VBox`,
@@ -1753,7 +1764,7 @@ menu             { background: #222; }                     /* попап - ко�
 состояния. Ошибки громкие, с местом: неизвестный тип/свойство/состояние (с перечнем допустимых свойств),
 неверный тип значения, `!important`, `@media`, незакрытый блок, дубль свойства в блоке.
 
-**Ограничения (намеренно, пока):** нет размеров (`width`, `min-width`...), `margin`, семейства шрифта
+**Ограничения (намеренно, пока):** нет `margin`, семейства шрифта
 файлом (только `monospace`/`sans-serif` из набора окна), padding у полей ввода; нет состояний предков
 (`.panel:hover button`), `:not()`, `+`/`~`, атрибутов; переменные не каскадируются; попапы стилизуются
 только корневыми правилами. C-ABI — vgui-capi/PROJECT.md, «Стили CSS»; Python — vguipy/PROJECT.md, «Стили CSS».
@@ -1763,7 +1774,7 @@ menu             { background: #222; }                     /* попап - ко�
 
 | Тип | Свойства (`:состояние свойство` — поле для состояния) |
 |---|---|
-| любой | `font-size`, `font-weight`, `font-style`, `font-family`, `color`, `:disabled color`, `secondary-color`, `placeholder-color`, `accent-color` (+ `:hover`, `:pressed`), `accent-text-color`, `border-radius`, `focus-ring-color`, `focus-ring-width`, `scrollbar-color` (+ `:hover`, `:pressed`), `scrollbar-track-color`, `success-/warning-/error-/info-color`, `shadow-color` |
+| любой | `font-size`, `font-weight`, `font-style`, `font-family`, `width`, `height`, `min-`/`max-width`, `min-`/`max-height` (не в `:root`), `color`, `:disabled color`, `secondary-color`, `placeholder-color`, `accent-color` (+ `:hover`, `:pressed`), `accent-text-color`, `border-radius`, `focus-ring-color`, `focus-ring-width`, `scrollbar-color` (+ `:hover`, `:pressed`), `scrollbar-track-color`, `success-/warning-/error-/info-color`, `shadow-color` |
 | `:root` | всё общее + `background`, `surface-color`, `panel-background`, `border-color`, `input-background`, `input-border-color`, `modal-backdrop-color` |
 | `button`, `menubutton` | `background` (+ `:hover`, `:pressed`, `:disabled`), `color`, `border-color` (+ `:disabled`); button — `padding` (поля вокруг текста для `measure()`) |
 | `label` | общие + `padding` |
@@ -1788,8 +1799,9 @@ menu             { background: #222; }                     /* попап - ко�
 `canvas`, `icon`, `curve` (у них только общие свойства). Новое свойство — строка в `css_prop_table` (тест
 проверяет, что поле есть в `Theme`) и строка в этой таблице.
 
-Тесты шрифтов и отступов — `css_layout_test.v`: разбор и ошибки, начертания, раскладка детей по
-padding/gap, шрифт при измерении, курсор поля ввода по CSS-шрифту при клике.
+Тесты шрифтов, отступов и размеров — `css_layout_test.v`: разбор и ошибки, начертания, раскладка детей
+по padding/gap, шрифт при измерении, курсор поля ввода по CSS-шрифту при клике, width/min-/max- (и у
+ребёнка с весом).
 
 Тесты — `css_test.v`: разбор и ~20 видов ошибок, полнота таблицы, каскад, сопоставление селекторов
 (включая возврат при `>`), метки и .vui, живая отрисовка (цвет пикселей, восстановление темы, заливка,

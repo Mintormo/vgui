@@ -46,6 +46,8 @@ button:hover { background: rgba(124, 58, 237, 0.18); }
 .danger:hover { background: #ef4444; }
 #save { background: var(--brand); color: #ffffff; }
 #save:hover { background: var(--brand-hover); }
+/* размеры: главные кнопки не уже 96 */
+#save, .danger { min-width: 96; }
 
 toggle:checked { background: var(--brand); }
 progress { fill-color: #16a34a; }

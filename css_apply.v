@@ -150,6 +150,58 @@ mut:
 	has_gap bool
 	gap_row f32
 	gap_col f32
+	// размеры (width, min-width...): -1 - не заданы; применяет measure_widget
+	// (css_apply_size)
+	has_size bool
+	width    f32 = -1
+	height   f32 = -1
+	min_w    f32 = -1
+	max_w    f32 = -1
+	min_h    f32 = -1
+	max_h    f32 = -1
+}
+
+// css_apply_size накладывает размеры из CSS на SizeHint виджета (зовёт
+// measure_widget, пока текущий виджет - этот). Порядок как в CSS: width
+// фиксирует размер (min = max = width), max- ограничивает сверху, min-
+// побеждает max-. Ось с размерами из CSS помечается (css_w/css_h): их
+// уважает и ребёнок с весом (flex) в hbox/vbox, у которого свой hint
+// вдоль главной оси иначе не учитывается.
+fn css_apply_size(h SizeHint, b &CssBox) SizeHint {
+	mut r := h
+	r.w, r.min_w, r.max_w, r.css_w = css_limit_axis(r.w, r.min_w, r.max_w, b.width, b.min_w,
+		b.max_w)
+	r.h, r.min_h, r.max_h, r.css_h = css_limit_axis(r.h, r.min_h, r.max_h, b.height, b.min_h,
+		b.max_h)
+	if b.width >= 0 {
+		r.h_policy = .fixed
+	}
+	if b.height >= 0 {
+		r.v_policy = .fixed
+	}
+	return r
+}
+
+// css_limit_axis — одна ось: (желаемый, min, max, задано ли из CSS).
+fn css_limit_axis(pref f32, mn f32, mx f32, fixed f32, css_min f32, css_max f32) (f32, f32, f32, bool) {
+	if fixed < 0 && css_min < 0 && css_max < 0 {
+		return pref, mn, mx, false
+	}
+	mut p := pref
+	mut lo := mn
+	mut hi := mx
+	if fixed >= 0 {
+		p, lo, hi = fixed, fixed, fixed
+	}
+	if css_max >= 0 {
+		hi = min_f32(hi, css_max)
+		lo = min_f32(lo, css_max)
+	}
+	if css_min >= 0 {
+		lo = max_f32(lo, css_min)
+		hi = max_f32(hi, lo)
+	}
+	return clamp_f32(p, lo, hi), lo, hi, true
 }
 
 // css_pad_of — внутренний отступ виджета owner: из CSS, если таблица задала
@@ -276,7 +328,7 @@ fn (mut ctx RenderContext) css_enter_layout(addr voidptr, tags CssTags) CssLayou
 			}
 		}
 	}
-	if ctx.css_box.has_pad || ctx.css_box.has_gap {
+	if ctx.css_box.has_pad || ctx.css_box.has_gap || ctx.css_box.has_size {
 		ctx.css_box.owner = addr
 		ctx.css_box.kind = kind
 	}
@@ -430,7 +482,7 @@ pub fn (mut ctx RenderContext) draw_child(mut w Widget) {
 			}
 		}
 	}
-	if ctx.css_box.has_pad || ctx.css_box.has_gap {
+	if ctx.css_box.has_pad || ctx.css_box.has_gap || ctx.css_box.has_size {
 		ctx.css_box.owner = addr
 		ctx.css_box.kind = kind
 	}

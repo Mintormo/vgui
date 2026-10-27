@@ -116,6 +116,17 @@ fn (b &BoxLayout) child_main_item(c &ChildEntry, ctx &RenderContext, vertical bo
 		.flex {
 			// База 0 + вес: ровно старая семантика дележа.
 			it.flex = max_f32(0, c.flex)
+			// Но ограничения из CSS (width, min-/max-width) по этой оси
+			// уважаются и тут: стиль сильнее веса, как в CSS flex. Без
+			// таблицы стилей с размерами ребёнка с весом не меряем вовсе
+			if ctx.css_layout_active() && is_measurable(c.widget) {
+				hint := measure_widget(c.widget, ctx)
+				if (vertical && hint.css_h) || (!vertical && hint.css_w) {
+					_, mn, mx, _ := hint.axis(vertical)
+					it.min = mn
+					it.max = mx
+				}
+			}
 		}
 	}
 	// Явные границы вызывающего кода сильнее measure().

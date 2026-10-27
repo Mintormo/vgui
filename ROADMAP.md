@@ -167,8 +167,10 @@ Qt/GTK/WPF интегрированы с UIA (Windows), AT-SPI (Linux), NSAccess
 - [x] стилизация одного конкретного экземпляра без правки темы — `#id` / `.класс`
 - [x] hot-reload темы из файла — `App.load_stylesheet(path, true)`
 - [x] CSS: шрифты и отступы (27.10.2026) — `font-size`/`-weight`/`-style`/`-family`, `padding`, `gap`;
-      действуют и на раскладку, и на события (PROJECT.md, «Стили CSS», «Шрифты и отступы»)
-- [ ] CSS: размеры (`width`, `min-width`...) и `margin`
+      действуют и на раскладку, и на события (PROJECT.md, «Стили CSS», «Шрифты, отступы и размеры»)
+- [x] CSS: размеры (27.10.2026) — `width`, `height`, `min-`/`max-width`, `min-`/`max-height`
+      у любого виджета (ограничения SizeHint в measure_widget)
+- [ ] CSS: `margin`
 - [x] CSS в C-ABI и Python (`vgui_stylesheet_*`, `vguipy.Stylesheet`, `add_css_class`)
 
 ## 7. Реактивность и привязка данных

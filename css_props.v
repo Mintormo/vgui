@@ -104,10 +104,14 @@ const css_fill_field = '@fill'
 const css_padding_field = '@padding'
 const css_gap_field = '@gap'
 
+// css_size_fields — размеры виджета (width, min-width...): тоже CssBox, не
+// наследуются; их применяет measure_widget к SizeHint любого виджета.
+const css_size_fields = ['@width', '@height', '@min-width', '@max-width', '@min-height', '@max-height']
+
 // css_layout_fields — поля, от которых зависит раскладка: объявление с ними
 // применяют и measure/arrange/события (CssDecl.layout), а не только draw.
 const css_layout_fields = ['font_size', 'font_bold', 'font_italic', 'font_mono', css_padding_field,
-	css_gap_field]
+	css_gap_field, '@width', '@height', '@min-width', '@max-width', '@min-height', '@max-height']
 
 // css_font_keywords — допустимые слова свойств font-weight/-style/-family:
 // поле Theme -> слово -> включить начертание (true) или снять заданное выше (false).
@@ -160,6 +164,13 @@ const css_prop_table = {
 	'*:/font-weight':                    ['font_bold']
 	'*:/font-style':                     ['font_italic']
 	'*:/font-family':                    ['font_mono']
+	// размеры - у любого элемента (не в :root): ограничения SizeHint
+	'*:/width':                          ['@width']
+	'*:/height':                         ['@height']
+	'*:/min-width':                      ['@min-width']
+	'*:/max-width':                      ['@max-width']
+	'*:/min-height':                     ['@min-height']
+	'*:/max-height':                     ['@max-height']
 	// ── :root — общая тема окна ──
 	'root:/background':                  ['bg']
 	'root:/surface-color':               ['surface']
@@ -382,7 +393,12 @@ fn css_lookup_fields(typ string, pseudo string, prop string) []string {
 	if typ in css_root_types {
 		return []string{}
 	}
-	return css_prop_table['*:${pseudo}/${prop}'] or { []string{} }
+	fields := css_prop_table['*:${pseudo}/${prop}'] or { return []string{} }
+	// размеры - свойство виджета, у окна целиком (:root) их нет
+	if typ == 'root' && fields.any(it in css_size_fields) {
+		return []string{}
+	}
+	return fields
 }
 
 // css_props_for — список свойств, допустимых для типа в состоянии (для подсказки
@@ -398,6 +414,11 @@ fn css_props_for(typ string, pseudo string) []string {
 			continue
 		}
 		prop := key.all_after('/')
+		// размеры к :root неприменимы (css_lookup_fields) - не предлагать
+		if typ == 'root' && prop in ['width', 'height', 'min-width', 'max-width', 'min-height',
+			'max-height'] {
+			continue
+		}
 		if prop !in out {
 			out << prop
 		}
@@ -516,6 +537,20 @@ fn css_write_field(mut t Theme, mut box CssBox, field string, v CssValue) ! {
 			box.gap_row = n[0]
 			box.gap_col = if n.len == 2 { n[1] } else { n[0] }
 			box.has_gap = true
+		}
+		'@width', '@height', '@min-width', '@max-width', '@min-height', '@max-height' {
+			if v.nums.len != 1 || v.num < 0 {
+				return error('ожидается одно неотрицательное число, а не ${v.raw}')
+			}
+			match field {
+				'@width' { box.width = v.num }
+				'@height' { box.height = v.num }
+				'@min-width' { box.min_w = v.num }
+				'@max-width' { box.max_w = v.num }
+				'@min-height' { box.min_h = v.num }
+				else { box.max_h = v.num }
+			}
+			box.has_size = true
 		}
 		'font_bold', 'font_italic', 'font_mono' {
 			// без копии карты: значение ищется прямо в константе

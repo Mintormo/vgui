@@ -1,7 +1,7 @@
 module vgui
 
-// Шрифты и отступы из CSS (PROJECT.md, «Стили CSS», «Шрифты и отступы»):
-// разбор font-*/padding/gap и их ошибок, и что одни и те же правила видят
+// Шрифты, отступы и размеры из CSS (PROJECT.md, «Стили CSS», «Шрифты,
+// отступы и размеры»): разбор font-*/padding/gap/width... и их ошибок, и что одни и те же правила видят
 // измерение, раскладка, отрисовка и события - размеры виджета считаются тем
 // шрифтом, которым он нарисован, а клик в поле ввода ставит курсор по нему же.
 //
@@ -204,4 +204,62 @@ fn test_event_uses_css_font() {
 	t.click(x, input.bounds.y + input.bounds.h / 2)
 	assert input.cur == 10, 'курсор - по моноширинному шрифту, а не по обычному (${input.cur})'
 	assert t.win.ctx.css_stack.len == 0 && !t.win.ctx.theme.font_mono
+}
+
+fn test_size_errors() {
+	assert css_err('.a { width: -5; }').contains('неотрицательное')
+	assert css_err('.a { min-width: 10 20; }').contains('одно неотрицательное')
+	assert css_err(':root { width: 100; }').contains('неприменимо к :root')
+	assert css_err('menu { max-height: 100; }').contains('неприменимо к menu')
+	assert css_err(':root { color: #fff; } .a { width: 10px; height: 0; }') == ''
+}
+
+// width/height фиксируют размер, min-/max- ограничивают: у виджета по
+// содержимому, у растягиваемого и у ребёнка с весом (flex) в vbox/hbox.
+fn test_sizes_limit_layout() {
+	mut t := new_test_ui(width: 500, height: 500)!
+	defer {
+		t.close()
+	}
+	mut root := create_vbox_fill()
+	mut row := create_hbox_fill()
+	mut fixed_btn := button('OK')
+	fixed_btn.css.classes = ['w150']
+	mut wide_lbl := label('x')
+	wide_lbl.css.classes = ['min100']
+	mut narrow_btn := button('A rather long caption')
+	narrow_btn.css.classes = ['max60']
+	row.add(fixed_btn)
+	row.add(wide_lbl)
+	row.add(narrow_btn)
+	mut tall_btn := button('Tall')
+	tall_btn.css.classes = ['h50']
+	// растягиваемый список с весом - но не выше 90
+	mut short_list := list_box()
+	short_list.css.classes = ['short']
+	mut rest := list_box()
+	root.add(row)
+	root.add(tall_btn)
+	root.add(short_list, flex: 1)
+	root.add(rest, flex: 1)
+	t.app.set_stylesheet(parse_stylesheet('
+		.w150 { width: 150; }
+		.min100 { min-width: 100; }
+		.max60 { max-width: 60; }
+		.h50 { height: 50; min-height: 70; }
+		.short { max-height: 90; }
+	', 't.css')!)
+	t.add(root)
+	t.frame()
+	assert fixed_btn.bounds.w == 150
+	assert wide_lbl.bounds.w == 100
+	assert narrow_btn.bounds.w == 60
+	assert tall_btn.bounds.h == 70, 'min-height сильнее height, как в CSS'
+	assert short_list.bounds.h == 90, 'max-height сильнее веса flex'
+	assert rest.bounds.h > 90, 'остаток достался соседу с весом'
+	// без стилей - снова по содержимому и весу
+	t.app.set_stylesheet(unsafe { nil })
+	t.frame()
+	assert fixed_btn.bounds.w != 150
+	assert short_list.bounds.h == rest.bounds.h
 }
