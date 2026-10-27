@@ -1276,7 +1276,8 @@ SDL3 доставляет **drop'ы** drag-and-drop (файлы/текст, пе
 перетаскивания, — `dnd_cancel()`.
 
 Тесты — `dnd_test.v` (`sim_drop_files`/`sim_drop_text` в `testkit.v` — сброс извне настоящим путём через
-очередь SDL); пример — `examples/60_drag_drop.v`. В C-ABI и Python пока не проброшено.
+очередь SDL); пример — `examples/60_drag_drop.v`. C-ABI — vgui-capi/PROJECT.md, «Перетаскивание»;
+Python — vguipy/PROJECT.md, «Перетаскивание» (`DropInfo.source_ptr()` — адрес источника для биндингов).
 
 ## ImageBackground (kind 49) и фон окна (`image_background.v`)
 

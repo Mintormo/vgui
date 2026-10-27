@@ -331,6 +331,12 @@ fn dnd_same_widget(a &Widget, b &Widget) bool {
 	return dnd_addr(a) == dnd_addr(b)
 }
 
+// source_ptr - адрес структуры виджета-источника (nil - внешний сброс) для
+// биндингов: по нему C-ABI и Python узнают свой объект (как Ui.widget_ptr).
+pub fn (info &DropInfo) source_ptr() voidptr {
+	return dnd_addr(info.source)
+}
+
 // from - сброс пришёл из виджета w (сравнение по самому виджету, а не по
 // обёртке интерфейса): `if info.from(list_a) { ... }`.
 pub fn (info &DropInfo) from(w &Widget) bool {

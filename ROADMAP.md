@@ -232,7 +232,8 @@ Qt/GTK/WPF интегрированы с UIA (Windows), AT-SPI (Linux), NSAccess
       между окнами приложения, ListBox/TreeView — перестановка и вынос строк/
       узлов, внешние файлы/текст — в те же цели. PROJECT.md, «Перетаскивание
       между виджетами»
-- [ ] **DnD: C-ABI и Python** — `vgui_widget_set_drag_*`, `vguipy`
+- [x] **DnD: C-ABI и Python** (27.10.2026) — `vgui_widget_set_drag_*`,
+      `vgui_dnd_*`, `vguipy.dnd`
 - [ ] **DnD наружу, в другие приложения** — в SDL 3.5 API нет, нужен нативный
       код под каждую ОС (X11 XDND, Wayland data-device, OLE, NSDraggingSource)
 - [x] **Иконки в списках, меню, деревьях** (13.10.2026) — общий `ItemIcon`
