@@ -238,12 +238,14 @@ fn (mut g GridLayout) layout(ctx &RenderContext) {
 	if g.cells.len == 0 || g.cols < 1 || g.rows < 1 {
 		return
 	}
-	inner := g.bounds.shrunk(g.pad)
+	// отступы - свои или из CSS (padding/gap у этой сетки)
+	pad, sx, sy := g.css_metrics(ctx)
+	inner := g.bounds.inset(pad)
 
 	col_fixed := g.auto_track_sizes(ctx, false)
 	row_fixed := g.auto_track_sizes(ctx, true)
-	col_sizes := distribute_sizes(inner.w, g.spacing_x, g.cols, col_fixed, g.col_weights)
-	row_sizes := distribute_sizes(inner.h, g.spacing_y, g.rows, row_fixed, g.row_weights)
+	col_sizes := distribute_sizes(inner.w, sx, g.cols, col_fixed, g.col_weights)
+	row_sizes := distribute_sizes(inner.h, sy, g.rows, row_fixed, g.row_weights)
 
 	// Cumulative offsets
 	mut col_off := []f32{len: g.cols, init: 0}
@@ -251,12 +253,12 @@ fn (mut g GridLayout) layout(ctx &RenderContext) {
 	mut x := inner.x
 	for i in 0 .. g.cols {
 		col_off[i] = x
-		x += col_sizes[i] + g.spacing_x
+		x += col_sizes[i] + sx
 	}
 	mut y := inner.y
 	for i in 0 .. g.rows {
 		row_off[i] = y
-		y += row_sizes[i] + g.spacing_y
+		y += row_sizes[i] + sy
 	}
 
 	for i, c in g.cells {
@@ -272,16 +274,25 @@ fn (mut g GridLayout) layout(ctx &RenderContext) {
 		for k in c.col .. col_end {
 			cw += col_sizes[k]
 		}
-		cw += f32(col_end - c.col - 1) * g.spacing_x
+		cw += f32(col_end - c.col - 1) * sx
 		mut ch := f32(0)
 		for k in c.row .. row_end {
 			ch += row_sizes[k]
 		}
-		ch += f32(row_end - c.row - 1) * g.spacing_y
+		ch += f32(row_end - c.row - 1) * sy
 
 		r := Rect{cx, cy, cw, ch}
 		set_widget_bounds(mut g.cells[i].widget, r)
 	}
+}
+
+// css_metrics — внутренний отступ и промежутки между колонками (sx) и строками
+// (sy): из таблицы стилей, если она задала padding/gap этой сетке (css_apply.v,
+// CssBox; `gap: строки колонки`), иначе свои pad и spacing_x/spacing_y.
+fn (g &GridLayout) css_metrics(ctx &RenderContext) (CssInsets, f32, f32) {
+	pad := ctx.css_pad_of(voidptr(g), g.pad)
+	gap_row, gap_col := ctx.css_gap_of(voidptr(g), g.spacing_y, g.spacing_x)
+	return pad, gap_col, gap_row
 }
 
 // arrange: bounds по умолчанию - весь экран; раздаёт bounds ячейкам и рекурсивно спускается в их поддеревья.
@@ -333,7 +344,7 @@ pub fn (mut g GridLayout) handle_event(event &GuiEvent, app &App) bool {
 		}
 	}
 	for i := g.cells.len - 1; i >= 0; i-- {
-		if g.cells[i].widget.handle_event(event, app) {
+		if event_child(mut g.cells[i].widget, event, app) {
 			return true
 		}
 	}

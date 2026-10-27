@@ -2396,7 +2396,7 @@ fn (mut lb ListBox) dispatch_to_row_widgets(event &GuiEvent, app &App) bool {
 			inner := Rect{cx + lb_cell_pad, iy + 1, col_w - lb_cell_pad * 2, lb.item_height - 2}
 			mut w := unsafe { cell.widget }
 			set_widget_bounds(mut w, inner)
-			if w.handle_event(event, app) {
+			if event_child(mut w, event, app) {
 				return true
 			}
 		}
@@ -2434,7 +2434,7 @@ fn (mut lb ListBox) dispatch_to_row_widgets_h(event &GuiEvent, app &App) bool {
 			Rect{ix + lb_cell_pad, vp.y + lb_cell_pad, iw - lb_cell_pad * 2, ih - lb_cell_pad * 2}
 		mut w := unsafe { cell.widget }
 		set_widget_bounds(mut w, inner)
-		if w.handle_event(event, app) {
+		if event_child(mut w, event, app) {
 			return true
 		}
 	}

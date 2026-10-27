@@ -411,7 +411,7 @@ fn (mut cb ComboBox) dispatch_to_item_widgets(event &GuiEvent, app &App) bool {
 		r := Rect{inner.x, iy, text_w, h}
 		mut w := unsafe { cb.entries[i].widget }
 		set_widget_bounds(mut w, r)
-		if w.handle_event(event, app) {
+		if event_child(mut w, event, app) {
 			return true
 		}
 	}

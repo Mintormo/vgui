@@ -59,6 +59,9 @@ mut:
 	root_rules []CssRule
 	// vars — переменные из :root (без «--»), уже подставленные в значения.
 	vars map[string]string
+	// has_layout — хоть одно правило по дереву (не корневое) меняет шрифт
+	// или отступы. Нет - measure/arrange/события обходятся без CSS вовсе.
+	has_layout bool
 }
 
 // CssRel — как звено селектора связано со звеном левее (ближе к корню дерева).
@@ -88,11 +91,16 @@ struct CssSelector {
 	root_type string
 }
 
-// CssValue — значение свойства, уже разобранное: цвет или число.
+// CssValue — значение свойства, уже разобранное: цвет, число (одно или
+// несколько через пробел - `padding: 4 8`) или ключевое слово (`bold`).
+// Какое из них допустимо, решает поле, в которое значение пишется
+// (theme_set_field, css_write_field).
 struct CssValue {
 	is_color bool
 	color    Color
-	num      f32
+	num      f32    // первое (или единственное) число
+	nums     []f32  // все числа значения; у цвета и слова - пусто
+	word     string // ключевое слово в нижнем регистре; у цвета и чисел - ''
 	raw      string // текст значения после подстановки var() - для сообщений
 }
 
@@ -109,6 +117,10 @@ mut:
 	fields_by_kind [][]string
 	// root_fields — поля для корневого правила.
 	root_fields []string
+	// layout — объявление влияет на раскладку (шрифт, padding, gap -
+	// css_layout_fields): его применяют и measure/arrange/события, а не
+	// только отрисовка (css_apply.v, css_enter_layout).
+	layout bool
 }
 
 // CssRule — селектор (один - список через запятую разворачивается в несколько
@@ -243,6 +255,9 @@ fn (mut p CssParser) parse() !&Stylesheet {
 			if sel.root_type.len > 0 {
 				ss.root_rules << rule
 			} else {
+				if rule.decls.any(it.layout) {
+					ss.has_layout = true
+				}
 				ss.rules << rule
 			}
 		}
@@ -581,18 +596,43 @@ fn css_parse_value(text string) !CssValue {
 		c := css_parse_rgb(t) or { return error('${text}: ожидается rgb(r, g, b) или rgba(r, g, b, a)') }
 		return css_color_value(c, text)!
 	}
-	num_text := if t.ends_with('px') { t[..t.len - 2] } else { t }
-	if num_text.len > 0 && (num_text[0].is_digit() || num_text[0] == `.` || num_text[0] == `-`) {
-		n := num_text.f64()
-		if n == 0 && num_text.trim('0.-').len > 0 {
-			return error('${text}: не число')
+	// Числа: одно (`8`, `8px`) или несколько через пробел (`4 8`, `4px 8px 0 2`
+	// у padding). Сколько чисел допустимо, проверяет поле (css_write_field).
+	words := t.fields()
+	if words.len > 0 && css_looks_numeric(words[0]) {
+		mut nums := []f32{cap: words.len}
+		for w in words {
+			nums << css_parse_number(w) or { return error('${text}: ${err.msg()}') }
 		}
 		return CssValue{
-			num: f32(n)
-			raw: text
+			num:  nums[0]
+			nums: nums
+			raw:  text
 		}
 	}
-	return error('${text}: ожидается цвет (#rrggbb, rgb(), имя) или число')
+	// Ключевое слово (`bold`, `italic`, `monospace`, `sans-serif`): одно слово
+	// из букв и дефисов. Подходит ли оно свойству - тоже решает поле.
+	if words.len == 1 && t.bytes().all(it.is_letter() || it == `-`) {
+		return CssValue{
+			word: t
+			raw:  text
+		}
+	}
+	return error('${text}: ожидается цвет (#rrggbb, rgb(), имя), число или ключевое слово')
+}
+
+// css_looks_numeric — слово начинается как число (цифра, точка, минус).
+fn css_looks_numeric(w string) bool {
+	return w.len > 0 && (w[0].is_digit() || w[0] == `.` || w[0] == `-`)
+}
+
+// css_parse_number — одно число `8`, `8px`, `-2.5`. Мусор (`8pt`, `1x`) - ошибка.
+fn css_parse_number(w string) !f32 {
+	num_text := if w.ends_with('px') { w[..w.len - 2] } else { w }
+	if !css_looks_numeric(num_text) || num_text.trim('0123456789.-').len > 0 {
+		return error('${w}: не число')
+	}
+	return f32(num_text.f64())
 }
 
 fn css_color_value(c Color, raw string) !CssValue {

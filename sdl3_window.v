@@ -641,7 +641,10 @@ pub fn (w &Window) measure_content() SizeHint {
 	mut r := SizeHint{}
 	// Все корни — один проход измерения (measure_cache.v).
 	measure_pass_enter()
+	// с чистого состояния стилей, как arrange()
+	css_saved := w.css_begin_traversal()
 	defer {
+		w.css_end_traversal(css_saved)
 		measure_pass_leave()
 	}
 	for widget in w.widgets {
@@ -878,6 +881,12 @@ fn (mut w Window) ensure_render_target() bool {
 // размера корням выставляется весь экран, затем рекурсивно раскладывается всё
 // дерево. Снимает ctx.layout_dirty.
 fn (mut w Window) arrange() {
+	// Обход с корней - с чистого состояния стилей (css_begin_traversal):
+	// раскладку может запросить событие, пришедшее посреди другого обхода.
+	css_saved := w.css_begin_traversal()
+	defer {
+		w.css_end_traversal(css_saved)
+	}
 	// Один проход измерения на весь arrange: кэш SizeHint
 	// (measure_cache.v) живёт от этой точки до конца обхода.
 	measure_pass_begin()
@@ -1201,11 +1210,14 @@ fn (mut w Window) render() {
 			w.bg_image.draw(mut w.ctx)
 		}
 		// через draw_child - чтобы корневые виджеты тоже получали стили CSS;
-		// стек предков на всякий случай пуст в начале кадра
-		w.ctx.css_stack.clear()
+		// обход с корня начинается с чистого состояния стилей (стек предков
+		// пуст, тема окна): кадр мог начаться посреди обработки события этого
+		// окна (модальный диалог из обработчика клика) - css_begin_traversal
+		css_saved := w.css_begin_traversal()
 		for mut widget in w.widgets {
 			w.ctx.draw_child(mut widget)
 		}
+		w.css_end_traversal(css_saved)
 
 		if !full {
 			// Balance the push_clip() above — clip_stack must be empty again
@@ -1292,6 +1304,16 @@ fn (mut w Window) render() {
 // dispatch_event_inner, затем синхронизирует режим текстового ввода SDL (кроме mouse_move -
 // движение мыши фокус не меняет).
 fn (mut w Window) dispatch_event_with_app(ev &GuiEvent, app &App) {
+	// Активный контекст - этого окна: по нему виджеты меряют текст в
+	// handle_event, а event_child берёт шрифт и отступы из CSS. Цикл App
+	// ставит его сам; прямой вызов (тесты, свой цикл) - здесь, как dnd_deliver_in.
+	if !isnil(app) && isnil(app.active_ctx) {
+		mut mapp := unsafe { &App(app) }
+		mapp.active_ctx = &w.ctx
+		defer {
+			mapp.active_ctx = unsafe { nil }
+		}
+	}
 	w.dispatch_event_inner(ev, app)
 	// Второй и следующий быстрый клик: сначала обычное нажатие (выше), затем
 	// mouse_dbl_click в той же точке. Раньше двойной клик приходил вместо
@@ -1396,7 +1418,7 @@ fn (mut w Window) dispatch_event_inner(ev &GuiEvent, app &App) {
 	mut handled := false
 	if w.focused >= 0 && w.focused < w.widgets.len {
 		mut widget := w.widgets[w.focused]
-		handled = widget.handle_event(ev, app)
+		handled = event_child(mut widget, ev, app)
 	}
 	if !handled {
 		for i := w.widgets.len - 1; i >= 0; i-- {
@@ -1404,7 +1426,7 @@ fn (mut w Window) dispatch_event_inner(ev &GuiEvent, app &App) {
 				continue
 			}
 			mut widget := w.widgets[i]
-			if widget.handle_event(ev, app) {
+			if event_child(mut widget, ev, app) {
 				handled = true
 				break
 			}

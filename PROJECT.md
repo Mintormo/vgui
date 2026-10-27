@@ -1658,10 +1658,9 @@ menu             { background: #222; }                     /* попап - ко�
   ошибка), и у свойства без поля темы для этого состояния (`button:hover { color }`) — ошибка.
 - **Наследование** получается само: тема действует на поддерево. `.sidebar { color }` красит весь текст
   внутри. Обратная сторона: правило на контейнере меняет и потомков, читающих то же поле.
-- **Раскладку стили не трогают**: в CSS нет отступов, размеров, шрифтов. `measure()` от таблицы не
-  зависит, смена таблицы — только перерисовка. Исключение — `--control-height`: влияет на `measure()`,
-  поэтому разрешено только в `:root` (тема окна целиком; `apply_stylesheet` зовёт `invalidate_all`,
-  а он взводит и `layout_dirty`); в обычном правиле — ошибка.
+- **Цвета раскладку не трогают; шрифты и отступы — трогают** (с 27.10.2026, раздел «Шрифты и отступы»
+  ниже). `--control-height` влияет на `measure()` и разрешено только в `:root` (тема окна целиком;
+  `apply_stylesheet` зовёт `invalidate_all`, а он взводит и `layout_dirty`); в обычном правиле — ошибка.
 - Одно свойство может писать в несколько полей: `button { background }` пишет `button_bg`, `accent`,
   `error_color`, `success` — иначе на кнопке `style=accent`/`danger` оно не сработало бы. Побочного эффекта
   нет: копия темы живёт только на время отрисовки поддерева самой кнопки (но кольцо фокуса этой кнопки,
@@ -1686,6 +1685,41 @@ menu             { background: #222; }                     /* попап - ко�
 в теме, поэтому `background` у них — не поле `Theme`, а заливка прямоугольника в `draw_child` перед
 `draw()` (особое «поле» `@fill`); скругление — только если правило задало `border-radius`. У `panel`
 `background` — это `panel_bg`.
+
+**Шрифты и отступы** (с 27.10.2026). Свойства `font-size` (число), `font-weight` (`bold`/`normal`),
+`font-style` (`italic`/`normal`), `font-family` (`monospace`/`sans-serif`) — у любого элемента и в `:root`;
+`padding` (1–4 числа, порядок CSS: верх право низ лево) — у `vbox`, `hbox`, `grid`, `panel`, `button`,
+`label`; `gap` (`строки [колонки]`) — у `vbox`, `hbox`, `grid` (у vbox берётся первое число, у hbox —
+второе). Из CSS они сильнее `pad=`/`gap=` разметки и `set_padding`/`set_spacing`.
+
+- **Шрифт — поля темы** (`font_size`, `font_bold`, `font_italic`, `font_mono`) и наследуется поддеревом,
+  как цвет. Его читает `get_font`: `font_size` заменяет размер окна только при `size <= 0` (явный размер
+  виджета — `Label.font_size`, `TextInput` с размером по высоте — сильнее); начертание `css_font_style`
+  **добавляет** к выбранному виджетом (жирный заголовок таблицы от `font-weight: normal` обычным не станет,
+  `normal` снимает только жирность, заданную CSS выше). У моно курсива нет. `draw_text*` и
+  `MarkdownView` (`default_font_size`) тоже идут через него.
+- **Отступы — не тема, а `ctx.css_box`** (`CssBox`): не наследуются, у каждого виджета свои, сбрасываются
+  при входе в каждый виджет. `owner` — адрес виджета, которому они заданы: виджет читает их
+  `ctx.css_pad_of(себя, свой_pad)` / `css_gap_of`, поэтому внутренняя часть составного виджета,
+  нарисованная мимо `draw_child`, не возьмёт отступы владельца. `BoxLayout` лежит полем в `HBox`/`VBox`,
+  и его адрес не адрес виджета — владельца находит `css_box_owner_of`.
+- **Один и тот же CSS в четырёх обходах.** Размер виджета зависит от шрифта и padding, поэтому правила с
+  ними (`CssDecl.layout`, есть ли такие — `Stylesheet.has_layout`) применяют не только `draw_child`, но и
+  `measure_widget`, `arrange_widget` и **`event_child`** — раздача событий детям (`TextInput.hit_pos`
+  меряет текст в `handle_event`: без этого клик ставил бы курсор по чужому шрифту). Цепочка предков
+  копится в `ctx.css_stack` во всех четырёх, поэтому **контейнер, рисующий детей через `draw_child`,
+  раздаёт им события через `event_child`**, а измеряет — через `measure_widget` внутри своего
+  `measure()`/`arrange()` (сверху вниз). Без правил о шрифте и отступах три обхода к CSS не обращаются.
+  `measure_widget` меняет поля стилей неизменяемого контекста на время вызова и возвращает (как
+  `get_font_immut`); кэш измерений не страдает — у виджета одна и та же цепочка предков.
+- **Обход с корня — с чистого состояния** (`Window.css_begin_traversal`/`css_end_traversal` в `render`,
+  `arrange`, `measure_content`). Иначе: клик внутри `event_child` с подменённым шрифтом кнопки открыл
+  модальный диалог, его цикл перерисовал и это окно — с шрифтом кнопки в теме окна и непустым стеком.
+  Выход из виджета возвращает стек к длине, а не `pop` (по той же причине). `dispatch_event_with_app`
+  ставит `app.active_ctx` своего окна, если его нет (прямой вызов, тесты): `event_child` берёт его.
+- Попапы (меню, выпадающий список, подсказки) рисуются вне дерева — шрифт у них из `:root`;
+  `menu { font-size }` — ошибка, как и прочие свойства корневых типов с деревом. Отступов у `input`,
+  `combo` и т.п. нет (текст в них смещён константами `draw()`); `margin` нет — в раскладке его нет вовсе.
 
 **Корневые правила** — `:root` и голые `menu`, `tooltip`, `notification`, `dropdown` (выпадающий список
 `ComboBox`). Они вшиваются в саму тему окна (`css_base_theme`), а не подменяются на время поддерева:
@@ -1719,7 +1753,8 @@ menu             { background: #222; }                     /* попап - ко�
 состояния. Ошибки громкие, с местом: неизвестный тип/свойство/состояние (с перечнем допустимых свойств),
 неверный тип значения, `!important`, `@media`, незакрытый блок, дубль свойства в блоке.
 
-**Ограничения (намеренно, пока):** нет шрифтов, отступов, размеров; нет состояний предков
+**Ограничения (намеренно, пока):** нет размеров (`width`, `min-width`...), `margin`, семейства шрифта
+файлом (только `monospace`/`sans-serif` из набора окна), padding у полей ввода; нет состояний предков
 (`.panel:hover button`), `:not()`, `+`/`~`, атрибутов; переменные не каскадируются; попапы стилизуются
 только корневыми правилами. C-ABI — vgui-capi/PROJECT.md, «Стили CSS»; Python — vguipy/PROJECT.md, «Стили CSS».
 
@@ -1728,9 +1763,10 @@ menu             { background: #222; }                     /* попап - ко�
 
 | Тип | Свойства (`:состояние свойство` — поле для состояния) |
 |---|---|
-| любой | `color`, `:disabled color`, `secondary-color`, `placeholder-color`, `accent-color` (+ `:hover`, `:pressed`), `accent-text-color`, `border-radius`, `focus-ring-color`, `focus-ring-width`, `scrollbar-color` (+ `:hover`, `:pressed`), `scrollbar-track-color`, `success-/warning-/error-/info-color`, `shadow-color` |
+| любой | `font-size`, `font-weight`, `font-style`, `font-family`, `color`, `:disabled color`, `secondary-color`, `placeholder-color`, `accent-color` (+ `:hover`, `:pressed`), `accent-text-color`, `border-radius`, `focus-ring-color`, `focus-ring-width`, `scrollbar-color` (+ `:hover`, `:pressed`), `scrollbar-track-color`, `success-/warning-/error-/info-color`, `shadow-color` |
 | `:root` | всё общее + `background`, `surface-color`, `panel-background`, `border-color`, `input-background`, `input-border-color`, `modal-backdrop-color` |
-| `button`, `menubutton` | `background` (+ `:hover`, `:pressed`, `:disabled`), `color`, `border-color` (+ `:disabled`) |
+| `button`, `menubutton` | `background` (+ `:hover`, `:pressed`, `:disabled`), `color`, `border-color` (+ `:disabled`); button — `padding` (поля вокруг текста для `measure()`) |
+| `label` | общие + `padding` |
 | `input`, `textarea` | `background`, `border-color`, `:focus border-color` |
 | `spinbox` | `background`, `border-color`, `color`, `button-background` (+ `:hover`) |
 | `code` | `background`, `border-color`, `color`, `gutter-background`, `gutter-color`, `current-line-background`, `selection-background`, `caret-color` |
@@ -1739,8 +1775,8 @@ menu             { background: #222; }                     /* попап - ко�
 | `slider`, `progress`, `spinner` | `track-color`/`background`, `fill-color`, `thumb-color`, `tick-color`; progress — `color`; spinner — `color`, `background` |
 | `list`, `table`, `propertygrid` | `background`, `alt-row-background`, `border-color`, `color`, `grid-color`, `header-background`, `header-color`, `:hover background`, `:selected background`, `:selected color`; list/table — `header-border-color`; table — `rownum-*`, `current-line-background`; propertygrid — `group-*`, `splitter-color` |
 | `tree` | `background`, `border-color`, `color`, `guide-color`, `arrow-color`, `:hover`/`:selected background`, `:selected color` |
-| `panel` | `background`, `border-color` |
-| `vbox`, `hbox`, `grid`, `scroll`, `stack`, `centered` | `background` (заливка) |
+| `panel` | `background`, `border-color`, `padding` |
+| `vbox`, `hbox`, `grid`, `scroll`, `stack`, `centered` | `background` (заливка); vbox/hbox/grid — `padding`, `gap` |
 | `tabs` | `background`, `strip-background`, `tab-background` (+ `:hover`, `:selected`), `color` (+ `:selected`, `:disabled`), `border-color`, `indicator-color` |
 | `accordion` | `background`, `header-background` (+ `:hover`), `header-color`, `border-color`, `arrow-color` |
 | `split` | `handle-color` (+ `:hover`) |
@@ -1751,6 +1787,9 @@ menu             { background: #222; }                     /* попап - ко�
 Имена типов — как в .vui; кроме того `image`, `colorpicker`, `datepicker`, `badge`, `calendar`, `dropzone`,
 `canvas`, `icon`, `curve` (у них только общие свойства). Новое свойство — строка в `css_prop_table` (тест
 проверяет, что поле есть в `Theme`) и строка в этой таблице.
+
+Тесты шрифтов и отступов — `css_layout_test.v`: разбор и ошибки, начертания, раскладка детей по
+padding/gap, шрифт при измерении, курсор поля ввода по CSS-шрифту при клике.
 
 Тесты — `css_test.v`: разбор и ~20 видов ошибок, полнота таблицы, каскад, сопоставление селекторов
 (включая возврат при `>`), метки и .vui, живая отрисовка (цвет пикселей, восстановление темы, заливка,
@@ -1784,7 +1823,7 @@ vgui построена на десятках `__global`-слайсов/map и �
 Полный чек-лист с C-ABI - vgui-capi/PROJECT.md, «Добавление нового виджета»; Python-класс - vguipy/PROJECT.md. В самой библиотеке:
 
 - **первым полем** структуры - `type_tag int = kind_<name>`, константа - в `widget_kinds.v`, строка - в `widget_tag_test.v` («Тег типа виджета»); **вторым** - `css CssTags` (метки для CSS) и строка в `css_test.v` (`test_every_widget_type_has_css_tags`); имя типа для селекторов - в `css_kind_by_name` («Стили CSS»);
-- контейнер рисует детей через `ctx.draw_child(mut w)`, а не `w.draw(mut ctx)` - иначе правила CSS с предками его не видят («Стили CSS»);
+- контейнер рисует детей через `ctx.draw_child(mut w)`, а не `w.draw(mut ctx)`, и раздаёт им события через `event_child(mut w, ev, app)` - иначе правила CSS с предками его не видят, а шрифт из CSS в событиях не тот («Стили CSS»);
 - реализовать `bounds_of()`/`set_bounds()` для нового типа в `widget_tree.v` (интерфейс `Layouted`) — **критично**: без этого `get_widget_bounds`/`set_widget_bounds` не узнают тип, поле `bounds` виджета никогда не выставляется движком компоновки, и он рендерится в (0,0) с нулевым размером, то есть невидим. Плюс, если новый тип — контейнер, реально держащий детей-`Widget`: `child_widgets()` (`HasChildren`); `arrange()` (`Arrangeable`) — bounds детям выставляются только там, не в `draw()` (см. «Фаза arrange»); `hit_children()` (`HitTestable`) — если `arrange()` выставляет `bounds` не всем детям, а только части (активная вкладка, развёрнутая секция, видимый диапазон строк); и собственное топ-уровневое поле `visible bool`, а не спрятанное во вложенной структуре (иначе `HasVisibility` его не увидит и `widget_at` будет попадать в скрытый виджет — та же ловушка, что у `HBox`/`VBox`). Добавьте заодно проверку в `widget_tree_test.v` — тест не самопроверяющийся, забытый тип он молча пропустит. См. раздел «Дерево виджетов» выше
 - по желанию — `measure()` в `layout_measure.v`: без него виджет в `add(w)` занимает свободное место, а в окно по содержимому, `fit_to_content` и дорожки сетки входит своими текущими `bounds`. **Внутренний вспомогательный виджет без `measure()` в окне по содержимому ломает раскладку** (так было с `CpPreview` палитры: «растягивающийся во все стороны» ряд съедал высоту) — давайте `measure()` и им
 - поле `enabled bool = true` и неактивный вид: в `draw()` - `en := ctx.is_enabled(w.enabled)` и дальше только `en`; focusable при `!en` зовёт `ctx.focus_block(&w)` вместо регистрации; сложному содержимому - `ctx.draw_disabled_veil`; контейнер рисует детей между `begin_disabled`/`end_disabled` и при `!enabled` не отдаёт им ввод (`is_input_event`). Без этого `set_enabled` на новом виджете молча ничего не делает. См. «Неактивное состояние (enabled)»

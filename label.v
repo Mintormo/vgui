@@ -149,9 +149,11 @@ fn (mut l Label) draw_in_rect(mut ctx RenderContext, color Color) {
 	fh := ctx.font_height_of(font)
 	line_step := fh + l.line_gap
 
-	// Используем всю область bounds для размещения текста (без shrink для расчёта позиции)
-	// pad применяется только как отступ от краёв для wrap-ширины
-	wrap_w := l.bounds.w - l.pad * 2.0
+	// Область текста - bounds без отступов (свой pad или padding из CSS,
+	// css_apply.v). При равных отступах центрирование в ней даёт то же, что
+	// центрирование во всём bounds.
+	inner := l.bounds.inset(ctx.css_pad_of(voidptr(&l), l.pad))
+	wrap_w := inner.w
 	lines := l.wrap_lines(ctx, font, wrap_w)
 
 	// // Высота блока: n строк * шаг минус хвостовой line_gap (после последней строки зазора нет).
@@ -163,12 +165,12 @@ fn (mut l Label) draw_in_rect(mut ctx RenderContext, color Color) {
 
 	// Вертикальное выравнивание внутри всего bounds
 	mut y := match l.valign {
-		.top { l.bounds.y + l.pad }
-		.middle { l.bounds.y + (l.bounds.h - total_h) / 2.0 }
-		.bottom { l.bounds.y + l.bounds.h - total_h - l.pad }
+		.top { inner.y }
+		.middle { inner.y + (inner.h - total_h) / 2.0 }
+		.bottom { inner.y + inner.h - total_h }
 	}
 
-	content_x := l.bounds.x + l.pad
+	content_x := inner.x
 
 	for line in lines {
 		// // y растёт на line_step даже у пропущенных строк, поэтому положение следующих не сбивается.
@@ -185,8 +187,8 @@ fn (mut l Label) draw_in_rect(mut ctx RenderContext, color Color) {
 			lw := ctx.measure_text_with_font(line, font).x
 			x := match l.align {
 				.left { content_x }
-				.center { l.bounds.x + (l.bounds.w - lw) / 2.0 }
-				.right { l.bounds.x + l.bounds.w - l.pad - lw }
+				.center { inner.x + (inner.w - lw) / 2.0 }
+				.right { inner.x + inner.w - lw }
 			}
 
 			ctx.draw_text_with_font(line, x, y, color, font)

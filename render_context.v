@@ -129,10 +129,12 @@ pub mut:
 	// Текущая глубина рекурсии arrange_widget (защита от циклов в дереве).
 	arrange_depth int
 	// Таблица стилей окна (css_apply.v; nil - стилей нет) и цепочка предков
-	// рисуемого сейчас виджета для селекторов вида `.sidebar button` -
-	// её наполняет draw_child по ходу обхода дерева сверху вниз.
+	// текущего виджета для селекторов вида `.sidebar button` - её наполняют
+	// draw_child, measure_widget, arrange_widget и event_child по ходу обхода
+	// дерева сверху вниз. css_box - padding/gap из CSS у текущего виджета.
 	stylesheet &Stylesheet = unsafe { nil }
 	css_stack  []CssNode
+	css_box    CssBox
 	// Сколько отключённых контейнеров-предков у рисуемого сейчас виджета
 	// (enabled.v): > 0 - виджет неактивен по наследству. Меняют только
 	// begin_disabled/end_disabled, обнуляет Window.render() в начале кадра.
@@ -234,51 +236,43 @@ fn (mut ctx RenderContext) focus_ring_impl(r Rect, radius f32, strength f32, ins
 }
 
 // draw_text* — рисование строки стандартным шрифтом нужного стиля в точке (x, y)
-// (левый верхний угол строки). Если нужного стиля в наборе нет, подставляется запасной
-// (regular; для mono_bold — mono). Остальная логика (кэш текстур и др.) — в
-// draw_text_with_font (sdl3_fonts.v).
+// (левый верхний угол строки). Шрифт - через get_font (размер окна или из CSS,
+// начертание из CSS добавляется); если нужного стиля в наборе нет, подставляется
+// запасной (regular; для mono_bold — mono). Остальная логика (кэш текстур и др.) —
+// в draw_text_with_font (sdl3_fonts.v).
 pub fn (mut ctx RenderContext) draw_text(text string, x f32, y f32, c Color) {
-	ctx.draw_text_with_font(text, x, y, c, ctx.fonts.regular)
+	ctx.draw_text_with_font(text, x, y, c, ctx.font_or(.regular, .regular))
 }
 
 pub fn (mut ctx RenderContext) draw_text_bold(text string, x f32, y f32, c Color) {
-	mut font := voidptr(ctx.fonts.regular)
-	if unsafe { ctx.fonts.bold != nil } {
-		font = ctx.fonts.bold
-	}
-	ctx.draw_text_with_font(text, x, y, c, font)
+	ctx.draw_text_with_font(text, x, y, c, ctx.font_or(.bold, .regular))
 }
 
 pub fn (mut ctx RenderContext) draw_text_italic(text string, x f32, y f32, c Color) {
-	mut font := voidptr(ctx.fonts.regular)
-	if unsafe { ctx.fonts.italic != nil } {
-		font = ctx.fonts.italic
-	}
-	ctx.draw_text_with_font(text, x, y, c, font)
+	ctx.draw_text_with_font(text, x, y, c, ctx.font_or(.italic, .regular))
 }
 
 pub fn (mut ctx RenderContext) draw_text_mono(text string, x f32, y f32, c Color) {
-	mut font := voidptr(ctx.fonts.regular)
-	if unsafe { ctx.fonts.mono != nil } {
-		font = ctx.fonts.mono
-	}
-	ctx.draw_text_with_font(text, x, y, c, font)
+	ctx.draw_text_with_font(text, x, y, c, ctx.font_or(.mono, .regular))
 }
 
 pub fn (mut ctx RenderContext) draw_text_mono_bold(text string, x f32, y f32, c Color) {
-	mut font := voidptr(ctx.fonts.mono)
-	if unsafe { ctx.fonts.mono_bold != nil } {
-		font = ctx.fonts.mono_bold
+	ctx.draw_text_with_font(text, x, y, c, ctx.font_or(.mono_bold, .mono))
+}
+
+// font_or — шрифт стиля style размера по умолчанию, а если его нет (не
+// открылся) - запасного стиля fallback.
+fn (ctx &RenderContext) font_or(style FontStyle, fallback FontStyle) voidptr {
+	font := ctx.get_font_immut(style, 0)
+	if unsafe { font != nil } {
+		return font
 	}
-	ctx.draw_text_with_font(text, x, y, c, font)
+	return ctx.get_font_immut(fallback, 0)
 }
 
 // draw_text_mono_centered рисует моноширинный текст по центру прямоугольника r (пустой текст или отсутствие шрифта — ничего).
 pub fn (mut ctx RenderContext) draw_text_mono_centered(text string, r Rect, c Color) {
-	mut font := voidptr(ctx.fonts.regular)
-	if unsafe { ctx.fonts.mono != nil } {
-		font = ctx.fonts.mono
-	}
+	font := ctx.font_or(.mono, .regular)
 	if text.len == 0 || unsafe { font == nil } {
 		return
 	}
@@ -290,19 +284,12 @@ pub fn (mut ctx RenderContext) draw_text_mono_centered(text string, r Rect, c Co
 
 // measure_text_mono — размер строки моноширинным шрифтом (или regular, если mono нет).
 pub fn (ctx &RenderContext) measure_text_mono(text string) Vec2 {
-	mut font := voidptr(ctx.fonts.regular)
-	if unsafe { ctx.fonts.mono != nil } {
-		font = ctx.fonts.mono
-	}
-	return ctx.measure_text_with_font(text, font)
+	return ctx.measure_text_with_font(text, ctx.font_or(.mono, .regular))
 }
 
 // mono_font_height — высота строки моно-шрифта в логических пикселях (физическая высота / dpi_scale при HiDPI); 14 — запасное значение, если шрифта нет.
 pub fn (ctx &RenderContext) mono_font_height() f32 {
-	mut font := voidptr(ctx.fonts.regular)
-	if unsafe { ctx.fonts.mono != nil } {
-		font = ctx.fonts.mono
-	}
+	font := ctx.font_or(.mono, .regular)
 	if unsafe { font == nil } {
 		return 14.0
 	}

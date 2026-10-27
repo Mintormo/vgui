@@ -76,6 +76,20 @@ pub fn arrange_widget(mut w Widget, mut ctx RenderContext) {
 	if ctx.arrange_depth >= widget_tree_max_depth {
 		return
 	}
+	// шрифт и отступы из CSS - те же, что при измерении и отрисовке (css_apply.v)
+	// (адрес и метки - до сужения типа, `if mut w is` сужает w)
+	if ctx.css_layout_active() {
+		addr := widget_object_addr(&w)
+		tags := css_tags_of(&w)
+		if mut w is Arrangeable {
+			saved := ctx.css_enter_layout(addr, tags)
+			ctx.arrange_depth++
+			w.arrange(mut ctx)
+			ctx.arrange_depth--
+			ctx.css_leave_layout(saved)
+		}
+		return
+	}
 	if mut w is Arrangeable {
 		ctx.arrange_depth++
 		w.arrange(mut ctx)

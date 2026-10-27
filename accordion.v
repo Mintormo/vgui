@@ -637,7 +637,7 @@ pub fn (mut a Accordion) handle_event(event &GuiEvent, app &App) bool {
 	for i in 0 .. a.sections.len {
 		mut sec := a.sections[i]
 		if sec.expanded && sec.anim.value > 0.5 && unsafe { sec.widget != nil } {
-			if sec.widget.handle_event(event, app) {
+			if event_child(mut sec.widget, event, app) {
 				return true
 			}
 		}

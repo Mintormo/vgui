@@ -102,6 +102,266 @@ struct CssNode {
 	tags CssTags
 }
 
+// ─── Отступы виджета из CSS ────────────────────────────
+
+// CssInsets — отступы по четырём сторонам (padding из CSS).
+struct CssInsets {
+	top    f32
+	right  f32
+	bottom f32
+	left   f32
+}
+
+// css_insets_all — одинаковый отступ со всех сторон (свой pad виджета).
+fn css_insets_all(p f32) CssInsets {
+	return CssInsets{p, p, p, p}
+}
+
+// horizontal / vertical — сумма отступов по оси (лево+право, верх+низ).
+fn (i CssInsets) horizontal() f32 {
+	return i.left + i.right
+}
+
+fn (i CssInsets) vertical() f32 {
+	return i.top + i.bottom
+}
+
+// inset — прямоугольник r без отступов i (не меньше нуля по каждой оси).
+fn (r Rect) inset(i CssInsets) Rect {
+	return Rect{r.x + i.left, r.y + i.top, max_f32(0, r.w - i.horizontal()), max_f32(0,
+		r.h - i.vertical())}
+}
+
+// CssBox — padding и gap, заданные таблицей стилей ТЕКУЩЕМУ виджету: тому,
+// который сейчас рисуется, измеряется, раскладывается или получает событие
+// (ctx.css_box). В отличие от шрифта и цветов, отступы не наследуются - у
+// каждого виджета свои (как в CSS), поэтому они лежат не в Theme, а здесь и
+// сбрасываются при входе в каждый виджет.
+//
+// owner — адрес виджета, которому отступы заданы. Виджет читает их через
+// ctx.css_pad_of(себя, ...): так внутренняя часть составного виджета (метка,
+// нарисованная им напрямую, мимо draw_child) не возьмёт отступы владельца.
+struct CssBox {
+mut:
+	owner   voidptr
+	kind    int
+	has_pad bool
+	pad     CssInsets
+	has_gap bool
+	gap_row f32
+	gap_col f32
+}
+
+// css_pad_of — внутренний отступ виджета owner: из CSS, если таблица задала
+// его именно этому виджету, иначе свой равномерный pad.
+fn (ctx &RenderContext) css_pad_of(owner voidptr, pad f32) CssInsets {
+	if ctx.css_box.has_pad && ctx.css_box.owner == owner {
+		return ctx.css_box.pad
+	}
+	return css_insets_all(pad)
+}
+
+// css_pad_xy_of — как css_pad_of, но свой отступ разный по осям (кнопка:
+// measure_pad_x слева/справа, measure_pad_y сверху/снизу).
+fn (ctx &RenderContext) css_pad_xy_of(owner voidptr, pad_x f32, pad_y f32) CssInsets {
+	if ctx.css_box.has_pad && ctx.css_box.owner == owner {
+		return ctx.css_box.pad
+	}
+	return CssInsets{pad_y, pad_x, pad_y, pad_x}
+}
+
+// css_gap_of — промежутки между детьми виджета owner (строки, колонки): из CSS
+// или свои row/col.
+fn (ctx &RenderContext) css_gap_of(owner voidptr, row f32, col f32) (f32, f32) {
+	if ctx.css_box.has_gap && ctx.css_box.owner == owner {
+		return ctx.css_box.gap_row, ctx.css_box.gap_col
+	}
+	return row, col
+}
+
+// css_box_owner_of — адрес виджета, которому принадлежит BoxLayout: сам
+// BoxLayout лежит полем `box` внутри HBox/VBox, и его адрес не равен адресу
+// виджета, который видят селекторы. Отступы текущего виджета относятся к
+// этому BoxLayout, только если текущий виджет - HBox/VBox и b - его поле box.
+fn (ctx &RenderContext) css_box_owner_of(b &BoxLayout) voidptr {
+	o := ctx.css_box.owner
+	if isnil(o) {
+		return unsafe { nil }
+	}
+	match ctx.css_box.kind {
+		kind_hbox {
+			h := unsafe { &HBox(o) }
+			if voidptr(&h.box) == voidptr(b) {
+				return o
+			}
+		}
+		kind_vbox {
+			v := unsafe { &VBox(o) }
+			if voidptr(&v.box) == voidptr(b) {
+				return o
+			}
+		}
+		else {}
+	}
+	return unsafe { nil }
+}
+
+// ─── Вход в виджет: подмена темы и отступов ────────────
+//
+// Таблица стилей действует на виджет в четырёх обходах дерева: отрисовка
+// (draw_child), измерение (measure_widget), раскладка (arrange_widget) и
+// события (event_child). Отрисовка применяет все подошедшие правила; три
+// остальных - только объявления, от которых зависят размеры и геометрия
+// текста (шрифт, padding, gap - CssDecl.layout), и только если такие в
+// таблице вообще есть (Stylesheet.has_layout). Иначе раскладка с шрифтом
+// 20 и отрисовка с шрифтом 15 разошлись бы, а клик в поле ввода ставил бы
+// курсор по чужому шрифту.
+//
+// Цепочка предков для селекторов копится в ctx.css_stack: вход кладёт
+// виджет на стек, выход возвращает стек к прежней длине. Поэтому все четыре
+// обхода обязаны идти от родителя к ребёнку через эти обёртки - измерение
+// ребёнка внутри measure()/arrange() родителя так и устроено.
+
+// CssLayoutSaved — что вернуть при выходе из виджета (css_leave_layout).
+struct CssLayoutSaved {
+	stack_len   int
+	font_size   f32
+	font_bold   bool
+	font_italic bool
+	font_mono   bool
+	box         CssBox
+}
+
+// css_layout_active — нужна ли обходам раскладки и событий таблица стилей.
+fn (ctx &RenderContext) css_layout_active() bool {
+	return !isnil(ctx.stylesheet) && ctx.stylesheet.has_layout
+}
+
+// css_enter_layout — вход в виджет для measure/arrange/событий: виджет на
+// стек предков, отступы предыдущего виджета сброшены, затем подошедшие
+// правила пишут шрифт (в ctx.theme, наследуется детьми) и отступы (в
+// ctx.css_box, только этому виджету). Пару ей - css_leave_layout.
+//
+// Принимает адрес виджета и его метки, а не &Widget: measure_widget зовёт её
+// внутри `if w is Measurable`, где w уже сужен до интерфейса Measurable.
+fn (mut ctx RenderContext) css_enter_layout(addr voidptr, tags CssTags) CssLayoutSaved {
+	saved := CssLayoutSaved{
+		stack_len:   ctx.css_stack.len
+		font_size:   ctx.theme.font_size
+		font_bold:   ctx.theme.font_bold
+		font_italic: ctx.theme.font_italic
+		font_mono:   ctx.theme.font_mono
+		box:         ctx.css_box
+	}
+	kind := widget_type_tag(addr)
+	ctx.css_stack << CssNode{
+		kind: kind
+		tags: tags
+	}
+	ctx.css_box = CssBox{}
+	if kind <= 0 || kind > css_max_kind {
+		return saved
+	}
+	ss := ctx.stylesheet
+	for rule in ss.rules {
+		if !rule.decls.any(it.layout) || !css_selector_matches(rule.selector, ctx.css_stack) {
+			continue
+		}
+		for d in rule.decls {
+			if !d.layout {
+				continue
+			}
+			for f in d.fields_by_kind[kind] {
+				css_write_field(mut ctx.theme, mut ctx.css_box, f, d.value) or {}
+			}
+		}
+	}
+	if ctx.css_box.has_pad || ctx.css_box.has_gap {
+		ctx.css_box.owner = addr
+		ctx.css_box.kind = kind
+	}
+	return saved
+}
+
+// css_leave_layout — выход из виджета: шрифт и отступы родителя обратно,
+// стек - к прежней длине (не pop: обход мог прерваться посреди поддерева).
+fn (mut ctx RenderContext) css_leave_layout(s CssLayoutSaved) {
+	ctx.theme.font_size = s.font_size
+	ctx.theme.font_bold = s.font_bold
+	ctx.theme.font_italic = s.font_italic
+	ctx.theme.font_mono = s.font_mono
+	ctx.css_box = s.box
+	if ctx.css_stack.len > s.stack_len {
+		ctx.css_stack.trim(s.stack_len)
+	}
+}
+
+// CssTraversalSaved — состояние стилей окна на момент, когда начался новый
+// обход дерева с корня (Window.css_begin_traversal).
+struct CssTraversalSaved {
+	stack []CssNode
+	theme Theme
+	box   CssBox
+	busy  bool
+}
+
+// css_begin_traversal — новый обход с корней окна (кадр, раскладка, измерение
+// содержимого) начинается с чистого состояния: пустой стек предков, тема окна,
+// отступов нет. Обычно оно и так чистое (проверка - и выход, без копий). Не
+// чистое - если обход начался посреди другого: обработчик клика (внутри
+// event_child, с подменённым шрифтом кнопки) открыл модальный диалог, и его
+// цикл перерисовывает и это окно. Состояние прерванного обхода сохраняется и
+// возвращается в css_end_traversal.
+//
+// Метод неизменяемого окна (его зовёт и measure_content): меняются только поля
+// стилей контекста, и css_end_traversal их возвращает.
+fn (w &Window) css_begin_traversal() CssTraversalSaved {
+	if w.ctx.css_stack.len == 0 && isnil(w.ctx.css_box.owner) {
+		return CssTraversalSaved{}
+	}
+	mut ctx := unsafe { &RenderContext(&w.ctx) }
+	saved := CssTraversalSaved{
+		stack: ctx.css_stack.clone()
+		theme: ctx.theme
+		box:   ctx.css_box
+		busy:  true
+	}
+	ctx.css_stack = []CssNode{}
+	ctx.theme = w.styled_theme()
+	ctx.css_box = CssBox{}
+	return saved
+}
+
+// css_end_traversal — вернуть состояние прерванного обхода (если был).
+fn (w &Window) css_end_traversal(s CssTraversalSaved) {
+	if !s.busy {
+		return
+	}
+	mut ctx := unsafe { &RenderContext(&w.ctx) }
+	ctx.css_stack = s.stack
+	ctx.theme = s.theme
+	ctx.css_box = s.box
+}
+
+// event_child передаёт событие ребёнку контейнера с учётом таблицы стилей
+// (шрифт и отступы ребёнка - как при отрисовке). Контейнеры, рисующие детей
+// через draw_child, раздают им события через неё. Без правил о шрифте и
+// отступах - просто w.handle_event().
+//
+// Контекст - окна, которое сейчас обрабатывает событие (app.active_ctx; его
+// же виджеты берут в handle_event для измерения текста). Его поля шрифта и
+// отступов меняются на время вызова, как в measure_widget.
+pub fn event_child(mut w Widget, ev &GuiEvent, app &App) bool {
+	if isnil(app) || isnil(app.active_ctx) || !app.active_ctx.css_layout_active() {
+		return w.handle_event(ev, app)
+	}
+	mut ctx := unsafe { &RenderContext(app.active_ctx) }
+	saved := ctx.css_enter_layout(widget_object_addr(&w), css_tags_of(&w))
+	handled := w.handle_event(ev, app)
+	ctx.css_leave_layout(saved)
+	return handled
+}
+
 // ─── Отрисовка с подменой темы ─────────────────────────
 
 // draw_child рисует ребёнка контейнера с учётом таблицы стилей окна. Без таблицы -
@@ -109,20 +369,25 @@ struct CssNode {
 // с предками, `.sidebar button`, не увидят этого контейнера в цепочке).
 //
 // Шаги: (1) виджет кладётся в ctx.css_stack - теперь он «текущий», а стек под ним -
-// его предки; (2) ищется, подходит ли хоть одно правило; если нет - обычная
-// отрисовка; (3) иначе тема сохраняется, все подошедшие правила по порядку
-// каскада пишут свои поля в ctx.theme, и виджет со всем поддеревом рисуется уже
-// с ней; (4) тема восстанавливается, виджет снимается со стека.
+// его предки; отступы родителя (ctx.css_box) сбрасываются - они не наследуются;
+// (2) ищется, подходит ли хоть одно правило; если нет - обычная отрисовка;
+// (3) иначе тема сохраняется, все подошедшие правила по порядку каскада пишут
+// свои поля в ctx.theme (padding/gap - в ctx.css_box), и виджет со всем
+// поддеревом рисуется уже с ней; (4) тема, отступы и стек восстанавливаются.
 pub fn (mut ctx RenderContext) draw_child(mut w Widget) {
 	if isnil(ctx.stylesheet) || ctx.stylesheet.rules.len == 0 {
 		w.draw(mut ctx)
 		return
 	}
-	kind := widget_type_tag(widget_object_addr(&w))
+	addr := widget_object_addr(&w)
+	kind := widget_type_tag(addr)
+	stack_len := ctx.css_stack.len
+	saved_box := ctx.css_box
 	ctx.css_stack << CssNode{
 		kind: kind
 		tags: css_tags_of(&w)
 	}
+	ctx.css_box = CssBox{}
 	ss := ctx.stylesheet
 	// (2) сначала только проверка - копию темы делаем, лишь если правило нашлось
 	mut matched := false
@@ -134,7 +399,8 @@ pub fn (mut ctx RenderContext) draw_child(mut w Widget) {
 	}
 	if !matched {
 		w.draw(mut ctx)
-		ctx.css_stack.pop()
+		ctx.css_box = saved_box
+		ctx.css_stack.trim(stack_len)
 		return
 	}
 	// (3) правила уже отсортированы по (специфичность, порядок в файле) -
@@ -159,10 +425,14 @@ pub fn (mut ctx RenderContext) draw_child(mut w Widget) {
 						has_radius = true
 					}
 					// тип значения проверен при разборе (css_check_value) - ошибки не будет
-					theme_set_field(mut ctx.theme, f, d.value) or {}
+					css_write_field(mut ctx.theme, mut ctx.css_box, f, d.value) or {}
 				}
 			}
 		}
+	}
+	if ctx.css_box.has_pad || ctx.css_box.has_gap {
+		ctx.css_box.owner = addr
+		ctx.css_box.kind = kind
 	}
 	// заливка контейнера без своего цвета в теме (vbox, grid...): под детьми.
 	// Скругление - только если правило задало border-radius, иначе прямоугольник.
@@ -174,7 +444,8 @@ pub fn (mut ctx RenderContext) draw_child(mut w Widget) {
 	w.draw(mut ctx)
 	// (4)
 	ctx.theme = saved
-	ctx.css_stack.pop()
+	ctx.css_box = saved_box
+	ctx.css_stack.trim(stack_len)
 }
 
 // css_selector_matches — подходит ли селектор к вершине стека (стек - цепочка
@@ -246,10 +517,13 @@ pub fn css_base_theme(theme Theme, ss &Stylesheet) Theme {
 	if isnil(ss) {
 		return t
 	}
+	// отступов у корневых правил нет (padding/gap к :root неприменимы),
+	// CssBox здесь только для единой записи через css_write_field
+	mut box := CssBox{}
 	for rule in ss.root_rules {
 		for d in rule.decls {
 			for f in d.root_fields {
-				theme_set_field(mut t, f, d.value) or {}
+				css_write_field(mut t, mut box, f, d.value) or {}
 			}
 		}
 	}
@@ -286,6 +560,13 @@ fn (mut w Window) apply_stylesheet(ss &Stylesheet) {
 // unstyled_theme — тема окна без корневых правил CSS (заданная или светлая по умолчанию).
 fn (w &Window) unstyled_theme() Theme {
 	return w.config.theme or { light_theme() }
+}
+
+// styled_theme — тема окна вместе с корневыми правилами таблицы стилей: та,
+// что стоит в ctx.theme вне обходов дерева (apply_stylesheet). Нужна
+// css_begin_traversal, чтобы начать обход с чистой темы.
+fn (w &Window) styled_theme() Theme {
+	return css_base_theme(w.unstyled_theme(), w.ctx.stylesheet)
 }
 
 // stylesheet — текущая таблица стилей окна (nil - нет).

@@ -981,7 +981,7 @@ pub fn (mut tb TabBox) handle_event(event &GuiEvent, app &App) bool {
 
 	// Delegate to active child
 	if tb.active >= 0 && tb.active < tb.tabs.len {
-		if tb.tabs[tb.active].widget.handle_event(event, app) {
+		if event_child(mut tb.tabs[tb.active].widget, event, app) {
 			return true
 		}
 	}

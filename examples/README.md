@@ -120,7 +120,7 @@ v run examples/01_label.v
 | `53_animation.v` | Анимации своего виджета — `Anim`: `.tween` + `Easing` (8 кривых), `.smooth` для hover, `mark_anim_rect`; анимация из приложения — `Timeline` (дорожки, `then`), `app.play` |
 | `54_item_icons.v` | Иконки элементов — `ItemIcon` (Lucide, файл, байты) в меню, дереве, списке, вкладках, ComboBox, MenuButton, Accordion |
 | `55_disabled_state.v` | Неактивное состояние — `enabled = false` у виджета, у контейнера (гасит всё содержимое, флаги детей не трогает) и у пункта меню |
-| `56_css_styles.v` | Стили CSS (`56_styles.css`) — селекторы по типу, `.классу`, `#id`, предкам, состояния `:hover`/`:selected`, `:root` и переменные; файл перечитывается при сохранении |
+| `56_css_styles.v` | Стили CSS (`56_styles.css`) — селекторы по типу, `.классу`, `#id`, предкам, состояния `:hover`/`:selected`, `:root` и переменные, шрифты (`font-size`/`-weight`/`-style`/`-family`) и отступы (`padding`, `gap`); файл перечитывается при сохранении |
 | `57_virtual_rows.v` | Виртуальный режим `ListBox`/`TableView` (`set_virtual`) — лог на 1 000 000 строк с иконками и сортировкой, таблица на 2 000 000 строк с правкой через `on_change`; текст ячеек — колбэком только для видимых строк |
 | `58_shortcut_input.v` | Поле ввода сочетания `ShortcutInput` — настраиваемые сочетания пунктов меню: щелчок и нажатие, Esc — отмена, Backspace — снять, стрелки заняты (`on_reject`); сочетание по месту клавиши, в любой раскладке |
 | `61_data_binding.v` | Реактивные данные — `RowsModel` в `TableView` и `ListBox` (`set_model`), подпись через `Observable.bind`; правки модели видны без `invalidate` |

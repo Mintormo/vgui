@@ -3265,8 +3265,10 @@ fn (md &MarkdownView) resolve_font_size(ctx &RenderContext) int {
 	if md.font_size > 0 {
 		return md.font_size
 	}
-	if ctx.fonts.size > 0 {
-		return ctx.fonts.size
+	// размер окна или font-size из таблицы стилей
+	base := ctx.default_font_size()
+	if base > 0 {
+		return base
 	}
 	return 14
 }

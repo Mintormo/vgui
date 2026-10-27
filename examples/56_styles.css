@@ -29,7 +29,13 @@
 .card {
 	background: rgba(124, 58, 237, 0.08);
 	border-radius: 14;
+	/* отступы из CSS сильнее pad=/gap= разметки: внутри 16 сверху-снизу и
+	   20 слева-справа, между строками 10 */
+	padding: 16 20;
+	gap: 10;
 }
+/* подписи полей - мельче и жирнее (шрифт наследуется поддеревом) */
+.card label { font-size: 13; font-weight: bold; }
 .card input { border-color: #c9bfe6; }
 .card input:focus { border-color: var(--brand); }
 
@@ -43,6 +49,12 @@ button:hover { background: rgba(124, 58, 237, 0.18); }
 
 toggle:checked { background: var(--brand); }
 progress { fill-color: #16a34a; }
+
+/* Подсказка внизу - курсивом */
+#hint { font-style: italic; color: #7c6f99; }
+
+/* Список проектов - моноширинным шрифтом */
+.sidebar list { font-family: monospace; }
 
 /* Попапы - только корневыми правилами: они рисуются вне дерева окна */
 tooltip { background: #1f1b2e; color: #e9e4ff; border-color: #3b3355; }

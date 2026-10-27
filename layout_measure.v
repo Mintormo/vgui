@@ -35,13 +35,17 @@ pub fn (l &Label) measure(ctx &RenderContext) SizeHint {
 		return SizeHint{}
 	}
 	font := ctx.get_font_immut(l.font_style, l.font_size)
+	// отступ - свой pad или padding из CSS (css_apply.v)
+	pad := ctx.css_pad_of(voidptr(l), l.pad)
+	ph := pad.horizontal()
+	pv := pad.vertical()
 	mut sz := measure_text_lines(ctx, l.text, font, l.line_gap)
 	if l.wrap {
 		// Высота по ширине: перенос в ширину, которую метка получила в
 		// прошлом проходе (сменилась - Window.arrange пройдёт ещё раз), до
 		// первой раскладки - в желаемую ширину
-		ww := if l.bounds.w > l.pad * 2 {
-			l.bounds.w - l.pad * 2
+		ww := if l.bounds.w > ph {
+			l.bounds.w - ph
 		} else {
 			min_f32(sz.x, label_wrap_pref_w)
 		}
@@ -52,13 +56,13 @@ pub fn (l &Label) measure(ctx &RenderContext) SizeHint {
 	// переносится, поэтому min_w отпускаем в 0, а желаемая - удобная
 	// для чтения строка (не шире label_wrap_pref_w): окно «по
 	// содержимому» не вытягивается в одну длинную строку
-	min_w := if l.wrap { f32(0) } else { sz.x + l.pad * 2 }
+	min_w := if l.wrap { f32(0) } else { sz.x + ph }
 	pref_w := if l.wrap { min_f32(sz.x, label_wrap_pref_w) } else { sz.x }
 	return SizeHint{
-		w:        pref_w + l.pad * 2
-		h:        sz.y + l.pad * 2
+		w:        pref_w + ph
+		h:        sz.y + pv
 		min_w:    min_w
-		min_h:    sz.y + l.pad * 2
+		min_h:    sz.y + pv
 		v_policy: .fixed
 	}
 }
@@ -98,9 +102,12 @@ pub fn (b &Button) measure(ctx &RenderContext) SizeHint {
 		icon_font := ctx.get_font_immut(b.font_style, b.font_size)
 		cw += ctx.measure_text_with_font(b.icon_text + ' ', icon_font).x
 	}
+	// поля вокруг содержимого: свои (measure_pad_x/y) или padding из CSS.
+	// Рисуется содержимое по центру кнопки, поэтому draw() их не читает.
+	pad := ctx.css_pad_xy_of(voidptr(b), measure_pad_x, measure_pad_y)
 	if has_icon && b.text.len == 0 && b.icon_text == '' {
 		// Кнопка-значок - квадрат вокруг значка, без полей под текст
-		side := b.icon_size + measure_pad_y * 2
+		side := b.icon_size + pad.vertical()
 		return SizeHint{
 			w:        side
 			h:        side
@@ -110,11 +117,11 @@ pub fn (b &Button) measure(ctx &RenderContext) SizeHint {
 			v_policy: .fixed
 		}
 	}
-	h := max_f32(ctx.control_h(), ch + measure_pad_y * 2)
+	h := max_f32(ctx.control_h(), ch + pad.vertical())
 	return SizeHint{
-		w:        cw + measure_pad_x * 2
+		w:        cw + pad.horizontal()
 		h:        h
-		min_w:    cw + measure_pad_y * 2
+		min_w:    cw + min_f32(pad.horizontal(), pad.vertical())
 		min_h:    h
 		v_policy: .fixed
 	}
@@ -622,20 +629,24 @@ pub fn (s &Spacer) measure(ctx &RenderContext) SizeHint {
 
 // Panel: размер единственного ребёнка + pad с каждой стороны; пустая панель - только отступы.
 pub fn (p &Panel) measure(ctx &RenderContext) SizeHint {
+	// отступ - свой или padding из CSS
+	pad := ctx.css_pad_of(voidptr(p), p.pad)
+	ph := pad.horizontal()
+	pv := pad.vertical()
 	if p.child == unsafe { nil } {
 		return SizeHint{
-			w: p.pad * 2
-			h: p.pad * 2
+			w: ph
+			h: pv
 		}
 	}
 	c := measure_widget(p.child, ctx)
 	// Панель - контейнер: растягивается, даже если внутри метка
 	// фиксированной высоты (fixed ребёнка - не её)
 	return SizeHint{
-		w:        c.w + p.pad * 2
-		h:        c.h + p.pad * 2
-		min_w:    c.min_w + p.pad * 2
-		min_h:    c.min_h + p.pad * 2
+		w:        c.w + ph
+		h:        c.h + pv
+		min_w:    c.min_w + ph
+		min_h:    c.min_h + pv
 		h_policy: if c.h_policy == .expanding { SizePolicy.expanding } else { SizePolicy.preferred }
 		v_policy: if c.v_policy == .expanding { SizePolicy.expanding } else { SizePolicy.preferred }
 	}
@@ -779,10 +790,12 @@ pub fn (si &ShortcutInput) measure(ctx &RenderContext) SizeHint {
 // сумма + промежутки (spacing_x/y) + pad. Ячейки вне сетки игнорируются. Растягивается по оси,
 // если у неё есть дорожка с положительным весом.
 pub fn (g &GridLayout) measure(ctx &RenderContext) SizeHint {
+	// отступы - свои или из CSS (padding/gap); до измерения ячеек
+	pad, sx, sy := g.css_metrics(ctx)
 	if g.cells.len == 0 {
 		return SizeHint{
-			w: g.pad * 2
-			h: g.pad * 2
+			w: pad.horizontal()
+			h: pad.vertical()
 		}
 	}
 	mut col_w := []f32{len: g.cols}
@@ -799,8 +812,8 @@ pub fn (g &GridLayout) measure(ctx &RenderContext) SizeHint {
 		col_w[cell.col] = max_f32(col_w[cell.col], w_share)
 		row_h[cell.row] = max_f32(row_h[cell.row], h_share)
 	}
-	mut w := g.pad * 2 + f32(g.cols - 1) * g.spacing_x
-	mut h := g.pad * 2 + f32(g.rows - 1) * g.spacing_y
+	mut w := pad.horizontal() + f32(g.cols - 1) * sx
+	mut h := pad.vertical() + f32(g.rows - 1) * sy
 	for v in col_w {
 		w += v
 	}

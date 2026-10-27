@@ -86,8 +86,20 @@ fn (mut ctx RenderContext) evict_text_cache_lru() {
 // берётся из заранее открытого набора. Для других размеров шрифт открывается лениво и кэшируется
 // в fonts.size_cache; при ошибке открытия отдаётся regular. Шрифт НЕ нужно закрывать и хранить в
 // полях виджетов: им владеет FontSet (PROJECT.md, «Архитектура рендеринга»).
-pub fn (mut ctx RenderContext) get_font(style FontStyle, size int) voidptr {
-	effective_size := if size <= 0 { ctx.fonts.size } else { size }
+//
+// Шрифт из таблицы стилей (PROJECT.md, «Стили CSS», шрифты): тема текущего
+// поддерева может задать размер (theme.font_size - вместо размера окна, только
+// при size <= 0: явный размер виджета сильнее) и добавить начертание
+// (font_bold/italic/mono - css_font_style). Без таблицы эти поля пусты.
+pub fn (mut ctx RenderContext) get_font(requested FontStyle, size int) voidptr {
+	style := css_font_style(requested, ctx.theme)
+	effective_size := if size > 0 {
+		size
+	} else if ctx.theme.font_size > 0 {
+		int(ctx.theme.font_size + 0.5)
+	} else {
+		ctx.fonts.size
+	}
 
 	if effective_size == ctx.fonts.size {
 		return match style {
@@ -164,6 +176,39 @@ pub fn (mut ctx RenderContext) get_font(style FontStyle, size int) voidptr {
 	ctx.fonts.size_cache[key] = font
 	ctx.fonts.handle_map[font] = FontHandleInfo{int(style), effective_size}
 	return font
+}
+
+// css_font_style — начертание с учётом шрифта из CSS: font_bold/font_italic/
+// font_mono темы ДОБАВЛЯЮТ жирность, курсив, моноширинность к тому, что
+// выбрал виджет (заголовок таблицы останется жирным и при `font-weight:
+// normal`). У моноширинного шрифта курсива нет - он отбрасывается.
+fn css_font_style(style FontStyle, t &Theme) FontStyle {
+	if !t.font_bold && !t.font_italic && !t.font_mono {
+		return style
+	}
+	bold := t.font_bold || style in [.bold, .bold_italic, .mono_bold]
+	italic := t.font_italic || style in [.italic, .bold_italic]
+	mono := t.font_mono || style in [.mono, .mono_bold]
+	if mono {
+		return if bold { FontStyle.mono_bold } else { FontStyle.mono }
+	}
+	if bold && italic {
+		return .bold_italic
+	}
+	if bold {
+		return .bold
+	}
+	return if italic { FontStyle.italic } else { FontStyle.regular }
+}
+
+// default_font_size — размер текста «по умолчанию» в текущем поддереве:
+// из CSS (font-size) или размер окна. Для виджетов, которые считают свои
+// размеры от базового (масштаб MarkdownView).
+pub fn (ctx &RenderContext) default_font_size() int {
+	if ctx.theme.font_size > 0 {
+		return int(ctx.theme.font_size + 0.5)
+	}
+	return ctx.fonts.size
 }
 
 // Версия get_font для методов с неизменяемым ctx (measure() и прочие измерения).

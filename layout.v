@@ -124,6 +124,11 @@ pub fn measure_widget(w &Widget, ctx &RenderContext) SizeHint {
 	// Адрес — ключ кэша. Снимается до проверки на Measurable: внутри
 	// `if w is Measurable` V сужает тип w, и &Widget из него не получить.
 	addr := widget_object_addr(w)
+	// Таблица стилей с шрифтом/отступами (css_apply.v): измерять виджет надо
+	// с теми же шрифтом и padding, с какими он будет нарисован. Метки - тоже
+	// до сужения типа.
+	css_active := ctx.css_layout_active()
+	css_tags := if css_active { css_tags_of(w) } else { CssTags{} }
 	if w is Measurable {
 		g_measure_calls++
 		// Измерение вне arrange открывает свой проход, поэтому hint
@@ -148,7 +153,19 @@ pub fn measure_widget(w &Widget, ctx &RenderContext) SizeHint {
 			return SizeHint{}
 		}
 		g_measure_depth++
-		hint := w.measure(ctx).clamped()
+		mut hint := SizeHint{}
+		if css_active {
+			// measure() получает неизменяемый контекст, но шрифт и отступы
+			// текущего виджета живут в нём: меняем на время вызова и сразу
+			// возвращаем (для вызывающего measure остаётся чистым, как
+			// get_font_immut)
+			mut c := unsafe { &RenderContext(ctx) }
+			saved := c.css_enter_layout(addr, css_tags)
+			hint = w.measure(ctx).clamped()
+			c.css_leave_layout(saved)
+		} else {
+			hint = w.measure(ctx).clamped()
+		}
 		g_measure_depth--
 
 		if key != 0 {

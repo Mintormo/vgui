@@ -98,6 +98,38 @@ const css_fill_containers = ['vbox', 'hbox', 'grid', 'scroll', 'stack', 'centere
 // css_fill_field — особое «поле» для заливки контейнера (не поле Theme).
 const css_fill_field = '@fill'
 
+// css_padding_field / css_gap_field — особые «поля» отступов: не поля Theme
+// (не наследуются поддеревом, как и в CSS), а CssBox текущего виджета
+// (css_apply.v): его читают measure/arrange/draw самого виджета.
+const css_padding_field = '@padding'
+const css_gap_field = '@gap'
+
+// css_layout_fields — поля, от которых зависит раскладка: объявление с ними
+// применяют и measure/arrange/события (CssDecl.layout), а не только draw.
+const css_layout_fields = ['font_size', 'font_bold', 'font_italic', 'font_mono', css_padding_field,
+	css_gap_field]
+
+// css_font_keywords — допустимые слова свойств font-weight/-style/-family:
+// поле Theme -> слово -> включить начертание (true) или снять заданное выше (false).
+const css_font_keywords = {
+	'font_bold':   {
+		'bold':   true
+		'normal': false
+	}
+	'font_italic': {
+		'italic':  true
+		'oblique': true
+		'normal':  false
+	}
+	'font_mono':   {
+		'monospace':  true
+		'mono':       true
+		'sans-serif': false
+		'sans':       false
+		'normal':     false
+	}
+}
+
 // css_prop_table — «тип:состояние/свойство» -> поля Theme. Тип `*` - общая
 // строка для всех; `root` - только для `:root`; menu/tooltip/notification/
 // dropdown - корневые правила для попапов (css.v, css_root_types).
@@ -123,6 +155,11 @@ const css_prop_table = {
 	'*:/error-color':                    ['error_color']
 	'*:/info-color':                     ['info']
 	'*:/shadow-color':                   ['shadow_color']
+	// шрифт - у любого элемента и в :root (наследуется поддеревом)
+	'*:/font-size':                      ['font_size']
+	'*:/font-weight':                    ['font_bold']
+	'*:/font-style':                     ['font_italic']
+	'*:/font-family':                    ['font_mono']
 	// ── :root — общая тема окна ──
 	'root:/background':                  ['bg']
 	'root:/surface-color':               ['surface']
@@ -236,6 +273,16 @@ const css_prop_table = {
 	'propertygrid:hover/background':     ['pg_row_hover']
 	'propertygrid:selected/background':  ['pg_row_selected']
 	'propertygrid:selected/color':       ['pg_row_sel_text']
+	// ── отступы: padding - внутренний отступ, gap - между детьми ──
+	'vbox:/padding':                     [css_padding_field]
+	'hbox:/padding':                     [css_padding_field]
+	'grid:/padding':                     [css_padding_field]
+	'panel:/padding':                    [css_padding_field]
+	'button:/padding':                   [css_padding_field]
+	'label:/padding':                    [css_padding_field]
+	'vbox:/gap':                         [css_gap_field]
+	'hbox:/gap':                         [css_gap_field]
+	'grid:/gap':                         [css_gap_field]
 	// ── контейнеры ──
 	'panel:/background':                 ['panel_bg']
 	'panel:/border-color':               ['border']
@@ -404,6 +451,9 @@ fn css_compile_decl(sel CssSelector, prop string, value CssValue, line int) !Css
 			d.fields_by_kind[kind] = fields
 			css_check_value(fields, prop, value)!
 			any_kind = true
+			if fields.any(it in css_layout_fields) {
+				d.layout = true
+			}
 		}
 	}
 	if !any_kind {
@@ -424,6 +474,7 @@ fn css_compile_decl(sel CssSelector, prop string, value CssValue, line int) !Css
 // черновую тему: проверка та же, что при настоящем применении).
 fn css_check_value(fields []string, prop string, value CssValue) ! {
 	mut scratch := Theme{}
+	mut box := CssBox{}
 	for f in fields {
 		if f == css_fill_field {
 			if !value.is_color {
@@ -431,7 +482,64 @@ fn css_check_value(fields []string, prop string, value CssValue) ! {
 			}
 			continue
 		}
-		theme_set_field(mut scratch, f, value) or { return error('${prop}: ${err.msg()}') }
+		css_write_field(mut scratch, mut box, f, value) or { return error('${prop}: ${err.msg()}') }
+	}
+}
+
+// css_write_field — запись значения объявления: в поле Theme (обычные поля и
+// начертания шрифта) или в отступы текущего виджета (@padding, @gap). Ошибка -
+// значение не подходит полю (проверяется при разборе, при отрисовке её уже
+// не бывает). @fill сюда не приходит - заливку рисует draw_child.
+fn css_write_field(mut t Theme, mut box CssBox, field string, v CssValue) ! {
+	match field {
+		css_padding_field {
+			// как в CSS: 1 число - все стороны, 2 - верх/низ и лево/право,
+			// 3 - верх, лево/право, низ, 4 - верх, право, низ, лево
+			n := v.nums
+			if n.len == 0 || n.len > 4 || n.any(it < 0) {
+				return error('ожидается от 1 до 4 неотрицательных чисел (верх право низ лево), а не ${v.raw}')
+			}
+			box.pad = match n.len {
+				1 { CssInsets{n[0], n[0], n[0], n[0]} }
+				2 { CssInsets{n[0], n[1], n[0], n[1]} }
+				3 { CssInsets{n[0], n[1], n[2], n[1]} }
+				else { CssInsets{n[0], n[1], n[2], n[3]} }
+			}
+			box.has_pad = true
+		}
+		css_gap_field {
+			// `gap: 8` - между строками и колонками, `gap: 8 16` - строки, колонки
+			n := v.nums
+			if n.len == 0 || n.len > 2 || n.any(it < 0) {
+				return error('ожидается 1 или 2 неотрицательных числа (строки колонки), а не ${v.raw}')
+			}
+			box.gap_row = n[0]
+			box.gap_col = if n.len == 2 { n[1] } else { n[0] }
+			box.has_gap = true
+		}
+		'font_bold', 'font_italic', 'font_mono' {
+			// без копии карты: значение ищется прямо в константе
+			on := css_font_keywords[field][v.word] or {
+				words := css_font_keywords[field].clone()
+				mut allowed := words.keys()
+				allowed.sort()
+				return error('ожидается одно из: ${allowed.join(', ')}, а не ${v.raw}')
+			}
+			match field {
+				'font_bold' { t.font_bold = on }
+				'font_italic' { t.font_italic = on }
+				else { t.font_mono = on }
+			}
+		}
+		'font_size' {
+			if v.nums.len != 1 || v.num <= 0 {
+				return error('ожидается положительное число, а не ${v.raw}')
+			}
+			t.font_size = v.num
+		}
+		else {
+			theme_set_field(mut t, field, v)!
+		}
 	}
 }
 
@@ -457,13 +565,14 @@ fn theme_set_field(mut t Theme, field string, v CssValue) ! {
 				t.$(f.name) = v.color
 				return
 			} $else $if f.typ is f32 {
-				if v.is_color {
+				// цвет, слово или несколько чисел (`4 8`) - не одно число
+				if v.nums.len != 1 {
 					return error('ожидается число, а не ${v.raw}')
 				}
 				t.$(f.name) = v.num
 				return
 			} $else $if f.typ is int {
-				if v.is_color {
+				if v.nums.len != 1 {
 					return error('ожидается число, а не ${v.raw}')
 				}
 				t.$(f.name) = int(v.num)

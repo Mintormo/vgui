@@ -141,13 +141,15 @@ fn (mut b BoxLayout) layout(ctx &RenderContext) {
 		return
 	}
 
-	inner := b.bounds.shrunk(b.pad)
+	// отступы - свои или из CSS (padding/gap у этого hbox/vbox, css_apply.v)
+	pad, spacing := b.css_metrics(ctx)
+	inner := b.bounds.inset(pad)
 	is_h := b.dir == .horizontal
 	vertical_main := !is_h
 
 	// Шаги: (1) вычесть из главной оси отступы и промежутки -> avail; (2) каждому ребёнку собрать LayoutItem
 	// и поделить avail через distribute_main; (3) расставить детей подряд, поперёк выровнять по align.
-	total_spacing := f32(b.children.len - 1) * b.spacing
+	total_spacing := f32(b.children.len - 1) * spacing
 	main_total := if is_h { inner.w } else { inner.h }
 	avail := max_f32(0, main_total - total_spacing)
 
@@ -191,7 +193,7 @@ fn (mut b BoxLayout) layout(ctx &RenderContext) {
 
 		pos += sz
 		if i < b.children.len - 1 {
-			pos += b.spacing
+			pos += spacing
 		}
 	}
 }
@@ -202,10 +204,13 @@ fn (mut b BoxLayout) layout(ctx &RenderContext) {
 // авто-размера окна (fit_to_content).
 fn (b &BoxLayout) content_size(ctx &RenderContext) SizeHint {
 	is_h := b.dir == .horizontal
+	// до измерения детей: их measure_widget на время своего вызова меняет
+	// ctx.css_box (потом возвращает, но так проще проверить глазами)
+	pad, spacing := b.css_metrics(ctx)
 	if b.children.len == 0 {
 		return SizeHint{
-			w: b.pad * 2
-			h: b.pad * 2
+			w: pad.horizontal()
+			h: pad.vertical()
 		}
 	}
 
@@ -242,11 +247,13 @@ fn (b &BoxLayout) content_size(ctx &RenderContext) SizeHint {
 		}
 	}
 
-	extra := f32(b.children.len - 1) * b.spacing + b.pad * 2
+	main_pad := if is_h { pad.horizontal() } else { pad.vertical() }
+	cross_pad := if is_h { pad.vertical() } else { pad.horizontal() }
+	extra := f32(b.children.len - 1) * spacing + main_pad
 	main_pref += extra
 	main_min += extra
-	cross_pref += b.pad * 2
-	cross_min += b.pad * 2
+	cross_pref += cross_pad
+	cross_min += cross_pad
 
 	main_policy := if main_expands { SizePolicy.expanding } else { SizePolicy.preferred }
 	cross_policy := if cross_expands { SizePolicy.expanding } else { SizePolicy.preferred }
@@ -269,6 +276,20 @@ fn (b &BoxLayout) content_size(ctx &RenderContext) SizeHint {
 		h_policy: cross_policy
 		v_policy: main_policy
 	}
+}
+
+// css_metrics — внутренний отступ и промежуток между детьми: из таблицы
+// стилей, если она задала padding/gap именно этому hbox/vbox (css_apply.v,
+// CssBox), иначе свои pad и spacing. gap для вертикального бокса - между
+// строками, для горизонтального - между колонками (как `gap: строки колонки`).
+fn (b &BoxLayout) css_metrics(ctx &RenderContext) (CssInsets, f32) {
+	owner := ctx.css_box_owner_of(b)
+	if isnil(owner) {
+		return css_insets_all(b.pad), b.spacing
+	}
+	pad := ctx.css_pad_of(owner, b.pad)
+	gap_row, gap_col := ctx.css_gap_of(owner, b.spacing, b.spacing)
+	return pad, if b.dir == .vertical { gap_row } else { gap_col }
 }
 
 // arrange — layout() для своих детей плюс спуск в их поддеревья.
@@ -321,7 +342,7 @@ fn (mut b BoxLayout) event_impl(event &GuiEvent, app &App) bool {
 		return false
 	}
 	for i := b.children.len - 1; i >= 0; i-- {
-		if b.children[i].widget.handle_event(event, app) {
+		if event_child(mut b.children[i].widget, event, app) {
 			return true
 		}
 	}
@@ -581,7 +602,7 @@ pub fn (mut p Panel) arrange(mut ctx RenderContext) {
 	if !p.visible || unsafe { p.child == nil } {
 		return
 	}
-	arrange_child(mut p.child, p.bounds.shrunk(p.pad), mut ctx)
+	arrange_child(mut p.child, p.bounds.inset(ctx.css_pad_of(voidptr(&p), p.pad)), mut ctx)
 }
 
 pub fn (mut p Panel) draw(mut ctx RenderContext) {
@@ -599,7 +620,7 @@ pub fn (mut p Panel) draw(mut ctx RenderContext) {
 	}
 
 	if unsafe { p.child != nil } {
-		inner := p.bounds.shrunk(p.pad)
+		inner := p.bounds.inset(ctx.css_pad_of(voidptr(&p), p.pad))
 		// Как и у BoxLayout — клип раздут на visual_margin(), иначе padding
 		// меньше вылета тени срезал бы тень ребёнка. Ограничено самой
 		// панелью: за её рамку тень содержимого выходить не должна.
@@ -616,7 +637,7 @@ pub fn (mut p Panel) handle_event(event &GuiEvent, app &App) bool {
 		return false
 	}
 	if unsafe { p.child != nil } {
-		return p.child.handle_event(event, app)
+		return event_child(mut p.child, event, app)
 	}
 	return false
 }
@@ -693,7 +714,7 @@ pub fn (mut s Stack) handle_event(event &GuiEvent, app &App) bool {
 		return false
 	}
 	for i := s.children.len - 1; i >= 0; i-- {
-		if s.children[i].handle_event(event, app) {
+		if event_child(mut s.children[i], event, app) {
 			return true
 		}
 	}
@@ -816,7 +837,7 @@ pub fn (mut c Centered) handle_event(event &GuiEvent, app &App) bool {
 		}
 	}
 	if unsafe { c.child != nil } && (c.enabled || !is_input_event(event)) {
-		return c.child.handle_event(event, app)
+		return event_child(mut c.child, event, app)
 	}
 	return false
 }
@@ -1334,7 +1355,7 @@ pub fn (mut s ScrollBox) handle_event(event &GuiEvent, app &App) bool {
 
 	// ── Pass events to children FIRST ──
 	for i := s.children.len - 1; i >= 0; i-- {
-		if s.children[i].handle_event(event, app) {
+		if event_child(mut s.children[i], event, app) {
 			return true
 		}
 	}

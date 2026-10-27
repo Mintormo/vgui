@@ -513,12 +513,12 @@ pub fn (mut s Splitter) handle_event(event &GuiEvent, app &App) bool {
 
 	// Pass events to children (second first for z-order, then first)
 	if unsafe { s.second != nil } {
-		if s.second.handle_event(event, app) {
+		if event_child(mut s.second, event, app) {
 			return true
 		}
 	}
 	if unsafe { s.first != nil } {
-		if s.first.handle_event(event, app) {
+		if event_child(mut s.first, event, app) {
 			return true
 		}
 	}
