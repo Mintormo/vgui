@@ -77,8 +77,9 @@ pub fn image_background_data(data []u8) &ImageBackground {
 
 // ─── Public API ────────────────────────────────────────
 
-// set_path меняет источник на файл: сбрасывает data и помечает текстуру устаревшей - перезагрузка будет при следующем draw(). Тот же путь игнорируется. Кадр не инвалидирует.
+// set_path меняет источник на файл: сбрасывает data и помечает текстуру устаревшей - перезагрузка будет при следующем draw(). Тот же путь игнорируется. Окно перерисуется само (widget_changed).
 pub fn (mut ib ImageBackground) set_path(path string) {
+	widget_changed()
 	if ib.path != path {
 		ib.path = path
 		ib.data = []u8{}
@@ -89,16 +90,19 @@ pub fn (mut ib ImageBackground) set_path(path string) {
 
 // set_data меняет источник на байты (копия) и принудительно перезагружает текстуру при следующем draw().
 pub fn (mut ib ImageBackground) set_data(data []u8) {
+	widget_changed()
 	ib.data = data.clone()
 	ib.path = ''
 	ib.tex_path = '\x00reload'
 }
 
 pub fn (mut ib ImageBackground) set_mode(mode BgMode) {
+	widget_changed()
 	ib.mode = mode
 }
 
 pub fn (mut ib ImageBackground) set_bg_color(c Color) {
+	widget_changed()
 	ib.bg_color = c
 }
 

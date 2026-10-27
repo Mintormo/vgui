@@ -195,6 +195,7 @@ pub fn (mut tb TabBox) add_tab_icon(title string, ic ItemIcon, widget &Widget) {
 
 // Меняет иконку вкладки idx (ItemIcon{} - убрать); недопустимый индекс игнорируется.
 pub fn (mut tb TabBox) set_tab_icon(idx int, ic ItemIcon) {
+	widget_changed()
 	if idx >= 0 && idx < tb.tabs.len {
 		tb.tabs[idx].icon = ic
 	}
@@ -203,6 +204,7 @@ pub fn (mut tb TabBox) set_tab_icon(idx int, ic ItemIcon) {
 // Делает активной вкладку idx. Недопустимый индекс игнорируется; on_change не вызывается
 // (он вызывается только при смене пользователем и в close_*).
 pub fn (mut tb TabBox) set_active(idx int) {
+	widget_changed()
 	if idx >= 0 && idx < tb.tabs.len {
 		tb.active = idx
 	}

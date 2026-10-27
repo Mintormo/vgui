@@ -312,6 +312,7 @@ pub fn (mut p PlotView) fit_to_data() {
 // set_range задаёт видимую область по границам. Ось, у которой max <= min, не меняется;
 // размер обрезается до [plot_min_span, plot_max_span].
 pub fn (mut p PlotView) set_range(xmin f32, xmax f32, ymin f32, ymax f32) {
+	widget_changed()
 	if xmax > xmin {
 		p.view_x = xmin
 		p.view_w = clamp_f32(xmax - xmin, plot_min_span, plot_max_span)
@@ -339,31 +340,38 @@ pub fn (mut p PlotView) reset_view() {
 // ─── Color setters ─────────────────────────────────────
 
 pub fn (mut p PlotView) set_bg_color(c Color) {
+	widget_changed()
 	p.bg_color = c
 }
 
 pub fn (mut p PlotView) set_axis_color(c Color) {
+	widget_changed()
 	p.axis_color = c
 }
 
 pub fn (mut p PlotView) set_grid_color(major Color, minor Color) {
+	widget_changed()
 	p.grid_major_color = major
 	p.grid_minor_color = minor
 }
 
 pub fn (mut p PlotView) set_grid_major_color(c Color) {
+	widget_changed()
 	p.grid_major_color = c
 }
 
 pub fn (mut p PlotView) set_grid_minor_color(c Color) {
+	widget_changed()
 	p.grid_minor_color = c
 }
 
 pub fn (mut p PlotView) set_label_color(c Color) {
+	widget_changed()
 	p.label_color = c
 }
 
 pub fn (mut p PlotView) set_border_color(c Color) {
+	widget_changed()
 	p.border_color = c
 }
 

@@ -11,8 +11,8 @@ module vgui
 // measure() (layout_measure.v), bounds выдаёт контейнер в arrange(), а draw()
 // лишь просит RenderContext.draw_icon_glyph нарисовать глиф по центру bounds.
 // Неизвестное имя иконки не ошибка: виджет просто ничего не рисует.
-// Сеттеры кадр не инвалидируют (общее правило библиотеки) - в своём цикле
-// после них зовите Window.invalidate*.
+// После сеттеров окно перерисуется само (widget_changed); после прямого
+// присваивания полей - Window.invalidate*.
 
 // Icon - состояние виджета-иконки. @[heap]: на виджет ссылаются по указателю
 // из контейнеров, реестров capi и Python, поэтому он обязан жить в куче.
@@ -45,15 +45,18 @@ pub fn icon(name string) &Icon {
 // ─── Public API ────────────────────────────────────────
 
 pub fn (mut ic Icon) set_name(name string) {
+	widget_changed()
 	ic.name = name
 }
 
 pub fn (mut ic Icon) set_size(size int) {
+	widget_changed()
 	ic.size = size
 }
 
 // set_color задаёт цвет глифа; Color с альфой 0 означает «цвет текста темы».
 pub fn (mut ic Icon) set_color(c Color) {
+	widget_changed()
 	ic.color = c
 }
 

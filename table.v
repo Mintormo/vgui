@@ -245,6 +245,7 @@ pub fn (mut t TableView) add_column_with_min(title string, width f32, min_w f32)
 
 // NEW: Set minimum width for a column
 pub fn (mut t TableView) set_column_min_width(col int, min_w f32) {
+	widget_changed()
 	if col >= 0 && col < t.columns.len {
 		t.columns[col].min_w = max_f32(min_w, 10)
 		// Enforce: if current width < new min, expand
@@ -264,6 +265,7 @@ pub fn (t &TableView) get_column_min_width(col int) f32 {
 
 // NEW: Set column width (clamped to min_w)
 pub fn (mut t TableView) set_column_width(col int, w f32) {
+	widget_changed()
 	if col >= 0 && col < t.columns.len {
 		t.columns[col].width = max_f32(w, t.columns[col].min_w)
 	}
@@ -279,6 +281,7 @@ pub fn (t &TableView) get_column_width(col int) f32 {
 
 // NEW: Set global minimum row height
 pub fn (mut t TableView) set_min_row_height(h f32) {
+	widget_changed()
 	t.min_row_height = max_f32(h, 8)
 }
 
@@ -306,9 +309,9 @@ pub fn (mut t TableView) add_row(texts []string) {
 
 // Методы set_cell*/get_cell*/set_row_*/set_column_* ниже молча игнорируют
 // индексы вне диапазона (get_* возвращают нейтральное значение: '', false,
-// прозрачный цвет). Ни один из сеттеров не инвалидирует кадр - в собственном цикле
-// после изменений нужно вызвать Window.invalidate*.
+// прозрачный цвет). После сеттеров окно перерисуется само (widget_changed).
 pub fn (mut t TableView) set_cell(row int, col int, text string) {
+	widget_changed()
 	if row >= 0 && row < t.rows.len && col >= 0 && col < t.columns.len {
 		t.rows[row].cells[col].text = text
 	}
@@ -320,24 +323,28 @@ pub fn (t &TableView) get_cell(row int, col int) string {
 }
 
 pub fn (mut t TableView) set_cell_editable(row int, col int, val bool) {
+	widget_changed()
 	if row >= 0 && row < t.rows.len && col >= 0 && col < t.columns.len {
 		t.rows[row].cells[col].editable = val
 	}
 }
 
 pub fn (mut t TableView) set_cell_align(row int, col int, align CellAlign) {
+	widget_changed()
 	if row >= 0 && row < t.rows.len && col >= 0 && col < t.columns.len {
 		t.rows[row].cells[col].align = align
 	}
 }
 
 pub fn (mut t TableView) set_cell_color(row int, col int, c Color) {
+	widget_changed()
 	if row >= 0 && row < t.rows.len && col >= 0 && col < t.columns.len {
 		t.rows[row].cells[col].color = c
 	}
 }
 
 pub fn (mut t TableView) set_cell_bg_color(row int, col int, c Color) {
+	widget_changed()
 	if row >= 0 && row < t.rows.len && col >= 0 && col < t.columns.len {
 		t.rows[row].cells[col].bg_color = c
 	}
@@ -365,18 +372,21 @@ pub fn (t &TableView) get_cell_editable(row int, col int) bool {
 }
 
 pub fn (mut t TableView) set_row_align(row int, align CellAlign) {
+	widget_changed()
 	if row >= 0 && row < t.rows.len {
 		t.rows[row].align = align
 	}
 }
 
 pub fn (mut t TableView) set_column_align(col int, align CellAlign) {
+	widget_changed()
 	if col >= 0 && col < t.columns.len {
 		t.columns[col].align = align
 	}
 }
 
 pub fn (mut t TableView) set_row_height_at(row int, h f32) {
+	widget_changed()
 	if row >= 0 && row < t.rows.len {
 		t.rows[row].height = max_f32(h, t.min_row_height)
 	}
@@ -417,6 +427,7 @@ pub fn (t &TableView) row_count() int {
 // Колбэк зовётся из draw() главного потока, должен быть быстрым и не менять
 // таблицу. Индексы ему приходят только в диапазоне 0..count-1 и 0..колонки-1.
 pub fn (mut t TableView) set_virtual(count int, text_fn fn (row int, col int) string) {
+	widget_changed()
 	t.clear_rows()
 	if text_fn == unsafe { nil } {
 		return
@@ -431,6 +442,7 @@ pub fn (mut t TableView) set_virtual(count int, text_fn fn (row int, col int) st
 // переезжает на последнюю строку, правка ушедшей строки отменяется (без on_change).
 // В обычном режиме ничего не делает.
 pub fn (mut t TableView) set_virtual_count(count int) {
+	widget_changed()
 	if !t.is_virtual {
 		return
 	}
@@ -512,6 +524,7 @@ pub fn (t &TableView) has_selection() bool {
 // Программно выделяет ячейку (не вызывает on_select и не прокручивает к ней).
 // Некорректные индексы игнорируются.
 pub fn (mut t TableView) set_selected(row int, col int) {
+	widget_changed()
 	if row >= 0 && row < t.row_total() && col >= 0 && col < t.columns.len {
 		t.sel_row = row
 		t.sel_col = col

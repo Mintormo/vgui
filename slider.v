@@ -110,8 +110,9 @@ pub fn (s &Slider) get_value() f32 {
 }
 
 // Программно задаёт значение: ограничивает диапазоном, привязывает к сетке step и вызывает
-// on_change, только если значение действительно изменилось. Кадр сам не инвалидируется.
+// on_change, только если значение действительно изменилось. Окно перерисуется само (widget_changed).
 pub fn (mut s Slider) set_value(v f32) {
+	widget_changed()
 	new_v := slider_snap(s.min, s.max, s.step, clamp_f32(v, s.min, s.max))
 	if new_v != s.value {
 		s.value = new_v
@@ -126,6 +127,7 @@ pub fn (mut s Slider) set_value(v f32) {
 // Текущее значение value ограничивается новым диапазоном; если оно от этого сдвинулось,
 // зовётся on_change - как в Spinbox.set_range.
 pub fn (mut s Slider) set_range(min f32, max f32) {
+	widget_changed()
 	s.min, s.max = ordered_range_f32(min, max)
 	clamped := clamp_f32(s.value, s.min, s.max)
 	if clamped != s.value {

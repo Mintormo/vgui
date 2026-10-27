@@ -311,3 +311,112 @@ fn test_code_editor_undo_redo() {
 	e.set_text('')
 	assert !e.can_undo() && !e.can_redo()
 }
+
+// ─── Слияние набора по словам (UndoHistory.save_typing) ───
+
+// t_type — набор строки посимвольно, как с клавиатуры (событие ввода на
+// каждый символ - так набор приходит от SDL).
+fn t_type(mut t TestUi, s string) {
+	for r in s.runes() {
+		t.type_text(r.str())
+	}
+}
+
+// Набор подряд - один шаг на слово: «привет мир» отменяется как «мир», затем
+// «привет »; Backspace подряд - один шаг; перемещение курсора начинает новый.
+fn test_typing_merges_by_words() {
+	mut t := new_test_ui(width: 300, height: 260)!
+	defer {
+		t.close()
+	}
+	mut root := create_vbox_fill()
+	mut ti := text_input('')
+	mut ta := text_area('')
+	mut ce := code_editor()
+	root.add(ti)
+	root.add(ta, flex: 1)
+	root.add(ce, flex: 1)
+	t.add(root)
+
+	t.click_widget(ti)
+	t_type(mut t, 'привет мир')
+	assert ti.get_text() == 'привет мир'
+	assert ti.undo() && ti.get_text() == 'привет '
+	assert ti.undo() && ti.get_text() == ''
+	assert ti.redo() && ti.get_text() == 'привет '
+	assert ti.redo() && ti.get_text() == 'привет мир'
+	// три Backspace - один шаг
+	for _ in 0 .. 3 {
+		t.key(sdl_k_backspace, 0)
+	}
+	assert ti.get_text() == 'привет '
+	assert ti.undo() && ti.get_text() == 'привет мир'
+	// курсор сдвинули - новый шаг: «аб», Home, «в» отменяются по отдельности
+	ti.set_text('')
+	t_type(mut t, 'аб')
+	t.key(sdl_k_home, 0)
+	t_type(mut t, 'в')
+	assert ti.get_text() == 'ваб'
+	assert ti.undo() && ti.get_text() == 'аб'
+	assert ti.undo() && ti.get_text() == ''
+
+	t.click_widget(ta)
+	t_type(mut t, 'раз два')
+	assert ta.undo() && ta.get_text() == 'раз '
+	assert ta.undo() && ta.get_text() == ''
+
+	t.click_widget(ce)
+	t_type(mut t, 'fn main')
+	assert ce.get_text() == 'fn main'
+	assert ce.undo() && ce.get_text() == 'fn '
+	assert ce.undo() && ce.get_text() == ''
+}
+
+// ─── Ctrl+Z окна и стек команд (Window.set_undo_stack) ───
+
+struct UndoCounter {
+mut:
+	value int
+}
+
+fn test_window_undo_stack_shortcuts() {
+	mut t := new_test_ui(width: 300, height: 160)!
+	defer {
+		t.close()
+	}
+	mut root := create_vbox_fill()
+	mut ti := text_input('')
+	root.add(ti)
+	t.add(root)
+	mut doc := &UndoCounter{}
+	mut stack := undo_stack(0)
+	t.win.set_undo_stack(stack)
+	stack.push(UndoCommand{
+		text: 'плюс'
+		redo: fn [mut doc] () {
+			doc.value++
+		}
+		undo: fn [mut doc] () {
+			doc.value--
+		}
+	})
+	assert doc.value == 1
+	// фокуса нет - Ctrl+Z отменяет команду стека, Ctrl+Y повторяет
+	t.key(int(`z`), sdl_kmod_ctrl)
+	assert doc.value == 0
+	t.key(int(`y`), sdl_kmod_ctrl)
+	assert doc.value == 1
+	t.key(int(`z`), sdl_kmod_ctrl)
+	t.key(int(`z`), sdl_kmod_ctrl | sdl_kmod_shift)
+	assert doc.value == 1
+	// поле ввода в фокусе - Ctrl+Z его, стек не трогается
+	t.click_widget(ti)
+	t_type(mut t, 'абв')
+	t.key(int(`z`), sdl_kmod_ctrl)
+	assert ti.get_text() == '' && doc.value == 1
+	// связь снята - Ctrl+Z окна ничего не делает
+	t.win.set_undo_stack(unsafe { nil })
+	t.click(150, 150)
+	t.key(int(`z`), sdl_kmod_ctrl)
+	assert doc.value == 1
+}

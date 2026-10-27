@@ -175,3 +175,34 @@ fn test_tree_model_cycle_is_bounded() {
 	}
 	assert depth == tree_model_max_depth
 }
+
+// Инвалидация в сеттерах (widget_changed): публичный set_* просит кадр сам,
+// без invalidate; после кадра приложение затихает - сеттеры, которые виджеты
+// зовут по ходу отрисовки (ListBox с моделью), новых кадров не заказывают.
+fn test_setters_request_redraw() {
+	mut t := new_test_ui(width: 240, height: 200)!
+	defer {
+		t.close()
+	}
+	mut root := create_vbox_fill()
+	mut bar := progress_bar()
+	mut lbl := label('a')
+	mut lb := list_box()
+	lb.set_model(rows_model([['x'], ['y']]))
+	root.add(lbl)
+	root.add(bar)
+	root.add(lb, flex: 1)
+	t.add(root)
+	t.settle(20)
+	assert !t.app.needs_animation_now(), 'после кадра без изменений - тишина'
+	bar.set_value(0.5)
+	assert t.app.needs_animation_now(), 'сеттер попросил кадр'
+	t.frame()
+	assert !t.app.needs_animation_now()
+	lbl.set_text('длиннее')
+	assert t.app.needs_animation_now()
+	t.frame()
+	assert lbl.bounds.w > 0
+	t.frame()
+	assert !t.app.needs_animation_now()
+}

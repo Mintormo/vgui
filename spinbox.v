@@ -463,6 +463,7 @@ pub fn (s &Spinbox) get_value() int {
 // Задаёт значение с ограничением [min, max]. Если значение изменилось - обновляет текст и
 // вызывает on_change; если нет (в том числе после ограничения до прежнего) - ничего не делает.
 pub fn (mut s Spinbox) set_value(v int) {
+	widget_changed()
 	mut clamped := v
 	if clamped < s.min {
 		clamped = s.min
@@ -485,6 +486,7 @@ pub fn (mut s Spinbox) set_value(v int) {
 // Текущее значение подтягивается в новый диапазон через set_value, поэтому on_change
 // вызывается, если значение пришлось изменить.
 pub fn (mut s Spinbox) set_range(min int, max int) {
+	widget_changed()
 	s.min = if min <= max { min } else { max }
 	s.max = if min <= max { max } else { min }
 	if s.value < s.min {
@@ -497,6 +499,7 @@ pub fn (mut s Spinbox) set_range(min int, max int) {
 
 // Шаг должен быть положительным; нулевой и отрицательный игнорируются.
 pub fn (mut s Spinbox) set_step(step int) {
+	widget_changed()
 	if step > 0 {
 		s.step = step
 	}
@@ -504,6 +507,7 @@ pub fn (mut s Spinbox) set_step(step int) {
 
 // Префикс и суффикс текста (например единицы измерения); поле обновляется сразу.
 pub fn (mut s Spinbox) set_prefix(p string) {
+	widget_changed()
 	s.prefix = p
 	if s.text_input != unsafe { nil } {
 		s.update_text_input()
@@ -511,6 +515,7 @@ pub fn (mut s Spinbox) set_prefix(p string) {
 }
 
 pub fn (mut s Spinbox) set_suffix(suf string) {
+	widget_changed()
 	s.suffix = suf
 	if s.text_input != unsafe { nil } {
 		s.update_text_input()

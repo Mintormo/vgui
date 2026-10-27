@@ -125,10 +125,12 @@ pub fn splitter_vertical() &Splitter {
 
 // Назначают панели. Старая панель просто откреплается (не освобождается).
 pub fn (mut s Splitter) set_first(w &Widget) {
+	widget_changed()
 	s.first = unsafe { w }
 }
 
 pub fn (mut s Splitter) set_second(w &Widget) {
+	widget_changed()
 	s.second = unsafe { w }
 }
 
@@ -142,9 +144,10 @@ pub fn (mut s Splitter) clear_second() {
 }
 
 // Задаёт долю первой панели (ограничивается 0..1). Минимальные размеры применяются при раскладке.
-// Не вызывает on_resize и не инвалидирует кадр.
+// Не вызывает on_resize; окно перерисуется само (widget_changed).
 // В режиме keep размер удерживаемой панели пересчитается из новой доли на следующей раскладке.
 pub fn (mut s Splitter) set_ratio(r f32) {
+	widget_changed()
 	s.ratio = clamp_f32(r, 0.0, 1.0)
 	if s.keep != .ratio {
 		s.keep_size = 0
@@ -158,6 +161,7 @@ pub fn (s &Splitter) get_ratio() f32 {
 // set_keep - панель side (.first/.second) держит размер size px при изменении размера
 // сплиттера; .ratio - снова доля. Применится на следующей раскладке.
 pub fn (mut s Splitter) set_keep(side SplitKeep, size f32) {
+	widget_changed()
 	s.keep = side
 	s.keep_size = if size > 0 { size } else { 0 }
 }

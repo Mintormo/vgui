@@ -50,8 +50,9 @@ pub fn (cb &CheckBox) is_checked() bool {
 }
 
 // set_checked выставляет состояние программно: on_change НЕ вызывается,
-// кадр не инвалидируется (в своём цикле звать Window.invalidate*).
+// окно перерисуется само (widget_changed).
 pub fn (mut cb CheckBox) set_checked(v bool) {
+	widget_changed()
 	cb.checked = v
 }
 

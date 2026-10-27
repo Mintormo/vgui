@@ -65,3 +65,32 @@ fn test_heading_slug_keeps_unicode_letters() {
 	assert md_heading_to_slug('ĭ test') == 'ĭ-test'
 	assert md_heading_to_slug('Привет, мир') == 'привет-мир'
 }
+
+// Регрессия: абзац с « | » в тексте (не таблица - нет строки-разделителя) не
+// вешает разбор. Раньше любая строка с ' | ' прерывала абзац ещё до первой
+// строки, абзац выходил пустым, позиция не сдвигалась - вечный цикл (с
+// 10.10.2026; на PROJECT.md vgui MarkdownView зависал намертво).
+fn test_pipe_in_paragraph_is_not_a_table() {
+	md := markdown_view_with_text('источник `name` | `path` | байты\nвторая строка')
+	assert md.blocks.len == 1
+	assert md.blocks[0].kind == .paragraph
+	// настоящая таблица - по-прежнему таблица, абзац перед ней - абзац
+	t := markdown_view_with_text('текст\n| A | B |\n|---|---|\n| 1 | 2 |')
+	assert t.blocks.len == 2
+	assert t.blocks[0].kind == .paragraph && t.blocks[1].kind == .table
+	assert t.blocks[1].table_rows.len == 1
+}
+
+// Регрессия: выдача тех же bounds (каждый полный кадр - arrange) не помечает
+// раскладку устаревшей. Раньше set_bounds безусловно ставил dirty, и весь
+// документ вёрстался заново каждый кадр (~200 мс на PROJECT.md).
+fn test_same_bounds_do_not_relayout() {
+	mut md := markdown_view_with_text('# Заголовок\n\nтекст')
+	md.dirty = false
+	md.last_w = 300
+	md.set_bounds(Rect{0, 0, 300, 200})
+	assert !md.dirty, 'те же размеры - раскладка не устарела'
+	// смена ширины - ensure_layout заметит по last_w (dirty для этого не нужен)
+	md.set_bounds(Rect{0, 0, 400, 200})
+	assert md.last_w != md.bounds.w
+}

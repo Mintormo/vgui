@@ -270,9 +270,10 @@ fn (c &Canvas) in_bounds(x int, y int) bool {
 }
 
 // set_pixel записывает пиксель (молча игнорирует выход за границы) и помечает
-// буфер грязным: текстура обновится при следующем draw(). Сам кадр окна НЕ
-// инвалидируется - в своём цикле звать Window.invalidate*.
+// буфер грязным: текстура обновится при следующем draw(); окно перерисуется
+// само (widget_changed).
 pub fn (mut c Canvas) set_pixel(x int, y int, col Color) {
+	widget_changed()
 	if !c.in_bounds(x, y) {
 		return
 	}
@@ -329,6 +330,7 @@ pub fn (c &Canvas) pixels_len() int {
 
 // set_pixels overwrites the buffer from `src` (up to the buffer length).
 pub fn (mut c Canvas) set_pixels(src voidptr, n int) {
+	widget_changed()
 	if unsafe { src == nil } || n <= 0 || c.pixels.len == 0 {
 		return
 	}
@@ -512,6 +514,7 @@ pub fn (mut c Canvas) destroy_texture() {
 // tile denser than the buffer (rw < w) stays sharp at zoom. Replaces the
 // previous detail; n < w*h*4 or empty size - clear_detail.
 pub fn (mut c Canvas) set_detail(pixels voidptr, n int, w int, h int, x f32, y f32, rw f32, rh f32) {
+	widget_changed()
 	if unsafe { pixels == nil } || w <= 0 || h <= 0 || n < w * h * 4 || rw <= 0 || rh <= 0 {
 		c.clear_detail()
 		return
@@ -824,6 +827,7 @@ pub fn (c &Canvas) get_zoom() f32 {
 // set_zoom выключает auto_fit и ставит масштаб z (зажимается в
 // [cv_min_zoom, cv_max_zoom]); прокрутка корректируется под новый размер.
 pub fn (mut c Canvas) set_zoom(z f32) {
+	widget_changed()
 	c.auto_fit = false
 	c.zoom = clamp_f32(z, cv_min_zoom, cv_max_zoom)
 	c.clamp_scroll()
@@ -832,17 +836,20 @@ pub fn (mut c Canvas) set_zoom(z f32) {
 // set_pan_buttons sets which mouse buttons drive built-in panning (a cv_pan_*
 // bitmask). Buttons left out of the set arrive at on_input as pointer events.
 pub fn (mut c Canvas) set_pan_buttons(mask int) {
+	widget_changed()
 	c.pan_buttons = mask
 }
 
 // set_wheel_zoom toggles built-in cursor-anchored wheel zoom. When off, wheel
 // events are delivered to on_input instead.
 pub fn (mut c Canvas) set_wheel_zoom(on bool) {
+	widget_changed()
 	c.wheel_zoom = on
 }
 
 // set_focus_group assigns the Tab-navigation group for keyboard focus.
 pub fn (mut c Canvas) set_focus_group(group int) {
+	widget_changed()
 	c.focus_group = group
 }
 

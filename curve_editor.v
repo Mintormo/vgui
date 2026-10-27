@@ -48,8 +48,8 @@ const ce_min_gap = f32(0.01) // минимальный зазор по x меж�
 // CurveEditor - виджет-редактор кривой. points всегда отсортирован по x, содержит >= 2 точки, первая имеет
 // x = 0, последняя x = 1 (поддерживается normalize_curve_points / move_point / insert_point).
 // Рисование идёт в plot_rect() - bounds минус отступ под радиус точки, чтобы крайние точки не обрезались.
-// hovered_pt / drag_pt - индекс точки под курсором / перетаскиваемой (-1 нет). Кадр сеттеры не
-// инвалидируют: после изменения points из кода вызывайте Window.invalidate*.
+// hovered_pt / drag_pt - индекс точки под курсором / перетаскиваемой (-1 нет). После
+// прямого изменения points из кода вызывайте Window.invalidate* (сеттеры перерисуют сами).
 @[heap]
 pub struct CurveEditor {
 pub mut:
@@ -86,6 +86,7 @@ pub fn curve_editor() &CurveEditor {
 // set_points заменяет точки: сортирует по x, клампит в 0..1, добавляет
 // крайние точки, если их нет. Меньше двух точек — диагональ.
 pub fn (mut ce CurveEditor) set_points(pts []CurvePoint) {
+	widget_changed()
 	ce.points = normalize_curve_points(pts)
 	ce.hovered_pt = -1
 	ce.drag_pt = -1

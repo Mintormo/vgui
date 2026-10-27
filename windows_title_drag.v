@@ -72,18 +72,22 @@ pub fn (mut d WindowTitleDrag) add(widget &Widget, p LayoutParams) {
 }
 
 pub fn (mut d WindowTitleDrag) set_spacing(s f32) {
+	widget_changed()
 	d.box.spacing = s
 }
 
 pub fn (mut d WindowTitleDrag) set_padding(p f32) {
+	widget_changed()
 	d.box.pad = p
 }
 
 pub fn (mut d WindowTitleDrag) set_bg(c Color) {
+	widget_changed()
 	d.box.bg = c
 }
 
 pub fn (mut d WindowTitleDrag) set_panel_bg() {
+	widget_changed()
 	d.box.use_panel_bg = true
 }
 

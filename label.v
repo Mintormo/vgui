@@ -77,6 +77,14 @@ pub fn label(text string) &Label {
 	}
 }
 
+// set_text меняет текст метки; окно перерисуется само (widget_changed) - в
+// отличие от прямого присваивания поля text, после которого в своём цикле
+// нужен Window.invalidate*.
+pub fn (mut l Label) set_text(text string) {
+	widget_changed()
+	l.text = text
+}
+
 // For use inside containers, with wrap
 // label_wrap - Label с переносом по словам и обрезкой по bounds; для вставки в контейнеры,
 // которые сами задают размер.

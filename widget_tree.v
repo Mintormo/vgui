@@ -483,13 +483,13 @@ pub fn (w &MarkdownView) bounds_of() Rect {
 	return w.bounds
 }
 
-// MarkdownView помимо bounds обязан выставить dirty — это
-// сохранённая особенность из старого set_widget_bounds,
-// заставляющая перерисовать (перевёрстать) содержимое при
-// изменении размера.
+// MarkdownView: только bounds. Перевёрстка при смене ширины - забота
+// ensure_layout (сравнивает с last_w); от высоты раскладка не зависит.
+// До 27.10.2026 здесь безусловно ставился dirty, а arrange выдаёт bounds на
+// каждом полном кадре - и весь документ вёрстался заново каждый кадр
+// (PROJECT.md vgui: ~200 мс на кадр).
 pub fn (mut w MarkdownView) set_bounds(r Rect) {
 	w.bounds = r
-	w.dirty = true
 }
 
 pub fn (w &ShortcutInput) bounds_of() Rect {
@@ -1077,9 +1077,10 @@ pub fn widget_tooltip(w &Widget) string {
 }
 
 // set_widget_tooltip задаёт подсказку любому виджету; false — у типа нет
-// поля (служебные слои). Кадр не инвалидирует (как и прочие сеттеры): в
-// живом цикле новый текст подхватится со следующего кадра.
+// поля (служебные слои). Окно перерисуется само (widget_changed), как после
+// любого сеттера.
 pub fn set_widget_tooltip(mut w Widget, text string) bool {
+	widget_changed()
 	if mut w is HasTooltip {
 		w.tooltip = text
 		return true

@@ -42,6 +42,24 @@ pub fn notify_data_changed() {
 	g_data_changed = true
 }
 
+// g_quiet_changes > 0 — идёт отрисовка, раскладка или измерение окна: сеттеры,
+// которые виджеты зовут сами по ходу draw()/arrange(), кадр не просят (иначе
+// каждый кадр заказывал бы следующий и приложение перерисовывалось бы без
+// конца). Ставят Window.render/arrange/measure_content.
+__global g_quiet_changes = 0
+
+// widget_changed — «вид виджета изменился» из его сеттера (инвалидация в
+// сеттерах, PROJECT.md «Инвалидация и dirty regions»): App перерисует окна на
+// ближайшем кадре, как после изменения модели. Звать вручную не нужно: зовут
+// публичные set_* виджетов. Внутри отрисовки и раскладки ничего не делает
+// (g_quiet_changes). Прямое присваивание поля (`label.text = ...`) сеттером
+// не является - после него в своём цикле по-прежнему нужен invalidate.
+pub fn widget_changed() {
+	if g_quiet_changes == 0 {
+		g_data_changed = true
+	}
+}
+
 // take_data_changed возвращает флаг и снимает его (App.render_all).
 fn take_data_changed() bool {
 	changed := g_data_changed

@@ -70,6 +70,7 @@ pub fn menu_action_lucide(text string, icon_name string) &MenuItem {
 
 // set_icon задаёт иконку пункта (ItemIcon{} - убрать).
 pub fn (mut mi MenuItem) set_icon(ic ItemIcon) {
+	widget_changed()
 	mi.icon = ic
 }
 
@@ -1160,6 +1161,7 @@ pub fn (mut mb MenuBar) add_menu(title string, items []&MenuItem) {
 // меню держит свою копию списка и покажет новые пункты при следующем
 // открытии. Индекс вне списка игнорируется.
 pub fn (mut mb MenuBar) set_items(idx int, items []&MenuItem) {
+	widget_changed()
 	if idx < 0 || idx >= mb.entries.len {
 		return
 	}

@@ -55,8 +55,9 @@ pub fn (dp &DatePicker) get_date() (int, int, int) {
 	return dp.year, dp.month, dp.day
 }
 
-// set_date задаёт дату программно (on_change не вызывается); месяц зажимается в 1..12, день - в число дней этого месяца. Кадр не инвалидирует.
+// set_date задаёт дату программно (on_change не вызывается); месяц зажимается в 1..12, день - в число дней этого месяца. Окно перерисуется само (widget_changed).
 pub fn (mut dp DatePicker) set_date(y int, m int, d int) {
+	widget_changed()
 	dp.year = y
 	dp.month = clamp_int(m, 1, 12)
 	dp.day = clamp_int(d, 1, dp_days_in_month(y, dp.month))

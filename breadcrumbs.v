@@ -131,6 +131,7 @@ pub fn (mut bc Breadcrumbs) add(item string) {
 
 // set_items заменяет путь копией items.
 pub fn (mut bc Breadcrumbs) set_items(items []string) {
+	widget_changed()
 	bc.items = items.clone()
 }
 
@@ -165,6 +166,7 @@ pub fn (mut bc Breadcrumbs) pop() {
 // set_path_from_string разбирает строку path по разделителю sep, обрезает
 // пробелы по краям частей и отбрасывает пустые части. Прежний путь заменяется.
 pub fn (mut bc Breadcrumbs) set_path_from_string(path string, sep string) {
+	widget_changed()
 	bc.items.clear()
 	if path.len == 0 {
 		return

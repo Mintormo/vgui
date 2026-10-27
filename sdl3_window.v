@@ -227,7 +227,10 @@ pub mut:
 	// Фильтры событий окна (add_event_filter): видят каждое событие раньше
 	// маршрута и могут его поглотить - как installEventFilter в Qt
 	event_filters []EventFilter
-	hittest_data  voidptr = unsafe { nil }
+	// Стек команд приложения на Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y окна
+	// (set_undo_stack; nil - нет). Поле держит стек от GC.
+	undo_stack    &UndoStack = unsafe { nil }
+	hittest_data  voidptr    = unsafe { nil }
 	in_drag_zone  bool
 	last_layout_w f32
 	last_layout_h f32
@@ -649,6 +652,10 @@ pub fn (mut w Window) apply_sdl_size(sdl_w int, sdl_h int) {
 // create_window, поэтому размер известен до первой
 // отрисовки.
 pub fn (w &Window) measure_content() SizeHint {
+	g_quiet_changes++
+	defer {
+		g_quiet_changes--
+	}
 	mut r := SizeHint{}
 	// Все корни — один проход измерения (measure_cache.v).
 	measure_pass_enter()
@@ -892,6 +899,11 @@ fn (mut w Window) ensure_render_target() bool {
 // размера корням выставляется весь экран, затем рекурсивно раскладывается всё
 // дерево. Снимает ctx.layout_dirty.
 fn (mut w Window) arrange() {
+	// сеттеры, которые виджеты зовут сами в arrange(), кадр не просят
+	g_quiet_changes++
+	defer {
+		g_quiet_changes--
+	}
 	// Обход с корней - с чистого состояния стилей (css_begin_traversal):
 	// раскладку может запросить событие, пришедшее посреди другого обхода.
 	css_saved := w.css_begin_traversal()
@@ -999,6 +1011,76 @@ fn (mut w Window) arrange_if_needed() {
 	}
 }
 
+// partial_pass_begin — начало прохода частичного кадра по dirty_rect: клип на
+// стек контекста и очистка прямоугольника фоном (пару ему - pop_clip после
+// draw_tree). Подробности - в комментариях ниже.
+fn (mut w Window) partial_pass_begin(dirty_rect Rect, bg Color) {
+	// Partial repaint: clear only the accumulated dirty rectangle, then
+	// draw the whole tree with that rectangle pushed onto ctx's OWN clip
+	// stack (not just a raw SDL clip rect). This matters because many
+	// widgets/containers call ctx.push_clip()/pop_clip() themselves
+	// (Label, VBox/HBox, ScrollBox, ...), and push_clip() intersects
+	// against clip_stack's current top — if the dirty rect had only been
+	// set via a bare SDL_SetRenderClipRect call, clip_stack would still
+	// look empty to them, so their own push_clip would compute a wider
+	// rect and clobber ours, letting stale/duplicate pixels bleed in
+	// outside the intended dirty area.
+	w.ctx.push_clip(dirty_rect)
+	// The rect actually cleared must match the rect the clip stack just
+	// applied to the renderer, not the raw (unexpanded) dirty_rect:
+	// push_clip()/clip_sdl_rect() inflate the clip by 1 logical pixel in
+	// each direction (to cover sub-pixel edges/AA corners — see
+	// clip_sdl_rect's comment in sdl3_render.v), and the clip stack was
+	// just reset to empty at the top of this frame, so "actual" there
+	// equals dirty_rect verbatim. Clearing only the narrower raw
+	// dirty_rect left a 1px ring inside the (wider) clip where drawing
+	// is allowed but the old frame's pixels were never wiped.
+	clip_sdl := clip_sdl_rect(dirty_rect)
+	// SDL_RenderClear (the full-frame branch above) always writes the
+	// draw color verbatim, ignoring blend mode. This FillRect must match
+	// that behavior explicitly — otherwise it inherits whatever blend
+	// mode the previous frame's widget drawing left the renderer in, and
+	// a non-opaque theme.bg would composite instead of replace.
+	C.SDL_SetRenderDrawBlendMode(w.renderer, sdl_blendmode_none)
+	C.SDL_SetRenderDrawColor(w.renderer, bg.r, bg.g, bg.b, bg.a)
+	fdst := C.SDL_FRect{
+		x: f32(clip_sdl.x)
+		y: f32(clip_sdl.y)
+		w: f32(clip_sdl.w)
+		h: f32(clip_sdl.h)
+	}
+	C.SDL_RenderFillRect(w.renderer, &fdst)
+	// Restore blend mode: it is global renderer state that persists
+	// into the widget draw loop right below (and into subsequent
+	// frames if left unrestored). Almost every render_* primitive in
+	// sdl3_render.v sets sdl_blendmode_blend itself before drawing, but
+	// spinner_draw_circle_arc (spinner.v) calls SDL_RenderGeometry
+	// directly without doing so — leaving the mode at "none" here made
+	// its semi-transparent background ring (alpha 60) get written
+	// verbatim instead of blended, and that wrong content then got
+	// blitted onto the backbuffer every subsequent frame (see the
+	// SDL_SetTextureBlendMode note in ensure_render_target above).
+	C.SDL_SetRenderDrawBlendMode(w.renderer, sdl_blendmode_blend)
+}
+
+// draw_tree — фон-картинка окна и корневые виджеты (один проход отрисовки).
+fn (mut w Window) draw_tree(screen_rect Rect) {
+	// Background image (behind all widgets), filling the whole window.
+	if w.bg_image != unsafe { nil } {
+		w.bg_image.bounds = screen_rect
+		w.bg_image.draw(mut w.ctx)
+	}
+	// через draw_child - чтобы корневые виджеты тоже получали стили CSS;
+	// обход с корня начинается с чистого состояния стилей (стек предков
+	// пуст, тема окна): кадр мог начаться посреди обработки события этого
+	// окна (модальный диалог из обработчика клика) - css_begin_traversal
+	css_saved := w.css_begin_traversal()
+	for mut widget in w.widgets {
+		w.ctx.draw_child(mut widget)
+	}
+	w.css_end_traversal(css_saved)
+}
+
 // Один кадр окна. Шаги: (1) сброс флага анимации и расчёт anim_dt; (2) пропуск, если окно
 // закрыто/скрыто; (3) подготовка render-цели rt; (4) решение, какой кадр рисовать: полный
 // (full), частичный по dirty-прямоугольнику или никакой (skip_draw - ничего не изменилось);
@@ -1008,6 +1090,11 @@ fn (mut w Window) arrange_if_needed() {
 // SDL_RenderPresent - каждый кадр, даже пропущенный. Подробные причины каждого шага -
 // в комментариях внутри.
 fn (mut w Window) render() {
+	// сеттеры, которые виджеты зовут сами по ходу отрисовки, кадр не просят
+	g_quiet_changes++
+	defer {
+		g_quiet_changes--
+	}
 	w.sync_text_input()
 	// Reset needs_animation/anim_reason FIRST — before the visibility
 	// early-return below, and unconditionally (i.e. also on the skip_draw
@@ -1114,10 +1201,12 @@ fn (mut w Window) render() {
 		w.arrange()
 	}
 
-	// dirty_rect is captured before dirty.clear() below — it's the region
+	// passes are captured before dirty.clear() below — they are the regions
 	// accumulated by EVENTS/animation requests made since the previous
 	// frame, i.e. what THIS frame's partial repaint must cover.
-	dirty_rect := w.ctx.dirty.union_rect()
+	// Прямоугольники частичного кадра: далёкие области - отдельными проходами
+	// (DirtyRegion.passes), близкие - одним охватывающим.
+	passes := if full { []Rect{} } else { w.ctx.dirty.passes() }
 
 	// Consume this frame's accumulated dirt now — BEFORE calling into
 	// widgets' draw() below. Widgets request repaint of specific rects FROM
@@ -1127,7 +1216,7 @@ fn (mut w Window) render() {
 	// instant they were made, so every such animation froze after its first
 	// frame. Clearing here means marks made during the draw loop below
 	// survive to decide the NEXT frame, while this frame's own full/
-	// dirty_rect decision (above) is unaffected, since it was already taken.
+	// passes decision (above) is unaffected, since it was already taken.
 	w.ctx.dirty.clear()
 
 	// (needs_animation/anim_reason were already reset at the very top of this
@@ -1154,59 +1243,6 @@ fn (mut w Window) render() {
 		// instead of the intended logical/scaled size.
 		C.SDL_SetRenderScale(w.renderer, combined, combined)
 
-		if full {
-			C.SDL_SetRenderClipRect(w.renderer, unsafe { nil })
-			C.SDL_SetRenderDrawColor(w.renderer, bg.r, bg.g, bg.b, bg.a)
-			C.SDL_RenderClear(w.renderer)
-		} else {
-			// Partial repaint: clear only the accumulated dirty rectangle, then
-			// draw the whole tree with that rectangle pushed onto ctx's OWN clip
-			// stack (not just a raw SDL clip rect). This matters because many
-			// widgets/containers call ctx.push_clip()/pop_clip() themselves
-			// (Label, VBox/HBox, ScrollBox, ...), and push_clip() intersects
-			// against clip_stack's current top — if the dirty rect had only been
-			// set via a bare SDL_SetRenderClipRect call, clip_stack would still
-			// look empty to them, so their own push_clip would compute a wider
-			// rect and clobber ours, letting stale/duplicate pixels bleed in
-			// outside the intended dirty area.
-			w.ctx.push_clip(dirty_rect)
-			// The rect actually cleared must match the rect the clip stack just
-			// applied to the renderer, not the raw (unexpanded) dirty_rect:
-			// push_clip()/clip_sdl_rect() inflate the clip by 1 logical pixel in
-			// each direction (to cover sub-pixel edges/AA corners — see
-			// clip_sdl_rect's comment in sdl3_render.v), and the clip stack was
-			// just reset to empty at the top of this frame, so "actual" there
-			// equals dirty_rect verbatim. Clearing only the narrower raw
-			// dirty_rect left a 1px ring inside the (wider) clip where drawing
-			// is allowed but the old frame's pixels were never wiped.
-			clip_sdl := clip_sdl_rect(dirty_rect)
-			// SDL_RenderClear (the full-frame branch above) always writes the
-			// draw color verbatim, ignoring blend mode. This FillRect must match
-			// that behavior explicitly — otherwise it inherits whatever blend
-			// mode the previous frame's widget drawing left the renderer in, and
-			// a non-opaque theme.bg would composite instead of replace.
-			C.SDL_SetRenderDrawBlendMode(w.renderer, sdl_blendmode_none)
-			C.SDL_SetRenderDrawColor(w.renderer, bg.r, bg.g, bg.b, bg.a)
-			fdst := C.SDL_FRect{
-				x: f32(clip_sdl.x)
-				y: f32(clip_sdl.y)
-				w: f32(clip_sdl.w)
-				h: f32(clip_sdl.h)
-			}
-			C.SDL_RenderFillRect(w.renderer, &fdst)
-			// Restore blend mode: it is global renderer state that persists
-			// into the widget draw loop right below (and into subsequent
-			// frames if left unrestored). Almost every render_* primitive in
-			// sdl3_render.v sets sdl_blendmode_blend itself before drawing, but
-			// spinner_draw_circle_arc (spinner.v) calls SDL_RenderGeometry
-			// directly without doing so — leaving the mode at "none" here made
-			// its semi-transparent background ring (alpha 60) get written
-			// verbatim instead of blended, and that wrong content then got
-			// blitted onto the backbuffer every subsequent frame (see the
-			// SDL_SetTextureBlendMode note in ensure_render_target above).
-			C.SDL_SetRenderDrawBlendMode(w.renderer, sdl_blendmode_blend)
-		}
-
 		w.ctx.pending_drag_rects.clear()
 		w.ctx.pending_titlebar_rects.clear()
 
@@ -1215,26 +1251,26 @@ fn (mut w Window) render() {
 			w.last_layout_w = w.ctx.screen_width
 			w.last_layout_h = w.ctx.screen_height
 		}
-		// Background image (behind all widgets), filling the whole window.
-		if w.bg_image != unsafe { nil } {
-			w.bg_image.bounds = screen_rect
-			w.bg_image.draw(mut w.ctx)
-		}
-		// через draw_child - чтобы корневые виджеты тоже получали стили CSS;
-		// обход с корня начинается с чистого состояния стилей (стек предков
-		// пуст, тема окна): кадр мог начаться посреди обработки события этого
-		// окна (модальный диалог из обработчика клика) - css_begin_traversal
-		css_saved := w.css_begin_traversal()
-		for mut widget in w.widgets {
-			w.ctx.draw_child(mut widget)
-		}
-		w.css_end_traversal(css_saved)
-
-		if !full {
-			// Balance the push_clip() above — clip_stack must be empty again
-			// before the overlay/tooltip/modal sections below, which reset the
-			// SDL clip directly and assume no leftover entries.
-			w.ctx.pop_clip()
+		if full {
+			C.SDL_SetRenderClipRect(w.renderer, unsafe { nil })
+			C.SDL_SetRenderDrawColor(w.renderer, bg.r, bg.g, bg.b, bg.a)
+			C.SDL_RenderClear(w.renderer)
+			w.draw_tree(screen_rect)
+		} else {
+			// Частичный кадр: каждый прямоугольник - своим проходом (очистка и
+			// обход дерева в его клипе). Анимации шагают раз за кадр (Anim по
+			// frame_no), регистрация фокуса и оверлеев идемпотентна, поэтому
+			// повторный обход дерева в том же кадре безопасен. Кадры с попапами
+			// и подсказками - всегда полные (overlay_active_before).
+			for dirty_rect in passes {
+				w.partial_pass_begin(dirty_rect, bg)
+				w.draw_tree(screen_rect)
+				// Balance the push_clip() in partial_pass_begin — clip_stack must
+				// be empty again before the next pass and before the overlay/
+				// tooltip/modal sections below, which reset the SDL clip directly
+				// and assume no leftover entries.
+				w.ctx.pop_clip()
+			}
 		}
 
 		if w.hittest_data != unsafe { nil } {
@@ -2150,6 +2186,35 @@ pub fn (mut w Window) set_hotkey_enabled(shortcut string, enabled bool) {
 
 pub fn (mut w Window) clear_hotkeys() {
 	w.hotkeys.clear()
+}
+
+// window_undo_keys — сочетания отмены и повтора окна (set_undo_stack).
+const window_undo_keys = ['Ctrl+Z', 'Ctrl+Shift+Z', 'Ctrl+Y']
+
+// set_undo_stack связывает стек команд приложения (UndoStack, undo.v) с
+// окном: Ctrl+Z - stack.undo(), Ctrl+Shift+Z и Ctrl+Y - stack.redo() - как
+// QUndoStack с действиями «Отменить/Повторить» в Qt. Это горячие клавиши
+// окна, поэтому сначала сочетание получает виджет в фокусе (поле ввода
+// отменяет свой текст), затем пункт меню с тем же сочетанием, и только потом
+// стек. nil - снять связь (и эти три сочетания окна). Своя горячая клавиша
+// окна на тех же сочетаниях заменяется.
+pub fn (mut w Window) set_undo_stack(stack &UndoStack) {
+	w.undo_stack = unsafe { stack }
+	if isnil(stack) {
+		for k in window_undo_keys {
+			w.hotkeys.unbind(k)
+		}
+		return
+	}
+	mut st := unsafe { stack }
+	w.hotkeys.bind('Ctrl+Z', fn [mut st] () {
+		st.undo()
+	})
+	for k in window_undo_keys[1..] {
+		w.hotkeys.bind(k, fn [mut st] () {
+			st.redo()
+		})
+	}
 }
 
 // bind_hold_hotkey — удержание клавиши окна: on_press при нажатии, on_release

@@ -201,6 +201,7 @@ pub fn code_editor() &CodeEditor {
 // Курсор и прокрутка уходят в начало, выделение сбрасывается, история отмены
 // забывается; on_change НЕ вызывается (это программная загрузка, не правка).
 pub fn (mut e CodeEditor) set_text(text string) {
+	widget_changed()
 	e.lines.clear()
 	raw_lines := text.replace('\r\n', '\n').replace('\r', '\n').split('\n')
 	for rl in raw_lines {
@@ -310,6 +311,7 @@ fn (e &CodeEditor) syntax_palette(ctx &RenderContext) SyntaxPalette {
 // set_highlighter подключает подсветку синтаксиса (nil отключает). Редактор
 // хранит голый указатель, не владеет объектом: владелец обязан держать его живым.
 pub fn (mut e CodeEditor) set_highlighter(h &SyntaxHighlighter) {
+	widget_changed()
 	e.highlighter = unsafe { h }
 }
 
@@ -398,6 +400,14 @@ fn (e &CodeEditor) snap() CeUndoEntry {
 // звать только когда правка точно произойдёт (save обрывает ветку redo).
 fn (mut e CodeEditor) save_undo() {
 	e.history.save(e.snap())
+	e.text_changed()
+}
+
+// save_undo_typing — снимок правки набора со слиянием в шаг отмены по словам
+// (UndoHistory.save_typing): курсор после правки (строка, столбец), символ.
+fn (mut e CodeEditor) save_undo_typing(kind TypingKind, after_line int, after_col int, ch rune) {
+	e.history.save_typing(e.snap(), kind, ta_pos(e.cur_line, e.cur_col), ta_pos(after_line,
+		after_col), ch)
 	e.text_changed()
 }
 
@@ -522,7 +532,14 @@ fn (mut e CodeEditor) insert_text(text string) {
 	if text.len == 0 {
 		return
 	}
-	e.save_undo()
+	// набор одного символа без выделения сливается в шаг по словам; вставка
+	// из буфера и замена выделения - отдельный шаг
+	one := text.runes()
+	if one.len == 1 && one[0] != `\n` && one[0] != `\r` && !e.has_sel() {
+		e.save_undo_typing(.insert, e.cur_line, e.cur_col + 1, one[0])
+	} else {
+		e.save_undo()
+	}
 	if e.has_sel() {
 		e.delete_sel()
 	}
@@ -2066,7 +2083,8 @@ fn (mut e CodeEditor) key_backspace(ctrl bool) {
 		return
 	}
 	if e.cur_col > 0 {
-		e.save_undo()
+		// одиночный Backspace внутри строки сливается в шаг
+		e.save_undo_typing(.delete_back, e.cur_line, e.cur_col - 1, 0)
 		mut line := e.lines[e.cur_line]
 		mut nw := []rune{cap: line.len - 1}
 		for i in 0 .. e.cur_col - 1 {
@@ -2129,7 +2147,8 @@ fn (mut e CodeEditor) key_delete(ctrl bool) {
 		return
 	}
 	if e.cur_col < line.len {
-		e.save_undo()
+		// одиночный Delete внутри строки сливается в шаг (курсор не двигается)
+		e.save_undo_typing(.delete_fwd, e.cur_line, e.cur_col, 0)
 		mut nw := []rune{cap: line.len - 1}
 		for i in 0 .. e.cur_col {
 			nw << line[i]

@@ -163,6 +163,7 @@ pub fn (mut a Accordion) add_section(title string, widget &Widget) {
 // set_section_icon задаёт иконку заголовка секции idx (ItemIcon{} - убрать);
 // неверный индекс игнорируется.
 pub fn (mut a Accordion) set_section_icon(idx int, ic ItemIcon) {
+	widget_changed()
 	if idx >= 0 && idx < a.sections.len {
 		a.sections[idx].icon = ic
 	}
@@ -199,6 +200,7 @@ pub fn (a &Accordion) is_expanded(idx int) bool {
 // set_expanded раскрывает/сворачивает секцию программно (on_change НЕ зовётся).
 // В .single раскрытие секции сворачивает остальные; индекс вне диапазона игнорируется.
 pub fn (mut a Accordion) set_expanded(idx int, val bool) {
+	widget_changed()
 	if idx < 0 || idx >= a.sections.len {
 		return
 	}

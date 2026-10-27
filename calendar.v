@@ -161,12 +161,14 @@ pub fn calendar_new() &Calendar {
 
 // set_view переключает месячный/годовой вид программно (on_view_change не зовётся).
 pub fn (mut c Calendar) set_view(v CalendarView) {
+	widget_changed()
 	c.view = v
 }
 
 // set_date показывает месяц m года y и выбирает день d (проверок диапазона нет;
 // on_select не вызывается).
 pub fn (mut c Calendar) set_date(y int, m int, d int) {
+	widget_changed()
 	c.year = y
 	c.month = m
 	c.sel_year = y

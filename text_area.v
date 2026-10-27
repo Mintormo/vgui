@@ -111,6 +111,7 @@ pub fn (ta &TextArea) get_text() string {
 // Заменяет текст: курсор в конец, выделение и прокрутка сброшены, undo-история очищена.
 // on_change НЕ вызывается. Строки делятся по '\n' ('\r' не обрабатывается).
 pub fn (mut ta TextArea) set_text(s string) {
+	widget_changed()
 	ta.lines = s.split('\n')
 	if ta.lines.len == 0 {
 		ta.lines = ['']
@@ -160,6 +161,18 @@ fn (ta &TextArea) snap() TaUndoEntry {
 
 fn (mut ta TextArea) save_undo() {
 	ta.history.save(ta.snap())
+}
+
+// ta_pos — позиция курсора одним числом для слияния набора (строка, столбец).
+fn ta_pos(line int, col int) u64 {
+	return (u64(line) << 32) | u64(u32(col))
+}
+
+// save_undo_typing — снимок правки набора со слиянием в шаг отмены по словам
+// (UndoHistory.save_typing): курсор после правки (строка, столбец), символ.
+fn (mut ta TextArea) save_undo_typing(kind TypingKind, after_l int, after_c int, ch rune) {
+	ta.history.save_typing(ta.snap(), kind, ta_pos(ta.cur_l, ta.cur_c), ta_pos(after_l,
+		after_c), ch)
 }
 
 fn (mut ta TextArea) restore(entry TaUndoEntry) {
@@ -885,7 +898,13 @@ fn (mut ta TextArea) key_backspace(ctrl bool) {
 	if ta.cur_c == 0 && ta.cur_l == 0 {
 		return
 	}
-	ta.save_undo()
+	// одиночный Backspace внутри строки сливается в шаг; склейка строк и
+	// удаление слова (Ctrl) - отдельный шаг
+	if ta.cur_c > 0 && !ctrl {
+		ta.save_undo_typing(.delete_back, ta.cur_l, ta.cur_c - 1, 0)
+	} else {
+		ta.save_undo()
+	}
 	if ta.cur_c == 0 {
 		// Merge with previous line
 		prev_len := ta.lines[ta.cur_l - 1].runes().len
@@ -920,7 +939,12 @@ fn (mut ta TextArea) key_delete(ctrl bool) {
 	if ta.cur_c == rr.len && ta.cur_l == ta.lines.len - 1 {
 		return
 	}
-	ta.save_undo()
+	// одиночный Delete внутри строки сливается в шаг (курсор не двигается)
+	if ta.cur_c < rr.len && !ctrl {
+		ta.save_undo_typing(.delete_fwd, ta.cur_l, ta.cur_c, 0)
+	} else {
+		ta.save_undo()
+	}
 	if ta.cur_c == rr.len {
 		// Merge with next line
 		ta.lines[ta.cur_l] = ta.lines[ta.cur_l] + ta.lines[ta.cur_l + 1]
@@ -1027,7 +1051,14 @@ fn (mut ta TextArea) insert_text(text string) {
 			s = rr[..room].string()
 		}
 	}
-	ta.save_undo()
+	// набор одного символа без выделения сливается в шаг по словам; Enter,
+	// вставка из буфера и замена выделения - отдельный шаг
+	one := s.runes()
+	if one.len == 1 && one[0] != `\n` && !ta.has_sel() {
+		ta.save_undo_typing(.insert, ta.cur_l, ta.cur_c + 1, one[0])
+	} else {
+		ta.save_undo()
+	}
 	if ta.has_sel() {
 		ta.delete_selection()
 	}

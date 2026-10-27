@@ -82,6 +82,7 @@ pub fn (si &ShortcutInput) is_waiting() bool {
 // set_shortcut задаёт сочетание (в каноническом виде; неизвестная клавиша - ""). on_change
 // не зовёт: это значение от программы, а не от пользователя.
 pub fn (mut si ShortcutInput) set_shortcut(s string) {
+	widget_changed()
 	si.shortcut = shortcut_normalize(s)
 }
 

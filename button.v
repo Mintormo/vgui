@@ -144,9 +144,17 @@ pub fn (b &Button) is_active() bool {
 	return b.active
 }
 
+// set_text меняет надпись кнопки; окно перерисуется само (widget_changed) -
+// в отличие от прямого присваивания поля text.
+pub fn (mut b Button) set_text(text string) {
+	widget_changed()
+	b.text = text
+}
+
 // set_active ставит состояние toggle программно: on_toggle НЕ вызывается,
-// кадр не инвалидируется.
+// окно перерисуется само (widget_changed).
 pub fn (mut b Button) set_active(v bool) {
+	widget_changed()
 	b.active = v
 }
 

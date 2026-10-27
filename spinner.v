@@ -55,13 +55,15 @@ pub fn spinner_with_text(text string) &Spinner {
 	}
 }
 
-// Включает/выключает вращение. Кадр сам не инвалидируется: при start() следующий draw()
-// запросит анимацию, при stop() изменение появится при ближайшей перерисовке окна.
+// Включает/выключает вращение; окно перерисуется само (widget_changed), дальше
+// при start() анимацию запрашивает draw().
 pub fn (mut s Spinner) start() {
+	widget_changed()
 	s.spinning = true
 }
 
 pub fn (mut s Spinner) stop() {
+	widget_changed()
 	s.spinning = false
 }
 

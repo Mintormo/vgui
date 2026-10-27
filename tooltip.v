@@ -87,6 +87,7 @@ pub fn (t &Tooltip) is_attached_to(obj voidptr) bool {
 }
 
 pub fn (mut t Tooltip) set_text(text string) {
+	widget_changed()
 	t.text = text
 }
 

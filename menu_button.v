@@ -112,6 +112,7 @@ pub fn menu_button_with_icon(placeholder string, icon_path string) &MenuButton {
 
 // set_icon задаёт иконку слева от текста (ItemIcon{} - убрать).
 pub fn (mut mb MenuButton) set_icon(ic ItemIcon) {
+	widget_changed()
 	mb.icon = ic
 }
 
@@ -132,8 +133,9 @@ pub fn (mb &MenuButton) is_open() bool {
 	return mb.state.open
 }
 
-// set_text меняет отображаемый текст кнопки, не трогая активное действие. Кадр не инвалидирует.
+// set_text меняет отображаемый текст кнопки, не трогая активное действие. Окно перерисуется само (widget_changed).
 pub fn (mut mb MenuButton) set_text(text string) {
+	widget_changed()
 	mb.text = text
 }
 

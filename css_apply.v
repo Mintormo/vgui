@@ -47,9 +47,10 @@ mut:
 	css CssTags
 }
 
-// set_css_id задаёт виджету имя для селектора `#id`. Кадр не инвалидирует (как
-// все сеттеры виджетов): в своём цикле - Window.invalidate_all().
+// set_css_id задаёт виджету имя для селектора `#id`. Окно перерисуется само
+// (widget_changed), как после любого сеттера.
 pub fn set_css_id(mut w Widget, id string) {
+	widget_changed()
 	if mut w is CssTagged {
 		mut tags := w.css
 		tags.id = id
@@ -59,6 +60,7 @@ pub fn set_css_id(mut w Widget, id string) {
 
 // add_css_class добавляет класс (повторное добавление ничего не меняет).
 pub fn add_css_class(mut w Widget, name string) {
+	widget_changed()
 	if mut w is CssTagged {
 		if name in w.css.classes {
 			return
@@ -73,6 +75,7 @@ pub fn add_css_class(mut w Widget, name string) {
 
 // remove_css_class убирает класс (если его не было - ничего).
 pub fn remove_css_class(mut w Widget, name string) {
+	widget_changed()
 	if mut w is CssTagged {
 		mut tags := w.css
 		tags.classes = tags.classes.filter(it != name)

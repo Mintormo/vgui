@@ -8,8 +8,8 @@ module vgui
 // принимает (handle_event всегда false) и в фокус-учёте не участвует.
 // Indeterminate-анимация зависит от времени now_ms() (clock.v), а не от Anim, и
 // держится на mark_anim_rect каждый кадр (см. draw). Цвета с a == 0 означают
-// «взять из темы» (eff_*_color). Сеттеры кадр не инвалидируют: после set_value
-// в своём цикле зовите Window.invalidate*.
+// «взять из темы» (eff_*_color). После сеттеров окно перерисуется само
+// (widget_changed).
 
 import math
 
@@ -98,13 +98,15 @@ pub fn (p &ProgressBar) get_value() f32 {
 	return p.value
 }
 
-// set_value задаёт долю выполнения 0..1; значения вне диапазона обрезаются. Кадр не инвалидирует.
+// set_value задаёт долю выполнения 0..1; значения вне диапазона обрезаются. Окно перерисуется само (widget_changed).
 pub fn (mut p ProgressBar) set_value(v f32) {
+	widget_changed()
 	p.value = clamp_f32(v, 0.0, 1.0)
 }
 
 // set_percent — то же в процентах (0..100).
 pub fn (mut p ProgressBar) set_percent(pct f32) {
+	widget_changed()
 	p.value = clamp_f32(pct / 100.0, 0.0, 1.0)
 }
 

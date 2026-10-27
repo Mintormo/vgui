@@ -344,21 +344,25 @@ pub fn (tv &TreeView) get_selected_text() string {
 // Программно выделяет узел: не вызывает on_select, не раскрывает предков и не
 // прокручивает к узлу.
 pub fn (mut tv TreeView) set_selected(node &TreeNode) {
+	widget_changed()
 	tv.selected = unsafe { node }
 }
 
 pub fn (mut tv TreeView) set_item_text(node &TreeNode, text string) {
+	widget_changed()
 	mut n := unsafe { node }
 	n.text = text
 }
 
 pub fn (mut tv TreeView) set_item_icon(node &TreeNode, icon_path string) {
+	widget_changed()
 	mut n := unsafe { node }
 	n.icon = item_icon_file(icon_path)
 }
 
 // set_node_icon - иконка узла любого вида (ItemIcon{} - убрать).
 pub fn (mut tv TreeView) set_node_icon(node &TreeNode, ic ItemIcon) {
+	widget_changed()
 	mut n := unsafe { node }
 	n.icon = ic
 }

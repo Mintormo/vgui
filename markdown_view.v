@@ -427,8 +427,9 @@ pub fn markdown_view_with_text(text string) &MarkdownView {
 // ─── Public API ────────────────────────────────────────
 
 // set_text заменяет документ: разбирает заново, помечает раскладку устаревшей, сбрасывает прокрутку и кэш размеров картинок,
-// синхронизирует редактор режима .source. Кадр не инвалидирует.
+// синхронизирует редактор режима .source. Окно перерисуется само (widget_changed).
 pub fn (mut md MarkdownView) set_text(text string) {
+	widget_changed()
 	md.text = text
 	md.parse()
 	md.dirty = true
@@ -466,6 +467,7 @@ pub fn (md &MarkdownView) save_file(path string) bool {
 
 // set_mode переключает режим. При возврате из .source в .preview текст забирается из редактора и разбирается заново (иначе правки не отобразятся).
 pub fn (mut md MarkdownView) set_mode(mode MarkdownMode) {
+	widget_changed()
 	if md.mode == mode {
 		return
 	}
@@ -931,7 +933,13 @@ fn (mut md MarkdownView) parse() {
 			if _, _ := md_parse_ordered_list_item(para_line) {
 				break
 			}
-			if md_is_table_row(pt) {
+			// Абзац прерывает только настоящее начало таблицы: строка с '|' и
+			// за ней строка-разделитель - то же условие, по которому таблица
+			// распознаётся выше. Раньше прерывала любая строка с ' | ' (обычный
+			// текст «a | b»), и абзац из неё выходил пустым: позиция не
+			// сдвигалась, разбор зацикливался навсегда (с 10.10.2026).
+			if md_is_table_row(pt) && i + 1 < raw_lines.len
+				&& md_is_table_separator(raw_lines[i + 1].trim_space()) {
 				break
 			}
 			if para_line.starts_with('    ') || para_line.starts_with('\t') {
@@ -948,6 +956,12 @@ fn (mut md MarkdownView) parse() {
 				}
 			}
 			para_lines << para_line
+			i++
+		}
+		// Защита от зацикливания: строку не взяла ни одна ветка разбора, и
+		// абзац вышел пустым - берём её в абзац, чтобы разбор шёл дальше.
+		if para_lines.len == 0 && i < raw_lines.len {
+			para_lines << raw_lines[i]
 			i++
 		}
 		if para_lines.len > 0 {
@@ -3362,6 +3376,7 @@ pub fn (mut md MarkdownView) reset_font_size() bool {
 
 // set_font_size: sz <= 0 - размер по умолчанию контекста; иначе размер зажимается в границы. Если исходный размер ещё не запомнен, запоминает его как базовый.
 pub fn (mut md MarkdownView) set_font_size(sz int) {
+	widget_changed()
 	if sz <= 0 {
 		md.font_size = 0
 		md.dirty = true
@@ -3383,6 +3398,7 @@ pub fn (md &MarkdownView) get_font_size() int {
 
 // set_min_font_size/set_max_font_size/set_font_size_step: значения < 1 игнорируются; границы взаимно подтягиваются, текущий размер приводится в диапазон.
 pub fn (mut md MarkdownView) set_min_font_size(sz int) {
+	widget_changed()
 	if sz < 1 {
 		return
 	}
@@ -3404,6 +3420,7 @@ pub fn (md &MarkdownView) get_min_font_size() int {
 }
 
 pub fn (mut md MarkdownView) set_max_font_size(sz int) {
+	widget_changed()
 	if sz < 1 {
 		return
 	}
@@ -3425,6 +3442,7 @@ pub fn (md &MarkdownView) get_max_font_size() int {
 }
 
 pub fn (mut md MarkdownView) set_font_size_step(step int) {
+	widget_changed()
 	if step < 1 {
 		return
 	}

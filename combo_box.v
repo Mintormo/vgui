@@ -109,6 +109,7 @@ pub fn (mut cb ComboBox) add_icon_item(text string, ic ItemIcon) {
 
 // set_item_icon меняет иконку пункта idx (ItemIcon{} - убрать); неверный индекс игнорируется.
 pub fn (mut cb ComboBox) set_item_icon(idx int, ic ItemIcon) {
+	widget_changed()
 	if idx >= 0 && idx < cb.entries.len {
 		cb.entries[idx].icon = ic
 	}
@@ -126,18 +127,21 @@ pub fn (mut cb ComboBox) add_widget_item_sized(text string, widget &Widget, heig
 
 // set_item_widget / set_item_height / set_item_data меняют элемент по индексу; неверный индекс молча игнорируется.
 pub fn (mut cb ComboBox) set_item_widget(idx int, widget &Widget) {
+	widget_changed()
 	if idx >= 0 && idx < cb.entries.len {
 		cb.entries[idx].widget = unsafe { widget }
 	}
 }
 
 pub fn (mut cb ComboBox) set_item_height(idx int, h f32) {
+	widget_changed()
 	if idx >= 0 && idx < cb.entries.len {
 		cb.entries[idx].height = h
 	}
 }
 
 pub fn (mut cb ComboBox) set_item_data(idx int, data voidptr) {
+	widget_changed()
 	if idx >= 0 && idx < cb.entries.len {
 		cb.entries[idx].user_data = data
 	}
@@ -163,6 +167,7 @@ pub fn (cb &ComboBox) get_entry(idx int) ComboItem {
 
 // set_items заменяет весь список текстами, сбрасывает выбор (-1) и прокрутку. on_change не вызывается.
 pub fn (mut cb ComboBox) set_items(items []string) {
+	widget_changed()
 	cb.entries.clear()
 	cb.items.clear()
 	for s in items {
@@ -184,6 +189,7 @@ pub fn (mut cb ComboBox) add_items(items []string) {
 
 // set_selected выбирает элемент программно (on_change не вызывается); неверный индекс игнорируется.
 pub fn (mut cb ComboBox) set_selected(idx int) {
+	widget_changed()
 	if idx >= 0 && idx < cb.entries.len {
 		cb.selected = idx
 	}
@@ -191,6 +197,7 @@ pub fn (mut cb ComboBox) set_selected(idx int) {
 
 // set_selected_text выбирает первый элемент с точно таким текстом; если не найден - выбор не меняется.
 pub fn (mut cb ComboBox) set_selected_text(text string) {
+	widget_changed()
 	for i, e in cb.entries {
 		if e.text == text {
 			cb.selected = i

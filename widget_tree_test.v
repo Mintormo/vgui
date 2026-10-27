@@ -432,7 +432,10 @@ fn test_layouted_markdownview() {
 	r := Rect{5, 6, 7, 8}
 	set_widget_bounds(mut w, r)
 	assert get_widget_bounds(w) == r
-	assert mv.dirty == true
+	// раскладку bounds устаревшей не помечают: смену ширины ловит
+	// ensure_layout по last_w (до 27.10.2026 dirty ставился всегда, и документ
+	// вёрстался заново каждый полный кадр)
+	assert mv.dirty == false
 }
 
 fn test_layouted_notificationmanager() {

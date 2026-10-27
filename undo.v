@@ -43,6 +43,20 @@ struct UndoHistory[T] {
 mut:
 	undo_stack []T
 	redo_stack []T
+	// Слияние набора (save_typing): какой шаг сейчас «открыт», где прошлая
+	// правка оставила курсор и закончилась ли прошлая вставка пробелом.
+	merge_kind  TypingKind
+	merge_pos   u64
+	merge_space bool
+}
+
+// TypingKind — вид правки набора, которую можно слить с предыдущей такой же
+// в один шаг отмены (save_typing). none - шаг закрыт.
+enum TypingKind {
+	none
+	insert      // набор символа
+	delete_back // Backspace
+	delete_fwd  // Delete
 }
 
 // save кладёт снимок состояния ДО правки. Новая правка обрывает ветку
@@ -55,6 +69,34 @@ fn (mut h UndoHistory[T]) save(snap T) {
 	}
 	h.undo_stack << snap
 	h.redo_stack.clear()
+	h.merge_kind = .none
+}
+
+// save_typing — снимок для правки набора (один символ или одно нажатие
+// Backspace/Delete без выделения) со слиянием, как в обычных редакторах:
+// набор подряд - один шаг отмены, пока не начнётся новое слово (символ не
+// пробел после пробела: «привет мир» отменяется как «мир», затем «привет »);
+// удаление подряд - один шаг. Сливается, только если курсор стоит там, где
+// его оставила прошлая правка (pos_before == merge_pos): перемещение курсора,
+// щелчок, другая правка начинают новый шаг сами, без отдельного сброса.
+//
+// pos_before/pos_after - позиция курсора до и после правки в любой
+// кодировке виджета (индекс в строке, (строка << 32) | столбец); ch -
+// вставляемый символ (для insert). Правка с выделением, вставка нескольких
+// символов, Enter - обычный save (шаг закрывается).
+fn (mut h UndoHistory[T]) save_typing(snap T, kind TypingKind, pos_before u64, pos_after u64, ch rune) {
+	is_space := kind == .insert && (ch == ` ` || ch == `\t`)
+	mut merge := h.merge_kind == kind && h.merge_pos == pos_before && h.undo_stack.len > 0
+	if merge && kind == .insert && h.merge_space && !is_space {
+		// новое слово после пробела - новый шаг
+		merge = false
+	}
+	if !merge {
+		h.save(snap)
+	}
+	h.merge_kind = kind
+	h.merge_pos = pos_after
+	h.merge_space = is_space
 }
 
 // undo принимает текущее состояние (оно уходит в повтор) и возвращает
@@ -64,6 +106,7 @@ fn (mut h UndoHistory[T]) undo(cur T) ?T {
 		return none
 	}
 	h.redo_stack << cur
+	h.merge_kind = .none
 	return h.undo_stack.pop()
 }
 
@@ -74,6 +117,7 @@ fn (mut h UndoHistory[T]) redo(cur T) ?T {
 		return none
 	}
 	h.undo_stack << cur
+	h.merge_kind = .none
 	return h.redo_stack.pop()
 }
 
@@ -90,6 +134,7 @@ fn (h &UndoHistory[T]) can_redo() bool {
 fn (mut h UndoHistory[T]) clear() {
 	h.undo_stack.clear()
 	h.redo_stack.clear()
+	h.merge_kind = .none
 }
 
 // RuneSnap — снимок однострочного редактора: TextInput и редакторы

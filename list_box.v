@@ -93,7 +93,8 @@ const lb_item_width_default = f32(120)
 
 // ListBox - список / таблица (см. шапку файла). Публичные поля - состояние и колбэки:
 // on_select(индекс, текст первой колонки) - при выборе; on_dbl_click(индекс, текст) - двойной клик
-// или Enter; on_sort(колонка, новое направление). Сеттеры кадр не инвалидируют.
+// или Enter; on_sort(колонка, новое направление). После сеттеров окно перерисуется само
+// (widget_changed); после прямого присваивания полей - Window.invalidate*.
 @[heap]
 pub struct ListBox {
 pub mut:
@@ -243,6 +244,7 @@ pub fn list_box_h(item_width f32) &ListBox {
 }
 
 pub fn (mut lb ListBox) set_item_width(w f32) {
+	widget_changed()
 	lb.item_width = max_f32(w, 10)
 }
 
@@ -298,6 +300,7 @@ pub fn (mut lb ListBox) add_column_full(title string, width f32, min_w f32, sort
 
 // Set minimum width for a column
 pub fn (mut lb ListBox) set_column_min_width(col int, min_w f32) {
+	widget_changed()
 	if col >= 0 && col < lb.columns.len {
 		lb.columns[col].min_w = max_f32(min_w, 10)
 		if lb.columns[col].width < lb.columns[col].min_w {
@@ -316,6 +319,7 @@ pub fn (lb &ListBox) get_column_min_width(col int) f32 {
 
 // Set column width (clamped to min_w)
 pub fn (mut lb ListBox) set_column_width(col int, w f32) {
+	widget_changed()
 	if col >= 0 && col < lb.columns.len {
 		lb.columns[col].width = max_f32(w, lb.columns[col].min_w)
 	}
@@ -363,6 +367,7 @@ pub fn (mut lb ListBox) add_column_resizable(title string, width f32, min_w f32,
 // set_column_sort ставит индикатор сортировки колонке и снимает у остальных (одновременно сортируется одна колонка).
 // При auto_sort переставляет строки (dir = none_ - исходный порядок); on_sort не зовёт.
 pub fn (mut lb ListBox) set_column_sort(col int, dir LbSortDir) {
+	widget_changed()
 	if col >= 0 && col < lb.columns.len {
 		// Clear other columns' sort
 		for i in 0 .. lb.columns.len {
@@ -588,6 +593,7 @@ pub fn (mut lb ListBox) add_row_widgets(widgets []&Widget) {
 
 // set_row_cell_text заменяет ячейку текстом (виджет в ней сбрасывается); для колонки 0 синхронизирует items и row.text.
 pub fn (mut lb ListBox) set_row_cell_text(row int, col int, text string) {
+	widget_changed()
 	if row >= 0 && row < lb.rows.len && col >= 0 && col < lb.rows[row].cells.len {
 		lb.rows[row].cells[col].text = text
 		lb.rows[row].cells[col].widget = unsafe { nil }
@@ -602,6 +608,7 @@ pub fn (mut lb ListBox) set_row_cell_text(row int, col int, text string) {
 
 // set_row_cell_widget ставит виджет в ячейку (текст ячейки остаётся, но виджет приоритетнее).
 pub fn (mut lb ListBox) set_row_cell_widget(row int, col int, widget &Widget) {
+	widget_changed()
 	if row >= 0 && row < lb.rows.len && col >= 0 && col < lb.rows[row].cells.len {
 		lb.rows[row].cells[col].widget = unsafe { widget }
 	}
@@ -614,6 +621,7 @@ pub fn (lb &ListBox) get_row_cell_text(row int, col int) string {
 }
 
 pub fn (mut lb ListBox) set_row_data(row int, data voidptr) {
+	widget_changed()
 	if row >= 0 && row < lb.rows.len {
 		lb.rows[row].user_data = data
 	}
@@ -622,6 +630,7 @@ pub fn (mut lb ListBox) set_row_data(row int, data voidptr) {
 // set_row_icon задаёт иконку строки row (ItemIcon{} - убрать); неверный индекс игнорируется.
 // Иконка едет вместе со строкой при сортировке.
 pub fn (mut lb ListBox) set_row_icon(row int, ic ItemIcon) {
+	widget_changed()
 	if row >= 0 && row < lb.rows.len {
 		lb.rows[row].icon = ic
 	}
@@ -759,6 +768,7 @@ pub fn (mut lb ListBox) clear() {
 }
 
 pub fn (mut lb ListBox) set_items(items []string) {
+	widget_changed()
 	lb.clear()
 	lb.add_items(items)
 }
@@ -768,6 +778,7 @@ pub fn (mut lb ListBox) set_items(items []string) {
 // возвращал бы мусорный индекс, которого нет в списке.
 // Во множественном выборе set_selected оставляет выбранной одну строку.
 pub fn (mut lb ListBox) set_selected(idx int) {
+	widget_changed()
 	if idx >= -1 && idx < lb.row_total() {
 		lb.selected = idx
 		lb.reset_marks()
@@ -850,6 +861,7 @@ pub fn (lb &ListBox) get_selection() []int {
 // multi_select (или если осталась одна строка) - как set_selected первой (пусто -
 // снять выбор).
 pub fn (mut lb ListBox) set_selection(idxs []int) {
+	widget_changed()
 	n := lb.row_total()
 	mut valid := idxs.filter(it >= 0 && it < n)
 	if !lb.multi_select || valid.len == 0 {
@@ -980,6 +992,7 @@ pub fn (lb &ListBox) row_count() int {
 // get_selected_text, on_select, Enter): должен быть быстрым и не менять ListBox.
 // Индексы приходят только из 0..count-1.
 pub fn (mut lb ListBox) set_virtual(count int, text_fn fn (row int, col int) string) {
+	widget_changed()
 	lb.clear()
 	if text_fn == unsafe { nil } {
 		return
@@ -993,6 +1006,7 @@ pub fn (mut lb ListBox) set_virtual(count int, text_fn fn (row int, col int) str
 // (ItemIcon{} - без иконки; nil - иконок нет вовсе). Как и текст, спрашивается
 // только для видимых строк.
 pub fn (mut lb ListBox) set_virtual_icons(icon_fn fn (row int) ItemIcon) {
+	widget_changed()
 	lb.virtual_icon = icon_fn
 }
 
@@ -1001,6 +1015,7 @@ pub fn (mut lb ListBox) set_virtual_icons(icon_fn fn (row int) ItemIcon) {
 // переезжает на последнюю строку, отметки множественного выбора за концом
 // снимаются. В обычном режиме ничего не делает.
 pub fn (mut lb ListBox) set_virtual_count(count int) {
+	widget_changed()
 	if !lb.is_virtual {
 		return
 	}
@@ -2464,8 +2479,9 @@ pub fn (mut lb ListBox) dnd_drop(info DropInfo, app &App) bool {
 // move_row переносит строку from на место to (оба - номера строк, to - номер
 // строки ПОСЛЕ переноса). Выбор, отметки множественного выбора и якорь едут
 // вместе со строками. false - номера вне списка, совпадают или список
-// виртуальный (своих строк нет). Кадр не инвалидирует (как прочие сеттеры).
+// виртуальный (своих строк нет). Окно перерисуется само (widget_changed).
 pub fn (mut lb ListBox) move_row(from int, to int) bool {
+	widget_changed()
 	n := lb.rows.len
 	if lb.is_virtual || from == to || from < 0 || to < 0 || from >= n || to >= n {
 		return false

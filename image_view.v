@@ -133,6 +133,7 @@ pub fn image_view_with_mode(path string, mode ImageMode) &ImageView {
 // set_path меняет файл; при смене сбрасывает зум и прокрутку. Саму текстуру подменит
 // ensure_texture_loaded при следующей отрисовке (сравнивает path с tex_path).
 pub fn (mut iv ImageView) set_path(path string) {
+	widget_changed()
 	if iv.path != path {
 		iv.path = path
 		iv.zoom = 1.0
@@ -143,6 +144,7 @@ pub fn (mut iv ImageView) set_path(path string) {
 
 // set_mode переключает режим и сбрасывает прокрутку; зум сохраняется только для .zoom/.native.
 pub fn (mut iv ImageView) set_mode(mode ImageMode) {
+	widget_changed()
 	iv.mode = mode
 	iv.scroll_x = 0
 	iv.scroll_y = 0
@@ -156,8 +158,9 @@ pub fn (iv &ImageView) get_zoom() f32 {
 }
 
 // set_zoom задаёт зум (1.0 = 100%), зажатый в [iv_min_zoom, iv_max_zoom]. Режим не меняет:
-// видим результат только в режиме .zoom. Кадр не инвалидирует - в своём цикле зовите Window.invalidate*.
+// видим результат только в режиме .zoom. Окно перерисуется само (widget_changed).
 pub fn (mut iv ImageView) set_zoom(z f32) {
+	widget_changed()
 	iv.zoom = clamp_f32(z, iv_min_zoom, iv_max_zoom)
 }
 

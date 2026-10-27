@@ -322,6 +322,7 @@ pub fn property_grid() &PropertyGrid {
 
 // set_app запоминает App для открытия диалогов color/date/file/folder.
 pub fn (mut pg PropertyGrid) set_app(app &App) {
+	widget_changed()
 	pg.app_ref = unsafe { app }
 }
 
@@ -425,7 +426,7 @@ fn pg_find_recursive(p &Property, name string) ?&Property {
 // нулевое значение (get_choice — -1), set_* молча ничего не делают. Тип свойства не
 // проверяется: get_int на строковом свойстве вернёт его (нулевое) int_val. set_*, как
 // Slider/Spinbox.set_value, зовут on_change только если значение действительно
-// изменилось; кадр не инвалидируют (общее правило сеттеров, CLAUDE.md).
+// изменилось; окно перерисуется само (widget_changed, как у всех сеттеров).
 // ─── Get/Set values by name ────────────────────────────
 
 pub fn (pg &PropertyGrid) get_string(name string) string {
@@ -485,6 +486,7 @@ pub fn (pg &PropertyGrid) get_choice(name string) int {
 }
 
 pub fn (mut pg PropertyGrid) set_string(name string, value string) {
+	widget_changed()
 	mut p := pg.find(name)
 	if unsafe { p != nil } && p.str_val != value {
 		p.str_val = value
@@ -493,6 +495,7 @@ pub fn (mut pg PropertyGrid) set_string(name string, value string) {
 }
 
 pub fn (mut pg PropertyGrid) set_int(name string, value int) {
+	widget_changed()
 	mut p := pg.find(name)
 	if unsafe { p != nil } && p.int_val != value {
 		p.int_val = value
@@ -501,6 +504,7 @@ pub fn (mut pg PropertyGrid) set_int(name string, value int) {
 }
 
 pub fn (mut pg PropertyGrid) set_float(name string, value f32) {
+	widget_changed()
 	mut p := pg.find(name)
 	if unsafe { p != nil } && p.float_val != value {
 		p.float_val = value
@@ -509,6 +513,7 @@ pub fn (mut pg PropertyGrid) set_float(name string, value f32) {
 }
 
 pub fn (mut pg PropertyGrid) set_bool(name string, value bool) {
+	widget_changed()
 	mut p := pg.find(name)
 	if unsafe { p != nil } && p.bool_val != value {
 		p.bool_val = value
@@ -517,6 +522,7 @@ pub fn (mut pg PropertyGrid) set_bool(name string, value bool) {
 }
 
 pub fn (mut pg PropertyGrid) set_color(name string, value Color) {
+	widget_changed()
 	mut p := pg.find(name)
 	if unsafe { p != nil } && p.color_val != value {
 		p.color_val = value
@@ -525,6 +531,7 @@ pub fn (mut pg PropertyGrid) set_color(name string, value Color) {
 }
 
 pub fn (mut pg PropertyGrid) set_date(name string, year int, month int, day int) {
+	widget_changed()
 	mut p := pg.find(name)
 	if unsafe { p != nil } && (p.year != year || p.month != month || p.day != day) {
 		p.year = year
@@ -537,6 +544,7 @@ pub fn (mut pg PropertyGrid) set_date(name string, year int, month int, day int)
 // set_choice выбирает вариант idx свойства .choice; индекс вне списка вариантов
 // игнорируется.
 pub fn (mut pg PropertyGrid) set_choice(name string, idx int) {
+	widget_changed()
 	mut p := pg.find(name)
 	if unsafe { p != nil } && idx >= 0 && idx < p.choices.len && p.choice_idx != idx {
 		p.choice_idx = idx

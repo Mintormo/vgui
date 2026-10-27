@@ -846,3 +846,56 @@ fn test_partial_hover_frames_match_full_frame_pixels() {
 	win.cleanup()
 	app.cleanup()
 }
+
+// Частичный кадр рисует далёкие области отдельными проходами
+// (DirtyRegion.passes): пиксели МЕЖДУ ними не перерисовываются. Средний
+// виджет поменял цвет без инвалидации - на экране он остаётся старым, а
+// крайние, инвалидированные, - новые.
+fn test_partial_frame_paints_far_rects_separately() {
+	mut app, mut win := make_render_test_window(400, 300) or {
+		assert false, 'window creation failed: ${err}'
+		return
+	}
+	red := Color{220, 0, 0, 255}
+	green := Color{0, 200, 0, 255}
+	blue := Color{0, 0, 220, 255}
+	mut a := &MockWidget{
+		bounds:     Rect{10, 10, 30, 30}
+		fill_color: red
+	}
+	mut mid := &MockWidget{
+		bounds:     Rect{180, 130, 40, 40}
+		fill_color: red
+	}
+	mut b := &MockWidget{
+		bounds:     Rect{350, 250, 30, 30}
+		fill_color: red
+	}
+	win.add_widget(a)
+	win.add_widget(mid)
+	win.add_widget(b)
+	win.ctx.invalidate_all()
+	win.render()
+
+	a.fill_color = green
+	b.fill_color = green
+	mid.fill_color = blue // без инвалидации: его область перерисовываться не должна
+	win.ctx.invalidate(a.bounds)
+	win.ctx.invalidate(b.bounds)
+	assert win.ctx.dirty.passes().len == 2
+	win.render()
+	buf, _, _, pitch := capture_rgba(mut win)
+	scale := win.ctx.dpi_scale * win.ctx.ui_scale
+	px := fn [buf, pitch, scale] (x f32, y f32) (u8, u8, u8, u8) {
+		return get_px(buf, pitch, int(x * scale), int(y * scale))
+	}
+	ar, ag, _, _ := px(25, 25)
+	assert ag > 150 && ar < 60, 'левый верхний перерисован'
+	br, bgc, _, _ := px(365, 265)
+	assert bgc > 150 && br < 60, 'правый нижний перерисован'
+	mr, _, mb, _ := px(200, 150)
+	assert mr > 150 && mb < 60, 'середина между ними не перерисована (отдельные проходы)'
+
+	win.cleanup()
+	app.cleanup()
+}

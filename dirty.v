@@ -19,18 +19,11 @@ module vgui
 // of collapsing early is a slightly larger repaint, never incorrectness.
 pub const dirty_max_rects = 8
 
-// Current state (as of the layout-system dirty-regions work): the single
-// consumer of this struct is Window.render(), and it only ever reads
-// union_rect() — the bounding box of everything in `rects`, never the
-// individual rectangles. Since the union of a list of rects is identical to
-// the union of its own bounding box, keeping up to `dirty_max_rects`
-// separate entries buys nothing today; a single running bbox would behave
-// identically for every caller that exists right now. Do NOT simplify this
-// away — the list is deliberately kept as scaffolding for a future switch to
-// per-rectangle clipping (each rect repainted individually instead of one
-// bbox covering all of them, which over-repaints when the rects are far
-// apart). That future consumer is what `rects` (plural) is for; there just
-// isn't one yet.
+// Отдельные прямоугольники нужны Window.render(): частичный кадр рисует их
+// по отдельности (passes), когда они далеко друг от друга, - мигающий курсор
+// в одном углу и крутящийся спиннер в другом не перерисовывают всё между
+// ними. До 27.10.2026 render() брал только охватывающий прямоугольник
+// (union_rect), и список был заделом на эту перерисовку.
 pub struct DirtyRegion {
 pub mut:
 	rects []Rect // накопленные изменённые прямоугольники (уже расширенные и обрезанные по окну)
@@ -91,6 +84,61 @@ pub fn (mut d DirtyRegion) clear() {
 // прямоугольников. Window.render() по этому признаку пропускает рисование.
 pub fn (d &DirtyRegion) is_empty() bool {
 	return !d.full && d.rects.len == 0
+}
+
+// dirty_merge_gap — прямоугольники ближе этого (логические пиксели) сливаются в
+// один: отдельный проход ради узкой щели между ними дороже, чем её перерисовка.
+const dirty_merge_gap = f32(24)
+
+// dirty_split_ratio — рисовать области по отдельности, только если вместе они
+// меньше этой доли охватывающего прямоугольника; иначе выгоднее один проход.
+const dirty_split_ratio = f32(0.5)
+
+// passes — прямоугольники частичного кадра, каждый рисуется своим проходом
+// (Window.render: очистка фона и обход дерева в клипе этого прямоугольника).
+// Шаги: (1) пересекающиеся и близкие (dirty_merge_gap) сливаются в их
+// охватывающий, пока есть что сливать; (2) если остался один или они вместе
+// занимают больше dirty_split_ratio охватывающего прямоугольника, - один проход
+// по нему (дерево обходится один раз). Каждый проход обходит всё дерево, но
+// виджеты вне клипа отсекаются сразу (is_in_clip), поэтому несколько маленьких
+// проходов дешевле одного большого, когда области далеко друг от друга.
+pub fn (d &DirtyRegion) passes() []Rect {
+	if d.rects.len <= 1 {
+		return d.rects.clone()
+	}
+	mut rs := d.rects.clone()
+	mut merged := true
+	for merged {
+		merged = false
+		outer: for i in 0 .. rs.len {
+			for j in i + 1 .. rs.len {
+				if rs[i].expanded(dirty_merge_gap).intersects(rs[j]) {
+					rs[i] = rect_union(rs[i], rs[j])
+					rs.delete(j)
+					merged = true
+					break outer
+				}
+			}
+		}
+	}
+	bbox := d.union_rect()
+	mut area := f32(0)
+	for r in rs {
+		area += r.w * r.h
+	}
+	if rs.len == 1 || area > bbox.w * bbox.h * dirty_split_ratio {
+		return [bbox]
+	}
+	return rs
+}
+
+// rect_union — охватывающий прямоугольник двух.
+fn rect_union(a Rect, b Rect) Rect {
+	x1 := min_f32(a.x, b.x)
+	y1 := min_f32(a.y, b.y)
+	x2 := max_f32(a.x + a.w, b.x + b.w)
+	y2 := max_f32(a.y + a.h, b.y + b.h)
+	return Rect{x1, y1, x2 - x1, y2 - y1}
 }
 
 // union_rect returns the bounding box of every accumulated rectangle, or a

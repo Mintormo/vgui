@@ -140,6 +140,7 @@ pub fn (t &TextInput) get_text() string {
 // Программно задаёт текст: курсор в конец, выделение и прокрутка сброшены, история
 // undo очищена. Колбэк on_change НЕ вызывается.
 pub fn (mut t TextInput) set_text(s string) {
+	widget_changed()
 	t.buf = s.runes()
 	t.cur = t.buf.len
 	t.sel_a = -1
@@ -162,6 +163,12 @@ fn (t &TextInput) snap() RuneSnap {
 
 fn (mut t TextInput) save_undo() {
 	t.history.save(t.snap())
+}
+
+// save_undo_typing — снимок правки набора со слиянием в шаг отмены по словам
+// (UndoHistory.save_typing): курсор до и после правки, вставляемый символ.
+fn (mut t TextInput) save_undo_typing(kind TypingKind, after int, ch rune) {
+	t.history.save_typing(t.snap(), kind, u64(t.cur), u64(after), ch)
 }
 
 fn (mut t TextInput) restore(entry RuneSnap) {
@@ -759,7 +766,7 @@ fn (mut t TextInput) key_backspace(ctrl bool) {
 			t.fire()
 		}
 	} else if t.cur > 0 {
-		t.save_undo()
+		t.save_undo_typing(.delete_back, t.cur - 1, 0)
 		t.buf = rsplice(t.buf, t.cur - 1, t.cur, [])
 		t.cur--
 		t.fire()
@@ -781,7 +788,7 @@ fn (mut t TextInput) key_delete(ctrl bool) {
 			t.fire()
 		}
 	} else if t.cur < t.buf.len {
-		t.save_undo()
+		t.save_undo_typing(.delete_fwd, t.cur, 0)
 		t.buf = rsplice(t.buf, t.cur, t.cur + 1, [])
 		t.fire()
 	}
@@ -885,7 +892,13 @@ fn (mut t TextInput) insert(s string) {
 	if rr.len == 0 || room <= 0 {
 		return
 	}
-	t.save_undo()
+	// набор одного символа без выделения сливается в шаг по словам; вставка
+	// из буфера и замена выделения - отдельный шаг
+	if rr.len == 1 && !t.has_sel() {
+		t.save_undo_typing(.insert, t.cur + 1, rr[0])
+	} else {
+		t.save_undo()
+	}
 	if t.has_sel() {
 		t.del_sel_no_undo()
 	}

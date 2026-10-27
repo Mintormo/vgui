@@ -167,3 +167,35 @@ fn test_union_rect_of_single_rect() {
 	assert u.w == 32
 	assert u.h == 42
 }
+
+// ─── passes(): какие прямоугольники рисовать отдельными проходами ───
+
+fn passes_of(rects []Rect) []Rect {
+	mut d := DirtyRegion{}
+	for r in rects {
+		d.add(r, Rect{0, 0, 1000, 1000})
+	}
+	return d.passes()
+}
+
+fn test_passes_far_apart_rects_are_separate() {
+	p := passes_of([Rect{10, 10, 20, 20}, Rect{800, 800, 20, 20}])
+	assert p.len == 2, 'далёкие области - отдельными проходами'
+}
+
+fn test_passes_near_rects_merge() {
+	p := passes_of([Rect{10, 10, 20, 20}, Rect{40, 10, 20, 20}])
+	assert p.len == 1, 'близкие (щель меньше dirty_merge_gap) сливаются'
+}
+
+fn test_passes_dense_rects_use_bbox() {
+	// две большие области, вместе больше половины охватывающего - один проход
+	p := passes_of([Rect{0, 0, 300, 400}, Rect{340, 0, 300, 400}])
+	assert p.len == 1
+	assert p[0].w >= 640
+}
+
+fn test_passes_single_and_empty() {
+	assert passes_of([]Rect{}).len == 0
+	assert passes_of([Rect{5, 5, 10, 10}]).len == 1
+}

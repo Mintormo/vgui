@@ -77,6 +77,7 @@ pub fn create_grid(cols int, rows int) &GridLayout {
 
 // set_cols / set_rows меняют число дорожек и СБРАСЫВАЮТ размеры, веса и авто-режим этого направления в значения по умолчанию. Уже добавленные ячейки не переносятся; ячейки вне сетки при раскладке пропускаются.
 pub fn (mut g GridLayout) set_cols(cols int) {
+	widget_changed()
 	c := if cols < 1 { 1 } else { cols }
 	g.cols = c
 	g.col_widths = []f32{len: c, init: 0}
@@ -85,6 +86,7 @@ pub fn (mut g GridLayout) set_cols(cols int) {
 }
 
 pub fn (mut g GridLayout) set_rows(rows int) {
+	widget_changed()
 	r := if rows < 1 { 1 } else { rows }
 	g.rows = r
 	g.row_heights = []f32{len: r, init: 0}
@@ -112,6 +114,7 @@ pub fn (mut g GridLayout) add_span(widget &Widget, row int, col int, row_span in
 // set_col_weight - колонка делит свободное место по весу (weight > 0)
 // вместо размера по содержимому; 0 - снова по содержимому
 pub fn (mut g GridLayout) set_col_weight(col int, weight f32) {
+	widget_changed()
 	if col < 0 || col >= g.col_weights.len {
 		return
 	}
@@ -121,6 +124,7 @@ pub fn (mut g GridLayout) set_col_weight(col int, weight f32) {
 
 // set_row_weight - то же для строки
 pub fn (mut g GridLayout) set_row_weight(row int, weight f32) {
+	widget_changed()
 	if row < 0 || row >= g.row_weights.len {
 		return
 	}
@@ -131,6 +135,7 @@ pub fn (mut g GridLayout) set_row_weight(row int, weight f32) {
 // set_col_auto - колонка снова по содержимому (по умолчанию так и
 // есть): ширина самого широкого виджета колонки (measure()).
 pub fn (mut g GridLayout) set_col_auto(col int) {
+	widget_changed()
 	if col < 0 || col >= g.col_auto.len {
 		return
 	}
@@ -140,6 +145,7 @@ pub fn (mut g GridLayout) set_col_auto(col int) {
 
 // set_row_auto — то же для высоты строки.
 pub fn (mut g GridLayout) set_row_auto(row int) {
+	widget_changed()
 	if row < 0 || row >= g.row_auto.len {
 		return
 	}
@@ -148,19 +154,23 @@ pub fn (mut g GridLayout) set_row_auto(row int) {
 }
 
 pub fn (mut g GridLayout) set_spacing(sx f32, sy f32) {
+	widget_changed()
 	g.spacing_x = sx
 	g.spacing_y = sy
 }
 
 pub fn (mut g GridLayout) set_padding(p f32) {
+	widget_changed()
 	g.pad = p
 }
 
 pub fn (mut g GridLayout) set_bg(c Color) {
+	widget_changed()
 	g.bg = c
 }
 
 pub fn (mut g GridLayout) set_panel_bg() {
+	widget_changed()
 	g.use_panel_bg = true
 }
 

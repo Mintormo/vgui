@@ -685,6 +685,7 @@ pub fn notification_manager_at(pos NotificationPosition) &NotificationManager {
 // Update fallback screen size (call on window resize)
 // set_screen_size обновляет запасной размер области (звать при ресайзе окна, если bounds менеджера не выставляются).
 pub fn (mut nm NotificationManager) set_screen_size(w f32, h f32) {
+	widget_changed()
 	nm.screen_w = w
 	nm.screen_h = h
 }

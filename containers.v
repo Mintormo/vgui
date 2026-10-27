@@ -431,6 +431,7 @@ pub fn (mut h HBox) add(widget &Widget, p LayoutParams) {
 // set_cross_align задаёт выравнивание детей по вертикали
 // (поперёк главной оси HBox).
 pub fn (mut h HBox) set_cross_align(a CrossAlign) {
+	widget_changed()
 	h.box.cross_align = a
 }
 
@@ -444,19 +445,23 @@ pub fn (mut h HBox) clear() {
 }
 
 pub fn (mut h HBox) set_spacing(s f32) {
+	widget_changed()
 	h.box.spacing = s
 }
 
 pub fn (mut h HBox) set_padding(p f32) {
+	widget_changed()
 	h.box.pad = p
 }
 
 pub fn (mut h HBox) set_bg(c Color) {
+	widget_changed()
 	h.box.bg = c
 }
 
 // set_panel_bg - рисовать фон цветом panel_bg текущей темы (вместо фиксированного set_bg).
 pub fn (mut h HBox) set_panel_bg() {
+	widget_changed()
 	h.box.use_panel_bg = true
 }
 
@@ -522,6 +527,7 @@ pub fn (mut v VBox) add(widget &Widget, p LayoutParams) {
 // set_cross_align задаёт выравнивание детей по горизонтали
 // (поперёк главной оси VBox).
 pub fn (mut v VBox) set_cross_align(a CrossAlign) {
+	widget_changed()
 	v.box.cross_align = a
 }
 
@@ -535,18 +541,22 @@ pub fn (mut v VBox) clear() {
 }
 
 pub fn (mut v VBox) set_spacing(s f32) {
+	widget_changed()
 	v.box.spacing = s
 }
 
 pub fn (mut v VBox) set_padding(p f32) {
+	widget_changed()
 	v.box.pad = p
 }
 
 pub fn (mut v VBox) set_bg(c Color) {
+	widget_changed()
 	v.box.bg = c
 }
 
 pub fn (mut v VBox) set_panel_bg() {
+	widget_changed()
 	v.box.use_panel_bg = true
 }
 
@@ -593,6 +603,7 @@ pub mut:
 
 // set_child назначает ребёнка (предыдущий просто забывается, не освобождается).
 pub fn (mut p Panel) set_child(w &Widget) {
+	widget_changed()
 	p.child = unsafe { w }
 }
 
@@ -783,6 +794,7 @@ pub fn create_centered_fill(child_w f32, child_h f32) &Centered {
 }
 
 pub fn (mut c Centered) set_child(w &Widget) {
+	widget_changed()
 	c.child = unsafe { w }
 }
 

@@ -54,8 +54,9 @@ pub fn (ts &ToggleSwitch) is_on() bool {
 }
 
 // Программно задаёт состояние: колбэк on_change НЕ вызывается, а анимация ползунка
-// запустится при следующей отрисовке (кадр сам не инвалидируется).
+// запустится при следующей отрисовке (окно перерисуется само, widget_changed).
 pub fn (mut ts ToggleSwitch) set_on(v bool) {
+	widget_changed()
 	ts.on = v
 }
 

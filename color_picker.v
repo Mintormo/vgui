@@ -76,6 +76,7 @@ pub fn (cp &ColorPicker) get_color() Color {
 }
 
 pub fn (mut cp ColorPicker) set_color(c Color) {
+	widget_changed()
 	cp.color = c
 }
 

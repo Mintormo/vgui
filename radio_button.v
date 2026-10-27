@@ -62,8 +62,9 @@ pub fn (rb &RadioButton) is_selected() bool {
 }
 
 // set_selected ставит флаг выбора напрямую: соседей по группе НЕ сбрасывает,
-// on_change не зовёт и кадр не инвалидирует (в своём цикле зовите Window.invalidate*).
+// on_change не зовёт; окно перерисуется само (widget_changed).
 pub fn (mut rb RadioButton) set_selected(v bool) {
+	widget_changed()
 	rb.selected = v
 }
 
