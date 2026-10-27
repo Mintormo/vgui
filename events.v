@@ -193,6 +193,10 @@ pub fn parse_sdl_event(raw &C.SDL_Event) GuiEvent {
 			if unsafe { ti.text != nil } {
 				ev.text = unsafe { cstring_to_vstring(ti.text) }
 			}
+			// Модификаторы и тут: при зажатом Ctrl SDL присылает text_input для
+			// горячей клавиши (Ctrl+V -> 'v'), и поля ввода по ним отличают ввод
+			// от сочетания - из события, а не опросом SDL у себя.
+			ev.mod_keys = C.SDL_GetModState()
 			ev.timestamp = ti.timestamp
 		}
 		sdl_mousemotion {

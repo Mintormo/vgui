@@ -301,7 +301,7 @@ fn borderless_on_mouse_up(w &Window, lx f32, ly f32) {
 		return
 	}
 
-	now := C.SDL_GetTicks()
+	now := now_ms()
 	dt := now - bd.last_click_time
 	dx := px - bd.last_click_x
 	dy := py - bd.last_click_y

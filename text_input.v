@@ -386,7 +386,7 @@ pub fn (mut t TextInput) draw(mut ctx RenderContext) {
 		phc := if en { ctx.theme.text_hint } else { ctx.theme.text_disabled }
 		ctx.draw_text_with_font(t.placeholder, cr.x, ty, phc, ti_font)
 	} else if dr.len == 0 && t.focused {
-		ms := C.SDL_GetTicks()
+		ms := now_ms()
 		phase := ms % u64(1060)
 		if phase < 530 {
 			ctx.fill_rect(Rect{cr.x, ty, 2, fh}, cc)
@@ -412,7 +412,7 @@ pub fn (mut t TextInput) draw(mut ctx RenderContext) {
 			ds := dr.string()
 			ctx.draw_text_with_font(ds, cr.x - t.scroll_x, ty, ctx.theme.text_primary, ti_font)
 
-			ms := C.SDL_GetTicks()
+			ms := now_ms()
 			phase := ms % u64(1060)
 			if phase < 530 {
 				cx := ctx.measure_text_with_font(rslice(dr, 0, t.cur), ti_font).x - t.scroll_x

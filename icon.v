@@ -3,7 +3,7 @@ module vgui
 // ═══════════════════════════════════════════════════════
 // Icon — draws a single glyph from the embedded Lucide icon font, centered
 // in its bounds. Lightweight and passive (no zoom/pan/events), same spirit
-// as ImageBackground. See icon_font.v for the glyph rendering pipeline and
+// as ImageBackground. See sdl3_icon_font.v for the glyph rendering pipeline and
 // icon_names.v for the name → codepoint map.
 // ═══════════════════════════════════════════════════════
 //

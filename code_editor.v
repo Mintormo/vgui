@@ -1158,7 +1158,7 @@ pub fn (mut e CodeEditor) draw(mut ctx RenderContext) {
 	// Cursor: мигает по системным часам SDL; первую половину периода виден.
 	// Кадры при этом запрашиваются в начале draw (mark_anim_rect).
 	if e.focused && !e.readonly {
-		ms := C.SDL_GetTicks()
+		ms := now_ms()
 		if ms % ce_cursor_blink_ms < ce_cursor_blink_ms / 2 {
 			line := e.lines[e.cur_line]
 			col := clamp_int(e.cur_col, 0, line.len)
@@ -1474,7 +1474,7 @@ pub fn (mut e CodeEditor) handle_event(event &GuiEvent, app &App) bool {
 			// При зажатом Ctrl SDL всё равно может прислать text_input для
 			// сочетания (например Ctrl+V -> 'v'); это не ввод, а горячая клавиша,
 			// которую уже обработал key_down, - поглощаем без вставки.
-			mod_state := C.SDL_GetModState()
+			mod_state := event.mod_keys
 			if (mod_state & sdl_kmod_ctrl) != 0 {
 				return true
 			}

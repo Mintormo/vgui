@@ -1,6 +1,11 @@
 # План: абстракция бэкенда рисования
 
-Составлен 27.10.2026, работа отложена. Пункт ROADMAP.md, раздел 9, «Backend-абстракция».
+Составлен 27.10.2026. Пункт ROADMAP.md, раздел 9, «Backend-абстракция».
+
+**Состояние (27.10.2026):** этапы 0–5 и 7 сделаны - виджеты SDL не зовут, это проверяет
+`backend_lint_test.v`; описание - PROJECT.md, «Бэкенд рисования: виджеты не зовут SDL напрямую».
+Этап 6 (интерфейс `RenderBackend`) не делался: без второго бэкенда он даёт только косвенный вызов на
+каждый примитив. Таблица «Текущее состояние» ниже - замер ДО работы.
 
 ## Цель и границы
 
@@ -53,12 +58,12 @@
 Каждый этап - отдельный коммит, после него всё зелёное: `v test .`, снапшоты **без перезаписи**
 (кадр обязан совпасть пиксель в пиксель), пересборка примеров, сборка vgui-capi и vraw.
 
-### Этап 0. Подготовка (полдня)
+### Этап 0. Подготовка (полдня) - сделано
 - Проверить, что галерея снапшотов покрывает canvas, spinner, plot_view, image_view, markdown с
   картинкой, иконки. Недостающее добавить **до** рефакторинга: это страховочная сетка.
 - Раздел в PROJECT.md «Бэкенд рисования» (пустой каркас, пополнять по ходу).
 
-### Этап 1. Часы кадра (1 день)
+### Этап 1. Часы кадра (1 день) - сделано (`clock.v`)
 - `ctx.now_ms()` (и аналог в `App`/`Window` для кода вне `draw`) поверх `SDL_GetTicks`;
   с `anim_fixed_dt` / `tip_clock_ms` в тестах время подменяется единообразно.
 - Заменить `SDL_GetTicks` во всех виджетах из таблицы. Мигание курсора, спиннер, прогресс,
@@ -67,7 +72,7 @@
 - `SDL_GetModState` → модификаторы из `GuiEvent` (или `app.mod_state()`), `SDL_Delay` - разобрать,
   зачем он там, скорее всего убрать.
 
-### Этап 2. Тип текстуры (1–2 дня)
+### Этап 2. Тип текстуры (1–2 дня) - сделано (`sdl3_texture.v`)
 - `pub struct Texture { handle voidptr  w f32  h f32  gen u64 }` (или `&Texture`), создаётся только
   через `RenderContext`: `ctx.texture_from_image(path|bytes)`, `ctx.texture_from_pixels(w, h, rgba)`,
   `ctx.update_texture(mut t, pixels)`, `ctx.destroy_texture(mut t)` (внутри - проверка поколения
@@ -77,24 +82,24 @@
 - `ctx.draw_texture(t, src ?Rect, dst Rect, opts)`, `draw_icon` и `render_copy_rotated` переходят на `Texture`.
 - Перевести `image_view`, `image_background`, `markdown_view` (картинки), `item_icon`, кэш иконок.
 
-### Этап 3. Геометрия и линии (1 день)
+### Этап 3. Геометрия и линии (1 день) - сделано
 - `ctx.draw_polyline(points []Point, color, width)` для `plot_view`;
   `ctx.fill_triangles(verts []Vertex)` (вершина = позиция + цвет [+ uv]) для `spinner`.
 - Учесть HiDPI: сейчас виджеты сами масштабируют точки или полагаются на `SDL_SetRenderScale`;
   после переноса масштабирование - только внутри `RenderContext`. Проверять через `set_ui_scale`
   и снапшоты 1.25/2.
 
-### Этап 4. Canvas (2–3 дня, самый объёмный)
+### Этап 4. Canvas (2–3 дня, самый объёмный) - сделано (`image_io.v`)
 - Битмап холста и `detail_tex` на `Texture` + `update_texture`.
 - Загрузка/сохранение изображений (IMG_Load/IMG_Save, `SDL_Surface`, ConvertSurface) - в отдельный
   модуль-утилиту `image_io.v` (декодирование в RGBA-буфер и обратно), без рендерера. Ею же
   пользуются этап 2 и `image_export.v`.
 
-### Этап 5. Иконочный шрифт (полдня–день)
+### Этап 5. Иконочный шрифт (полдня–день) - сделано (`sdl3_icon_font.v`, общий `cached_text_texture`)
 - `icon_font.v` держит свой `TTF_Font` в обход `FontSet` - перевести на общий путь текста
   (`draw_icon_glyph` через кэш текстур текста) или хотя бы спрятать за `RenderContext`.
 
-### Этап 6. Интерфейс бэкенда (2–3 дня)
+### Этап 6. Интерфейс бэкенда (2–3 дня) - не делался
 - Теперь весь SDL-рендер собран в `sdl3_render.v`, `sdl3_fonts.v`, `font_cache.v`, `render_context.v`.
   Выделить `interface RenderBackend` (примитивы: rect/rounded/line/geometry/texture/clip/target/
   read_pixels, текст: open_font/measure/render_glyph_run) и `SdlRenderBackend`.
@@ -106,7 +111,7 @@
 - Тесты-заглушка: `NullRenderBackend`, считающий вызовы, - полезен для тестов раскладки/
   инвалидации без SDL-рендерера.
 
-### Этап 7. Защита от регресса (полдня)
+### Этап 7. Защита от регресса (полдня) - сделано (`backend_lint_test.v`)
 - Тест-линтер (как `widget_tag_test.v`): grep по `*.v`, кроме разрешённого списка файлов
   (`sdl3_*`, `render_context.v`, `font_cache.v`, `image_io.v`, платформенный слой), не должен
   находить `C.SDL_Render*`, `C.SDL_*Texture*`, `C.TTF_`, `C.IMG_`, `C.SDL_GetTicks`.

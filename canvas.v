@@ -26,9 +26,9 @@ module vgui
 // «Кольцо пипетки», «Текстовый ввод SDL - только по фокусу; Canvas.take_keys»):
 //   - Фокус: draw() регистрирует холст в ctx.focus (register_canvas), клик
 //     инструмента берёт фокус (focus_canvas) - иначе клавиши не дойдут до on_input.
-//   - Текстура: потоковая SDL-текстура привязана к рендереру через пару
-//     (tex_renderer, tex_renderer_gen); уничтожать её можно только если рендерер
-//     ещё жив (is_renderer_alive_gen, PROJECT.md «Время жизни SDL-текстур»).
+//   - Текстура: потоковая Texture (sdl3_texture.v) помнит рендерер-создатель и
+//     его поколение; destroy() освобождает её, только если рендерер ещё жив
+//     (PROJECT.md «Время жизни SDL-текстур»). Файлы картинок - image_io.v.
 //   - Раскладка: bounds выставляет контейнер (Layouted/widget_tree.v), размер
 //     по содержимому не считается (см. Canvas.measure в layout_measure.v).
 //   - C-ABI: поля/методы отдаются в Python через vgui_canvas_* (vgui_capi);
@@ -166,11 +166,9 @@ pub mut:
 	hsb_hovered           bool
 	hsb_drag_start_x      f32
 	hsb_drag_start_scroll f32
-	// Streaming texture mirroring `pixels`
-	texture          voidptr = unsafe { nil }
-	tex_renderer     voidptr = unsafe { nil }
-	tex_renderer_gen u64
-	dirty            bool = true
+	// Streaming texture mirroring `pixels` (sdl3_texture.v)
+	texture Texture
+	dirty   bool = true
 	// Destination rect of the buffer inside bounds (computed in draw, reused in events)
 	disp_x f32
 	disp_y f32
@@ -227,16 +225,12 @@ pub mut:
 	// full-resolution fragment over a half-size preview: at zoom the screen
 	// shows the dense tile instead of the magnified buffer. Its own texture,
 	// so setting it never re-uploads the main buffer. set_detail/clear_detail.
-	detail_px      []u8
-	detail_w       int
-	detail_h       int
-	detail_rect    Rect
-	detail_dirty   bool
-	detail_tex     voidptr = unsafe { nil }
-	detail_tex_w   int
-	detail_tex_h   int
-	detail_tex_ren voidptr = unsafe { nil }
-	detail_tex_gen u64
+	detail_px    []u8
+	detail_w     int
+	detail_h     int
+	detail_rect  Rect
+	detail_dirty bool
+	detail_tex   Texture
 	// ── Input routing policy ──
 	// pan_buttons: bitmask (cv_pan_*) of buttons that drive built-in panning.
 	// wheel_zoom: when true the wheel zooms; when false wheel events go to on_input
@@ -447,65 +441,33 @@ pub fn (mut c Canvas) fill_circle(cx int, cy int, r int, col Color) {
 // load_* decode an image (any format SDL_image can read: png, jpg, webp, gif,
 // tiff, bmp, ...) and replace the buffer with it, resizing the canvas to the
 // image dimensions. save_file encodes the buffer to a file; the output format
-// is chosen from the file extension via IMG_Save (png/jpg/webp/gif/bmp; tiff
-// is read-only — SDL_image cannot write it).
+// is chosen from the file extension (png/jpg/webp/gif/bmp; tiff is read-only -
+// SDL_image cannot write it). Декодирование и кодирование - image_io.v.
 
 // load_file loads an image file onto the canvas. Returns true on success.
 pub fn (mut c Canvas) load_file(path string) bool {
-	surface := C.IMG_Load(path.str)
-	return c.load_from_surface(surface)
+	img := decode_image_file(path) or { return false }
+	c.load_image(img)
+	return true
 }
 
 // load_data loads an image from raw encoded bytes (png/jpg/... in memory).
 pub fn (mut c Canvas) load_data(data []u8) bool {
-	if data.len == 0 {
-		return false
-	}
-	io := C.SDL_IOFromConstMem(data.data, usize(data.len))
-	if unsafe { io == nil } {
-		return false
-	}
-	surface := C.IMG_Load_IO(io, true) // closeio = true: SDL frees the stream
-	return c.load_from_surface(surface)
+	img := decode_image_bytes(data) or { return false }
+	c.load_image(img)
+	return true
 }
 
-// load_from_surface converts a freshly loaded surface to the canvas pixel
-// format (ABGR8888), copies it into a resized buffer and frees the surface.
-fn (mut c Canvas) load_from_surface(surface voidptr) bool {
-	if unsafe { surface == nil } {
-		return false
-	}
-	conv := C.SDL_ConvertSurface(surface, sdl_pixelformat_abgr8888)
-	C.SDL_DestroySurface(surface)
-	if unsafe { conv == nil } {
-		return false
-	}
-	s := unsafe { &C.SDL_Surface(conv) }
-	w := s.w
-	h := s.h
-	if w <= 0 || h <= 0 || unsafe { s.pixels == nil } {
-		C.SDL_DestroySurface(conv)
-		return false
-	}
-	row_bytes := w * 4
-	mut buf := []u8{len: w * h * 4}
-	// Copy row by row: the surface pitch may include alignment padding while
-	// the canvas buffer is tightly packed.
-	for y in 0 .. h {
-		src := unsafe { &u8(s.pixels) + y * s.pitch }
-		dst := unsafe { &u8(buf.data) + y * row_bytes }
-		unsafe { vmemcpy(dst, src, row_bytes) }
-	}
-	C.SDL_DestroySurface(conv)
-
-	c.width = w
-	c.height = h
-	c.pixels = buf
+// load_image replaces the buffer with a decoded picture (its pixel format,
+// ABGR8888 tightly packed, is the canvas buffer format) and resizes the canvas.
+fn (mut c Canvas) load_image(img RgbaImage) {
+	c.width = img.w
+	c.height = img.h
+	c.pixels = img.pixels
 	// Dimensions changed: drop the streaming texture so draw() recreates it at
-	// the new size (ensure_texture only checks for renderer changes, not size).
+	// the new size.
 	c.destroy_texture()
 	c.dirty = true
-	return true
 }
 
 // save_file encodes the canvas buffer to an image file, format chosen from the
@@ -514,71 +476,32 @@ pub fn (mut c Canvas) save_file(path string) bool {
 	if c.width <= 0 || c.height <= 0 || c.pixels.len == 0 {
 		return false
 	}
-	surface := C.SDL_CreateSurface(c.width, c.height, sdl_pixelformat_abgr8888)
-	if unsafe { surface == nil } {
-		return false
-	}
-	s := unsafe { &C.SDL_Surface(surface) }
-	if unsafe { s.pixels == nil } {
-		C.SDL_DestroySurface(surface)
-		return false
-	}
-	row_bytes := c.width * 4
-	for y in 0 .. c.height {
-		src := unsafe { &u8(c.pixels.data) + y * row_bytes }
-		dst := unsafe { &u8(s.pixels) + y * s.pitch }
-		unsafe { vmemcpy(dst, src, row_bytes) }
-	}
-	ok := C.IMG_Save(surface, path.str)
-	C.SDL_DestroySurface(surface)
-	return ok
+	return encode_image_file(path, c.width, c.height, c.pixels)
 }
 
 // ─── Texture management ────────────────────────────────
 
-// ensure_texture гарантирует живую потоковую текстуру под текущий рендерер.
-// Если текстура уже есть и её рендерер жив (проверка с поколением - защита от
-// ABA, когда адрес рендерера переиспользован), ничего не делает. Иначе
-// создаёт новую нужного размера и взводит dirty, чтобы буфер залился заново.
-// Размер текстуры НЕ проверяется: при смене размера буфера вызывающий обязан
-// сам вызвать destroy_texture() (так делает load_from_surface).
+// ensure_texture гарантирует живую потоковую текстуру под текущий рендерер и
+// размер буфера. Если текстура уже есть, принадлежит рендереру этого окна
+// (проверка с поколением - защита от ABA, когда адрес рендерера переиспользован)
+// и совпадает по размеру, ничего не делает. Иначе освобождает старую (destroy()
+// сам не тронет текстуру мёртвого рендерера - SDL уже освободил её вместе с
+// ним), создаёт новую и взводит dirty, чтобы буфер залился заново.
 fn (mut c Canvas) ensure_texture(ctx &RenderContext) {
-	// Recreate if missing or the owning renderer changed/died (ABA-guarded).
-	if unsafe { c.texture != nil } && is_renderer_alive_gen(c.tex_renderer, c.tex_renderer_gen) {
+	if c.texture.belongs_to(ctx) && c.texture.w == c.width && c.texture.h == c.height {
 		return
 	}
-	// Сюда доходим, только если рендерер текстуры мёртв или сменился: SDL уже освободил
-	// её вместе с ним, остаётся забыть дескрипторы (не освобождать повторно).
-	c.texture = unsafe { nil }
-	c.tex_renderer = unsafe { nil }
-	c.tex_renderer_gen = 0
-	tex := C.SDL_CreateTexture(ctx.renderer, sdl_pixelformat_abgr8888, sdl_textureaccess_streaming,
-		c.width, c.height)
-	if unsafe { tex == nil } {
-		return
-	}
-	C.SDL_SetTextureBlendMode(tex, sdl_blendmode_blend)
-	C.SDL_SetTextureScaleMode(tex, sdl_scalemode_nearest)
-	c.texture = tex
-	c.tex_renderer = ctx.renderer
-	c.tex_renderer_gen = renderer_generation(ctx.renderer)
+	c.texture.destroy()
+	c.texture = ctx.texture_streaming(c.width, c.height, .nearest)
 	c.dirty = true
 }
 
-// destroy_texture освобождает основную и detail-текстуры. SDL_DestroyTexture
-// вызывается только при живом рендерере: у уничтоженного рендерера текстуры уже
-// освобождены, и повторное удаление было бы use-after-free. Зовётся из
-// load_from_surface и слоем C-ABI при уничтожении виджета (в этом модуле
-// других вызовов нет).
+// destroy_texture освобождает основную и detail-текстуры (Texture.destroy:
+// только при живом рендерере - у уничтоженного текстуры уже освобождены, и
+// повторное удаление было бы use-after-free). Зовётся из load_image и слоем
+// C-ABI при уничтожении виджета.
 pub fn (mut c Canvas) destroy_texture() {
-	if unsafe { c.texture != nil } {
-		if is_renderer_alive_gen(c.tex_renderer, c.tex_renderer_gen) {
-			C.SDL_DestroyTexture(c.texture)
-		}
-		c.texture = unsafe { nil }
-		c.tex_renderer = unsafe { nil }
-		c.tex_renderer_gen = 0
-	}
+	c.texture.destroy()
 	c.destroy_detail_texture()
 }
 
@@ -638,61 +561,36 @@ pub fn (c &Canvas) visible_buf_rect() Rect {
 
 // destroy_detail_texture - то же, что destroy_texture, но для текстуры слоя детализации.
 fn (mut c Canvas) destroy_detail_texture() {
-	if unsafe { c.detail_tex != nil } {
-		if is_renderer_alive_gen(c.detail_tex_ren, c.detail_tex_gen) {
-			C.SDL_DestroyTexture(c.detail_tex)
-		}
-		c.detail_tex = unsafe { nil }
-		c.detail_tex_ren = unsafe { nil }
-		c.detail_tex_gen = 0
-		c.detail_tex_w = 0
-		c.detail_tex_h = 0
-	}
+	c.detail_tex.destroy()
 }
 
 // draw_detail - the detail tile over the image (after compute_disp), clipped
 // to the viewport. The texture is recreated on size or renderer change.
 // Прямоугольник назначения получается переводом detail_rect из пикселей буфера
 // в экранные координаты (buf_to_screen), поэтому плитка автоматически следует
-// за zoom/pan. SDL_UpdateTexture - только когда detail_dirty (плитка менялась).
+// за zoom/pan. Пиксели заливаются в текстуру только когда detail_dirty (плитка менялась).
 fn (mut c Canvas) draw_detail(mut ctx RenderContext, vp Rect) {
 	if c.detail_w <= 0 {
 		return
 	}
-	if unsafe { c.detail_tex != nil } && (!is_renderer_alive_gen(c.detail_tex_ren, c.detail_tex_gen)
-		|| c.detail_tex_w != c.detail_w || c.detail_tex_h != c.detail_h) {
-		c.destroy_detail_texture()
-	}
-	if unsafe { c.detail_tex == nil } {
-		tex := C.SDL_CreateTexture(ctx.renderer, sdl_pixelformat_abgr8888, sdl_textureaccess_streaming,
-			c.detail_w, c.detail_h)
-		if unsafe { tex == nil } {
+	if !c.detail_tex.belongs_to(ctx) || c.detail_tex.w != c.detail_w
+		|| c.detail_tex.h != c.detail_h {
+		c.detail_tex.destroy()
+		c.detail_tex = ctx.texture_streaming(c.detail_w, c.detail_h, .nearest)
+		if !c.detail_tex.is_valid() {
 			return
 		}
-		C.SDL_SetTextureBlendMode(tex, sdl_blendmode_blend)
-		C.SDL_SetTextureScaleMode(tex, sdl_scalemode_nearest)
-		c.detail_tex = tex
-		c.detail_tex_w = c.detail_w
-		c.detail_tex_h = c.detail_h
-		c.detail_tex_ren = ctx.renderer
-		c.detail_tex_gen = renderer_generation(ctx.renderer)
 		c.detail_dirty = true
 	}
 	if c.detail_dirty {
-		C.SDL_UpdateTexture(c.detail_tex, unsafe { nil }, c.detail_px.data, c.detail_w * 4)
+		c.detail_tex.update(c.detail_px)
 		c.detail_dirty = false
 	}
 	r := c.detail_rect
 	x0, y0 := c.buf_to_screen(r.x, r.y)
 	x1, y1 := c.buf_to_screen(r.x + r.w, r.y + r.h)
-	dst := C.SDL_FRect{
-		x: x0
-		y: y0
-		w: x1 - x0
-		h: y1 - y0
-	}
 	ctx.push_clip(vp)
-	C.SDL_RenderTexture(ctx.renderer, c.detail_tex, unsafe { nil }, &dst)
+	ctx.draw_texture(c.detail_tex, Rect{x0, y0, x1 - x0, y1 - y0})
 	ctx.pop_clip()
 }
 
@@ -882,20 +780,14 @@ fn (c &Canvas) nav_rect() Rect {
 // рамка видимой части (светлая с тёмной обводкой - видна на любом снимке).
 fn (mut c Canvas) draw_navigator(mut ctx RenderContext) {
 	nr := c.nav_rect()
-	if nr.w <= 0 || unsafe { c.texture == nil } {
+	if nr.w <= 0 || !c.texture.is_valid() {
 		return
 	}
 	bg := Rect{nr.x - cv_nav_pad, nr.y - cv_nav_pad, nr.w + 2 * cv_nav_pad, nr.h + 2 * cv_nav_pad}
 	ctx.fill_rounded_rect(bg, Color{20, 20, 22, 210}, 4)
-	dst := C.SDL_FRect{
-		x: nr.x
-		y: nr.y
-		w: nr.w
-		h: nr.h
-	}
-	C.SDL_SetTextureScaleMode(c.texture, sdl_scalemode_linear)
-	C.SDL_RenderTexture(ctx.renderer, c.texture, unsafe { nil }, &dst)
-	C.SDL_SetTextureScaleMode(c.texture, sdl_scalemode_nearest)
+	c.texture.set_scale(.linear)
+	ctx.draw_texture(c.texture, nr)
+	c.texture.set_scale(.nearest)
 	vis := c.visible_buf_rect()
 	if vis.w <= 0 {
 		return
@@ -1025,26 +917,20 @@ pub fn (mut c Canvas) draw(mut ctx RenderContext) {
 	}
 
 	c.ensure_texture(ctx)
-	if unsafe { c.texture == nil } {
+	if !c.texture.is_valid() {
 		return
 	}
 
 	if c.dirty {
-		C.SDL_UpdateTexture(c.texture, unsafe { nil }, c.pixels.data, c.width * 4)
+		c.texture.update(c.pixels)
 		c.dirty = false
 	}
 
 	c.clamp_scroll()
 	c.compute_disp()
 	vp := c.viewport()
-	sdl_dst := C.SDL_FRect{
-		x: c.disp_x
-		y: c.disp_y
-		w: c.disp_w
-		h: c.disp_h
-	}
 	ctx.push_clip(vp)
-	C.SDL_RenderTexture(ctx.renderer, c.texture, unsafe { nil }, &sdl_dst)
+	ctx.draw_texture(c.texture, Rect{c.disp_x, c.disp_y, c.disp_w, c.disp_h})
 	ctx.pop_clip()
 	c.draw_detail(mut ctx, vp)
 

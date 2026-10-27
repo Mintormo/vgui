@@ -5,8 +5,8 @@ module vgui
 // text рисуется под индикатором. Это чисто декоративный виджет: событий не обрабатывает, фокуса
 // не берёт. Пока spinning == true, он каждый кадр просит следующий кадр через mark_anim_rect
 // (см. «Инвалидация и dirty regions» в PROJECT.md), а угол вращения вычисляется по
-// абсолютному времени SDL_GetTicks, а не по счётчику кадров - скорость не зависит от fps.
-// Дуги строятся треугольниками (SDL_RenderGeometry), как и остальные примитивы в sdl3_render.v.
+// абсолютному времени now_ms() (clock.v), а не по счётчику кадров - скорость не зависит от fps.
+// Дуги строятся треугольниками (ctx.fill_triangles, sdl3_render.v), как и остальные примитивы.
 // Тег типа kind_spinner - widget_tag.v.
 
 import math
@@ -109,7 +109,7 @@ fn (s &Spinner) spinner_geometry(ctx &RenderContext) (f32, f32, f32) {
 // Текущий угол (радианы) = время в секундах * speed * 2*pi. Число 6.2831853 - 2*pi,
 // встречается ниже в разных местах.
 fn spinner_angle(speed f32) f32 {
-	ms := C.SDL_GetTicks()
+	ms := now_ms()
 	t := f32(ms) * 0.001 * speed
 	return t * 6.2831853
 }
@@ -275,22 +275,11 @@ fn spinner_draw_circle_arc(mut ctx RenderContext, cx f32, cy f32, radius f32, th
 	segments := max_int(48, int(arc_len_px * 1.2))
 	step := arc_span / f32(segments)
 
-	fc := C.SDL_FColor{
-		r: f32(c.r) / 255.0
-		g: f32(c.g) / 255.0
-		b: f32(c.b) / 255.0
-		a: f32(c.a) / 255.0
-	}
-
-	// Match the convention every render_* primitive in sdl3_render.v follows:
-	// set the blend mode explicitly rather than relying on whatever the
-	// renderer was last left in. This matters especially for this widget's
-	// own semi-transparent background ring (alpha 60, drawn via this same
-	// function) — with blend mode "none" left over from elsewhere it would
-	// be written verbatim instead of composited.
-	C.SDL_SetRenderDrawBlendMode(ctx.renderer, sdl_blendmode_blend)
-
-	mut verts := []C.SDL_Vertex{cap: segments * 6}
+	// Дуга - лента трапеций между внутренним и внешним радиусом; набор
+	// треугольников заливается одним вызовом (fill_triangles сам выставляет
+	// blend mode - это важно для полупрозрачного кольца-фона, которое рисуется
+	// этой же функцией).
+	mut pts := []Vec2{cap: segments * 6}
 
 	mut a0 := start
 	mut ix0 := cx + r_inner * math.cosf(a0)
@@ -298,7 +287,6 @@ fn spinner_draw_circle_arc(mut ctx RenderContext, cx f32, cy f32, radius f32, th
 	mut ox0 := cx + r_outer * math.cosf(a0)
 	mut oy0 := cy + r_outer * math.sinf(a0)
 
-	z := C.SDL_FPoint{0, 0}
 	for i in 1 .. segments + 1 {
 		a1 := start + f32(i) * step
 		ix1 := cx + r_inner * math.cosf(a1)
@@ -307,36 +295,12 @@ fn spinner_draw_circle_arc(mut ctx RenderContext, cx f32, cy f32, radius f32, th
 		oy1 := cy + r_outer * math.sinf(a1)
 
 		// Trapezoid = 2 triangles: (ix0,iy0),(ox0,oy0),(ox1,oy1) and (ix0,iy0),(ox1,oy1),(ix1,iy1)
-		verts << C.SDL_Vertex{
-			position:  C.SDL_FPoint{ix0, iy0}
-			color:     fc
-			tex_coord: z
-		}
-		verts << C.SDL_Vertex{
-			position:  C.SDL_FPoint{ox0, oy0}
-			color:     fc
-			tex_coord: z
-		}
-		verts << C.SDL_Vertex{
-			position:  C.SDL_FPoint{ox1, oy1}
-			color:     fc
-			tex_coord: z
-		}
-		verts << C.SDL_Vertex{
-			position:  C.SDL_FPoint{ix0, iy0}
-			color:     fc
-			tex_coord: z
-		}
-		verts << C.SDL_Vertex{
-			position:  C.SDL_FPoint{ox1, oy1}
-			color:     fc
-			tex_coord: z
-		}
-		verts << C.SDL_Vertex{
-			position:  C.SDL_FPoint{ix1, iy1}
-			color:     fc
-			tex_coord: z
-		}
+		pts << Vec2{ix0, iy0}
+		pts << Vec2{ox0, oy0}
+		pts << Vec2{ox1, oy1}
+		pts << Vec2{ix0, iy0}
+		pts << Vec2{ox1, oy1}
+		pts << Vec2{ix1, iy1}
 
 		ix0 = ix1
 		iy0 = iy1
@@ -344,7 +308,7 @@ fn spinner_draw_circle_arc(mut ctx RenderContext, cx f32, cy f32, radius f32, th
 		oy0 = oy1
 	}
 
-	C.SDL_RenderGeometry(ctx.renderer, unsafe { nil }, verts.data, verts.len, unsafe { nil }, 0)
+	ctx.fill_triangles(pts, c)
 }
 
 // Спиннер событий не принимает - всегда false (события идут нижележащим виджетам).

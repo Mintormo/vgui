@@ -86,8 +86,10 @@ pub mut:
 	// a permanently wrong glyph texture.
 	text_cache map[u64]TextCacheEntry
 	cache_max  int = 1024
-	// Icon cache: separate from text_cache to avoid LRU eviction. Key = file path.
-	icon_cache map[string]voidptr
+	// Icon cache: separate from text_cache to avoid LRU eviction. Key = file path
+	// (или ключ байтов, см. item_icon_data). Пустая Texture - картинку прочитать не
+	// удалось (неудача кэшируется). Освобождает clear_text_cache.
+	icon_cache map[string]Texture
 	// Monotonic tick incremented on every cache access; used as LRU stamp.
 	cache_tick u64
 	// Last known mouse position (for events that don't carry coords, e.g. wheel)
@@ -318,69 +320,43 @@ pub fn (ctx &RenderContext) mono_char_width() f32 {
 
 // ─── Icon texture cache ───
 
-// load_icon_texture загружает картинку по пути в SDL-текстуру и кэширует её в
+// load_icon_texture загружает картинку по пути в текстуру и кэширует её в
 // icon_cache (ключ — путь; кэш не вытесняется, в отличие от text_cache). Возвращает
-// nil при пустом пути или ошибке загрузки (тогда draw_icon ничего не рисует).
-pub fn (mut ctx RenderContext) load_icon_texture(path string) voidptr {
+// пустую Texture при пустом пути или ошибке загрузки (тогда draw_icon ничего не
+// рисует). Текстурой владеет кэш: освобождать её вызывающему нельзя.
+pub fn (mut ctx RenderContext) load_icon_texture(path string) Texture {
 	if path.len == 0 {
-		return unsafe { nil }
+		return Texture{}
 	}
-	// Неудача тоже кэшируется (nil): иначе битый путь читался бы с диска на
-	// каждой отрисовке. Файл, появившийся позже, подхватится после сброса кэша.
+	// Неудача тоже кэшируется (пустая Texture): иначе битый путь читался бы с
+	// диска на каждой отрисовке. Файл, появившийся позже, подхватится после
+	// сброса кэша.
 	if path in ctx.icon_cache {
-		return ctx.icon_cache[path] or { unsafe { nil } }
+		return ctx.icon_cache[path] or { Texture{} }
 	}
-	surface := C.IMG_Load(path.str)
-	return ctx.cache_icon_surface(path, surface)
+	tex := ctx.texture_from_file(path)
+	ctx.icon_cache[path] = tex
+	return tex
 }
 
 // load_icon_texture_data - то же для картинки из байтов; key - ключ кэша,
-// однозначно задающий байты (см. item_icon_data). SDL читает байты только во
+// однозначно задающий байты (см. item_icon_data). Байты читаются только во
 // время вызова, хранить их дольше не нужно.
-pub fn (mut ctx RenderContext) load_icon_texture_data(key string, data []u8) voidptr {
+pub fn (mut ctx RenderContext) load_icon_texture_data(key string, data []u8) Texture {
 	if key.len == 0 || data.len == 0 {
-		return unsafe { nil }
+		return Texture{}
 	}
 	if key in ctx.icon_cache {
-		return ctx.icon_cache[key] or { unsafe { nil } }
+		return ctx.icon_cache[key] or { Texture{} }
 	}
-	io := C.SDL_IOFromConstMem(data.data, usize(data.len))
-	surface := if io == unsafe { nil } {
-		unsafe { nil }
-	} else {
-		C.IMG_Load_IO(io, true) // closeio = true: поток закрывает SDL
-	}
-	return ctx.cache_icon_surface(key, surface)
+	tex := ctx.texture_from_bytes(data)
+	ctx.icon_cache[key] = tex
+	return tex
 }
 
-// cache_icon_surface делает из поверхности текстуру, освобождает поверхность и
-// кладёт результат в icon_cache под key (nil при ошибке - тоже кладёт).
-fn (mut ctx RenderContext) cache_icon_surface(key string, surface voidptr) voidptr {
-	if unsafe { surface == nil } {
-		ctx.icon_cache[key] = unsafe { nil }
-		return unsafe { nil }
-	}
-	texture := C.SDL_CreateTextureFromSurface(ctx.renderer, surface)
-	C.SDL_DestroySurface(surface)
-	if unsafe { texture != nil } {
-		C.SDL_SetTextureBlendMode(texture, sdl_blendmode_blend)
-	}
-	ctx.icon_cache[key] = texture
-	return texture
-}
-
-// draw_icon рисует текстуру в прямоугольник (x, y, w, h); nil-текстура игнорируется.
-pub fn (mut ctx RenderContext) draw_icon(texture voidptr, x f32, y f32, w f32, h f32) {
-	if unsafe { texture == nil } {
-		return
-	}
-	dst := C.SDL_FRect{
-		x: x
-		y: y
-		w: w
-		h: h
-	}
-	C.SDL_RenderTexture(ctx.renderer, texture, unsafe { nil }, &dst)
+// draw_icon рисует текстуру в прямоугольник (x, y, w, h); пустая текстура игнорируется.
+pub fn (mut ctx RenderContext) draw_icon(texture Texture, x f32, y f32, w f32, h f32) {
+	ctx.draw_texture(texture, Rect{x, y, w, h})
 }
 
 // is_in_clip — стоит ли рисовать виджет с прямоугольником r: пересекает ли он

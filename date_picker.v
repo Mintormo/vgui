@@ -359,7 +359,7 @@ fn dp_run_dialog(parent &Window, mut app App, year int, month int, day int, titl
 	for app.running && dlg.is_open() && !state.confirmed && !state.cancelled {
 		app.process_events()
 		app.render_all()
-		C.SDL_Delay(16)
+		app.modal_loop_pause()
 	}
 
 	confirmed := state.confirmed

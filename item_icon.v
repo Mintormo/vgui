@@ -110,16 +110,11 @@ pub fn (mut ctx RenderContext) draw_item_icon(ic &ItemIcon, r Rect, size f32, fa
 	} else if ic.data.len > 0 {
 		ctx.load_icon_texture_data(ic.data_key, ic.data)
 	} else {
-		unsafe { nil }
+		Texture{}
 	}
-	if unsafe { tex == nil } {
-		return
-	}
-	if dim {
-		C.SDL_SetTextureAlphaMod(tex, disabled_image_alpha)
-	}
-	ctx.draw_icon(tex, r.x + (r.w - size) * 0.5, r.y + (r.h - size) * 0.5, size, size)
-	if dim {
-		C.SDL_SetTextureAlphaMod(tex, 255)
-	}
+	// Неактивный элемент - картинка полупрозрачная. Альфа ставится только на этот
+	// вызов (draw_texture_ex): текстура общая, из кэша иконок окна.
+	alpha := if dim { disabled_image_alpha } else { u8(255) }
+	dst := Rect{r.x + (r.w - size) * 0.5, r.y + (r.h - size) * 0.5, size, size}
+	ctx.draw_texture_ex(tex, dst, alpha: alpha)
 }

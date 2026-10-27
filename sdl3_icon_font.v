@@ -85,82 +85,13 @@ pub fn (mut ctx RenderContext) draw_icon_glyph(codepoint u32, bounds Rect, size 
 	if unsafe { font == nil } {
 		return
 	}
-	// Шаги: (1) получить шрифт нужного физического размера; (2) найти в text_cache текстуру глифа или отрендерить её
-	// через TTF_RenderText_Blended; (3) разместить по центру bounds с привязкой к физическим пикселям.
+	// Шаги: (1) шрифт нужного физического размера; (2) текстура глифа из общего кэша текста
+	// (cached_text_texture, sdl3_fonts.v - там же защита от коллизий хэша); (3) по центру bounds
+	// с привязкой к физическим пикселям.
 	text := rune(codepoint).str()
-
-	key := text_cache_key(text, size, icon_style_tag, c)
-	ctx.cache_tick++
-
-	// Ключ кэша содержит хэш, поэтому запись проверяется по полному совпадению text/размер/стиль/цвет - при коллизии текстура пересоздаётся (инвариант кэша текста).
-	cached := ctx.text_cache[key] or {
-		TextCacheEntry{
-			texture: unsafe { nil }
-			w:       0
-			h:       0
-		}
-	}
-	mut texture := cached.texture
-	mut tw := cached.w
-	mut th := cached.h
-
-	if unsafe { texture != nil } {
-		if cached.text != text || cached.font_size != size || cached.style_int != icon_style_tag
-			|| cached.color != c {
-			C.SDL_DestroyTexture(texture)
-			texture = unsafe { nil }
-		}
-	}
-
-	if unsafe { texture != nil } {
-		ctx.text_cache[key] = TextCacheEntry{
-			texture:   texture
-			w:         tw
-			h:         th
-			last_used: ctx.cache_tick
-			text:      cached.text
-			font_size: cached.font_size
-			style_int: cached.style_int
-			color:     cached.color
-		}
-	} else {
-		sdl_color := C.SDL_Color{
-			r: c.r
-			g: c.g
-			b: c.b
-			a: c.a
-		}
-		surface := C.TTF_RenderText_Blended(font, text.str, usize(0), sdl_color)
-		if unsafe { surface == nil } {
-			return
-		}
-		texture = C.SDL_CreateTextureFromSurface(ctx.renderer, surface)
-		C.SDL_DestroySurface(surface)
-		if unsafe { texture == nil } {
-			return
-		}
-		C.SDL_SetTextureBlendMode(texture, sdl_blendmode_blend)
-		C.SDL_SetTextureScaleMode(texture, sdl_scalemode_nearest)
-
-		mut iw := 0
-		mut ih := 0
-		C.TTF_GetStringSize(font, text.str, usize(0), &iw, &ih)
-		tw = iw
-		th = ih
-
-		if ctx.text_cache.len >= ctx.cache_max {
-			ctx.evict_text_cache_lru()
-		}
-		ctx.text_cache[key] = TextCacheEntry{
-			texture:   texture
-			w:         tw
-			h:         th
-			last_used: ctx.cache_tick
-			text:      text
-			font_size: size
-			style_int: icon_style_tag
-			color:     c
-		}
+	texture, tw, th := ctx.cached_text_texture(text, font, size, icon_style_tag, c)
+	if unsafe { texture == nil } {
+		return
 	}
 
 	// Позиция округляется до целого ФИЗИЧЕСКОГО пикселя (s - физических на логический): иначе при дробном ui_scale глиф расплывается/мерцает (см. привязку текста к физическим пикселям).

@@ -166,20 +166,6 @@ pub fn (mut ctx RenderContext) fill_triangle(x1 f32, y1 f32, x2 f32, y2 f32, x3 
 	render_fill_triangle(ctx.renderer, x1, y1, x2, y2, x3, y3, c)
 }
 
-// ─── Rotated texture copy ───
-
-// Рисует целую текстуру в прямоугольник dst, повёрнутую на angle градусов вокруг его центра.
-pub fn (mut ctx RenderContext) render_copy_rotated(texture voidptr, dst Rect, angle f64) {
-	sdl_dst := C.SDL_FRect{
-		x: dst.x
-		y: dst.y
-		w: dst.w
-		h: dst.h
-	}
-	C.SDL_RenderTextureRotated(ctx.renderer, texture, unsafe { nil }, &sdl_dst, angle,
-		unsafe { nil }, 0)
-}
-
 // То же, что fill_rounded_rect, но БЕЗ привязки к физическим пикселям. Для "таблеток" (радиус
 // равен половине меньшей стороны), у которых точные границы и так задаются размером.
 pub fn (mut ctx RenderContext) fill_pill_rect(r Rect, c Color, radius f32) {
@@ -545,4 +531,91 @@ fn render_thick_line(renderer voidptr, x1 f32, y1 f32, x2 f32, y2 f32, thickness
 	]
 	C.SDL_SetRenderDrawBlendMode(renderer, sdl_blendmode_blend)
 	C.SDL_RenderGeometry(renderer, unsafe { nil }, verts.data, verts.len, unsafe { nil }, 0)
+}
+
+// ═══════════════════════════════════════════════════════
+// Ломаные и наборы треугольников (PlotView, Spinner)
+// ═══════════════════════════════════════════════════════
+//
+// Виджеты с собственной геометрией раньше собирали массивы SDL_FPoint /
+// SDL_Vertex сами и звали SDL напрямую (PROJECT.md, «Бэкенд рисования: виджеты
+// не зовут SDL напрямую»). Теперь они передают точки в логических координатах
+// (Vec2), а SDL-типы и blend mode - забота этого файла. Масштаб HiDPI, как и у
+// остальных примитивов, делает SDL_SetRenderScale окна.
+
+// to_sdl_points переводит точки в массив SDL_FPoint (раскладка Vec2 та же, но
+// полагаться на это - лишняя хрупкость; копия на кадр дешёвая).
+fn to_sdl_points(pts []Vec2) []C.SDL_FPoint {
+	mut out := []C.SDL_FPoint{len: pts.len}
+	for i, pt in pts {
+		out[i] = C.SDL_FPoint{pt.x, pt.y}
+	}
+	return out
+}
+
+// draw_polyline рисует ломаную через точки pts цветом c. thickness округляется
+// до целого числа проходов: толщина 1 - одна ломаная SDL_RenderLines, толщина
+// n - n копий, сдвинутых по вертикали, и n - по горизонтали, с шагом 1
+// логический пиксель вокруг исходной линии (одним вызовом SDL на проход, а не
+// на отрезок - графику на тысячи точек это важно). Толстые линии (> 4) лучше
+// рисовать отрезками draw_line_thick: проходы дают «лесенку» на наклонах.
+// Меньше двух точек - ничего не рисуется.
+pub fn (mut ctx RenderContext) draw_polyline(pts []Vec2, c Color, thickness f32) {
+	if pts.len < 2 {
+		return
+	}
+	C.SDL_SetRenderDrawBlendMode(ctx.renderer, sdl_blendmode_blend)
+	C.SDL_SetRenderDrawColor(ctx.renderer, c.r, c.g, c.b, c.a)
+	sdl_pts := to_sdl_points(pts)
+	passes := int(thickness + 0.5)
+	if passes <= 1 {
+		C.SDL_RenderLines(ctx.renderer, sdl_pts.data, sdl_pts.len)
+		return
+	}
+	// Проходы симметричны относительно исходной линии: смещения от -half до +half.
+	half := f32(passes - 1) * 0.5
+	mut shifted := []C.SDL_FPoint{len: sdl_pts.len}
+	for dy in 0 .. passes {
+		offset := f32(dy) - half
+		for i, pt in sdl_pts {
+			shifted[i] = C.SDL_FPoint{pt.x, pt.y + offset}
+		}
+		C.SDL_RenderLines(ctx.renderer, shifted.data, shifted.len)
+	}
+	for dx in 0 .. passes {
+		offset := f32(dx) - half
+		for i, pt in sdl_pts {
+			shifted[i] = C.SDL_FPoint{pt.x + offset, pt.y}
+		}
+		C.SDL_RenderLines(ctx.renderer, shifted.data, shifted.len)
+	}
+}
+
+// fill_triangles заливает набор треугольников одним цветом c: каждые три точки
+// pts - один треугольник (лишние 1-2 точки в конце отбрасываются). Один вызов
+// SDL_RenderGeometry на весь набор - так рисуются дуги спиннера из сотен
+// трапеций. Blend mode выставляется здесь (полупрозрачное кольцо-фон иначе
+// записалось бы как есть, если рендерер остался в режиме «none»).
+pub fn (mut ctx RenderContext) fill_triangles(pts []Vec2, c Color) {
+	n := pts.len - pts.len % 3
+	if n == 0 {
+		return
+	}
+	fc := C.SDL_FColor{
+		r: f32(c.r) / 255.0
+		g: f32(c.g) / 255.0
+		b: f32(c.b) / 255.0
+		a: f32(c.a) / 255.0
+	}
+	z := C.SDL_FPoint{0, 0}
+	mut verts := []C.SDL_Vertex{len: n}
+	for i in 0 .. n {
+		verts[i] = C.SDL_Vertex{
+			position:  C.SDL_FPoint{pts[i].x, pts[i].y}
+			color:     fc
+			tex_coord: z
+		}
+	}
+	C.SDL_SetRenderDrawBlendMode(ctx.renderer, sdl_blendmode_blend)
+	C.SDL_RenderGeometry(ctx.renderer, unsafe { nil }, verts.data, verts.len, unsafe { nil }, 0)
 }

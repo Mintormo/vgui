@@ -4,7 +4,7 @@ import os
 
 // MarkdownView: картинки и якоря (аудит 2026-10, 1.1 и 2.17).
 //
-// 1.1: кэш текстур картинок привязан к рендереру (MdImageTexture). cleanup() звал
+// 1.1: кэш текстур картинок привязан к рендереру (Texture.belongs_to). cleanup() звал
 // SDL_DestroyTexture без проверки, жив ли рендерер, - после закрытия окна это
 // повторное освобождение; а кэш по голому пути отдавал текстуру чужого или уже
 // мёртвого рендерера, если виджет переносили в другое окно.
@@ -24,13 +24,13 @@ fn test_image_texture_is_bound_to_renderer() {
 
 	// Повторное обращение с тем же рендерером - та же текстура из кэша.
 	tex1 := md.image_texture(md_test_image, win1.ctx)
-	assert tex1 != unsafe { nil }
-	assert md.image_texture(md_test_image, win1.ctx) == tex1
+	assert tex1.is_valid()
+	assert md.image_texture(md_test_image, win1.ctx).handle == tex1.handle
 
 	// Другой рендерер (виджет перенесли в другое окно) - своя текстура,
 	// запись кэша теперь принадлежит второму рендереру.
 	tex2 := md.image_texture(md_test_image, win2.ctx)
-	assert tex2 != unsafe { nil }
+	assert tex2.is_valid()
 	entry := md.image_cache[md_test_image] or { panic('нет записи в кэше') }
 	assert entry.renderer == win2.ctx.renderer
 	assert is_renderer_alive_gen(entry.renderer, entry.gen)
@@ -43,8 +43,8 @@ fn test_image_texture_is_bound_to_renderer() {
 	assert md.image_cache.len == 0
 	md.cleanup() // повторный вызов безопасен
 
-	// Нечитаемый файл - nil, кэш не засоряется.
-	assert md.image_texture('/nonexistent/image.png', win1.ctx) == unsafe { nil }
+	// Нечитаемый файл - пустая текстура, кэш не засоряется.
+	assert !md.image_texture('/nonexistent/image.png', win1.ctx).is_valid()
 	assert md.image_cache.len == 0
 
 	win1.cleanup()

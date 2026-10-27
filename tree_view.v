@@ -1232,7 +1232,7 @@ pub fn (mut tv TreeView) draw(mut ctx RenderContext) {
 				ctx.theme.text_primary, font)
 
 			// Cursor
-			ms := C.SDL_GetTicks()
+			ms := now_ms()
 			if ms % u64(1060) < 530 {
 				text_before := if tv.edit_cur > 0 && tv.edit_cur <= tv.edit_buf.len {
 					tv.edit_buf[..tv.edit_cur].string()
@@ -1475,7 +1475,7 @@ fn (mut tv TreeView) handle_edit_event(event &GuiEvent, app &App, ctx_ptr &Rende
 	match event.typ {
 		.text_input {
 			// Ignore text_input when Ctrl is held (Ctrl+V etc. handled via key_down)
-			mod_state := C.SDL_GetModState()
+			mod_state := event.mod_keys
 			if (mod_state & sdl_kmod_ctrl) != 0 {
 				return true
 			}

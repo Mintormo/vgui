@@ -339,7 +339,7 @@ fn (mut app App) poll_stylesheet() bool {
 	if app.css_path.len == 0 {
 		return false
 	}
-	now := C.SDL_GetTicks()
+	now := now_ms()
 	if now < app.css_next_check {
 		return false
 	}

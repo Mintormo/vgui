@@ -820,7 +820,7 @@ fn (p &PlotView) draw_series(s PlotSeries, pr Rect, mut ctx RenderContext) {
 // Значения NaN/Inf и точки дальше 10 высот графика по вертикали разрывают линию:
 // накопленный участок дорисовывается, новый начинается заново (иначе SDL получил бы
 // огромные координаты у асимптот, вроде tan). Толщина <= 4 — быстрый путь:
-// один вызов SDL_RenderLines на участок (render_lines_thick); больше — по отрезкам.
+// одна ломаная ctx.draw_polyline на участок; больше — по отрезкам.
 fn (p &PlotView) draw_series_function(s PlotSeries, pr Rect, mut ctx RenderContext) {
 	if unsafe { s.func == nil } {
 		return
@@ -838,9 +838,8 @@ fn (p &PlotView) draw_series_function(s PlotSeries, pr Rect, mut ctx RenderConte
 
 	if thick <= 4.0 {
 		// Fast path: batch all points, use multi-pass for thickness
-		mut pts := []C.SDL_FPoint{cap: samples + 1}
-		C.SDL_SetRenderDrawBlendMode(ctx.renderer, sdl_blendmode_blend)
-		C.SDL_SetRenderDrawColor(ctx.renderer, s.color.r, s.color.g, s.color.b, s.color.a)
+		// Отрезки между разрывами (NaN/Inf, уход далеко за область) - отдельные ломаные.
+		mut pts := []Vec2{cap: samples + 1}
 
 		for i in 0 .. samples + 1 {
 			x := p.view_x + f32(i) * dx
@@ -848,7 +847,7 @@ fn (p &PlotView) draw_series_function(s PlotSeries, pr Rect, mut ctx RenderConte
 
 			if math.is_nan(f64(y)) || math.is_inf(f64(y), 0) {
 				if pts.len >= 2 {
-					p.render_lines_thick(ctx.renderer, pts, thick)
+					ctx.draw_polyline(pts, s.color, thick)
 				}
 				pts.clear()
 				continue
@@ -857,16 +856,16 @@ fn (p &PlotView) draw_series_function(s PlotSeries, pr Rect, mut ctx RenderConte
 			sy := p.py(y, pr)
 			if sy < pr.y - y_margin || sy > pr.y + pr.h + y_margin {
 				if pts.len >= 2 {
-					p.render_lines_thick(ctx.renderer, pts, thick)
+					ctx.draw_polyline(pts, s.color, thick)
 				}
 				pts.clear()
 				continue
 			}
 
-			pts << C.SDL_FPoint{p.px(x, pr), sy}
+			pts << Vec2{p.px(x, pr), sy}
 		}
 		if pts.len >= 2 {
-			p.render_lines_thick(ctx.renderer, pts, thick)
+			ctx.draw_polyline(pts, s.color, thick)
 		}
 	} else {
 		// Thick lines: fallback to per-segment (rarely used)
@@ -897,32 +896,6 @@ fn (p &PlotView) draw_series_function(s PlotSeries, pr Rect, mut ctx RenderConte
 			prev_sy = sy
 			prev_valid = valid
 		}
-	}
-}
-
-// render_lines_thick draws a polyline with integer pixel thickness using
-// offset passes of SDL_RenderLines — no per-segment SDL calls.
-fn (p &PlotView) render_lines_thick(renderer voidptr, pts []C.SDL_FPoint, thick f32) {
-	passes := int(thick + 0.5)
-	half := f32(passes - 1) * 0.5
-	if passes <= 1 {
-		C.SDL_RenderLines(renderer, pts.data, pts.len)
-		return
-	}
-	mut shifted := []C.SDL_FPoint{len: pts.len}
-	for dy in 0 .. passes {
-		offset := f32(dy) - half
-		for i, pt in pts {
-			shifted[i] = C.SDL_FPoint{pt.x, pt.y + offset}
-		}
-		C.SDL_RenderLines(renderer, shifted.data, shifted.len)
-	}
-	for dx in 0 .. passes {
-		offset := f32(dx) - half
-		for i, pt in pts {
-			shifted[i] = C.SDL_FPoint{pt.x + offset, pt.y}
-		}
-		C.SDL_RenderLines(renderer, shifted.data, shifted.len)
 	}
 }
 

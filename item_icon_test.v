@@ -70,7 +70,7 @@ fn test_item_icon_value() {
 	assert red.name == 'save' && red.color.r == 255
 }
 
-// Непрочитанная картинка кэшируется как nil: иначе IMG_Load шёл бы с диска на
+// Непрочитанная картинка кэшируется как пустая Texture: иначе IMG_Load шёл бы с диска на
 // каждой отрисовке (так было с узлами файлового диалога).
 fn test_failed_load_is_cached() {
 	mut t := new_test_ui(width: 120, height: 80)!
@@ -78,10 +78,10 @@ fn test_failed_load_is_cached() {
 		t.close()
 	}
 	path := '/nonexistent/vgui_item_icon.png'
-	assert t.win.ctx.load_icon_texture(path) == unsafe { nil }
+	assert !t.win.ctx.load_icon_texture(path).is_valid()
 	assert path in t.win.ctx.icon_cache
-	assert t.win.ctx.load_icon_texture(path) == unsafe { nil }
-	assert t.win.ctx.load_icon_texture_data('mem:bad', [u8(1), 2, 3]) == unsafe { nil }
+	assert !t.win.ctx.load_icon_texture(path).is_valid()
+	assert !t.win.ctx.load_icon_texture_data('mem:bad', [u8(1), 2, 3]).is_valid()
 	assert 'mem:bad' in t.win.ctx.icon_cache
 }
 

@@ -65,7 +65,7 @@ pub mut:
 	// Auto-dismiss
 	// время жизни в мс до автозакрытия; 0 — только вручную. Ошибки (notification_error) живут дольше — 6000
 	duration_ms u32 = 4000
-	// отметка C.SDL_GetTicks() старта таймера; сбрасывается при наведении и reset_timer
+	// отметка now_ms() старта таймера; сбрасывается при наведении и reset_timer
 	created_at u64
 	// dismissing — идёт анимация закрытия; dismissed — анимация закончена, виджет не рисуется и не принимает события
 	dismissing bool
@@ -108,7 +108,7 @@ pub mut:
 pub fn notification(message string) &Notification {
 	return &Notification{
 		message:    message
-		created_at: C.SDL_GetTicks()
+		created_at: now_ms()
 	}
 }
 
@@ -117,7 +117,7 @@ pub fn notification_info(message string) &Notification {
 	return &Notification{
 		kind:       .info
 		message:    message
-		created_at: C.SDL_GetTicks()
+		created_at: now_ms()
 	}
 }
 
@@ -126,7 +126,7 @@ pub fn notification_success(message string) &Notification {
 	return &Notification{
 		kind:       .success
 		message:    message
-		created_at: C.SDL_GetTicks()
+		created_at: now_ms()
 	}
 }
 
@@ -135,7 +135,7 @@ pub fn notification_warning(message string) &Notification {
 	return &Notification{
 		kind:       .warning
 		message:    message
-		created_at: C.SDL_GetTicks()
+		created_at: now_ms()
 	}
 }
 
@@ -145,7 +145,7 @@ pub fn notification_error(message string) &Notification {
 		kind:        .error
 		message:     message
 		duration_ms: 6000
-		created_at:  C.SDL_GetTicks()
+		created_at:  now_ms()
 	}
 }
 
@@ -155,7 +155,7 @@ pub fn notification_with_title(kind NotificationKind, title string, message stri
 		kind:       kind
 		title:      title
 		message:    message
-		created_at: C.SDL_GetTicks()
+		created_at: now_ms()
 	}
 }
 
@@ -176,7 +176,7 @@ pub fn (n &Notification) is_dismissed() bool {
 
 // reset_timer перезапускает таймер автозакрытия и «оживляет» уже закрывающееся/закрытое уведомление (dismiss_anim мгновенно возвращается в 1).
 pub fn (mut n Notification) reset_timer() {
-	n.created_at = C.SDL_GetTicks()
+	n.created_at = now_ms()
 	n.dismissing = false
 	n.dismissed = false
 	n.dismiss_anim.snap(1)
@@ -373,7 +373,7 @@ pub fn (mut n Notification) draw(mut ctx RenderContext) {
 		return
 	}
 
-	now := C.SDL_GetTicks()
+	now := now_ms()
 
 	// Auto-dismiss check
 	if !n.dismissing && n.duration_ms > 0 {
@@ -617,7 +617,7 @@ pub fn (mut n Notification) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	if n.hovered && !n.dismissing && n.duration_ms > 0 {
-		n.created_at = C.SDL_GetTicks()
+		n.created_at = now_ms()
 	}
 
 	return false
@@ -696,7 +696,7 @@ pub fn (mut nm NotificationManager) show(n &Notification) {
 		.bottom_center { NotificationAnim.slide_bottom }
 	}
 
-	mn.created_at = C.SDL_GetTicks()
+	mn.created_at = now_ms()
 	nm.notifications << unsafe { n }
 }
 

@@ -59,12 +59,12 @@ mut:
 	painter &Tooltip = unsafe { nil }
 }
 
-// tip_now - часы подсказок: SDL_GetTicks или подмена теста (tip_clock_ms).
+// tip_now - часы подсказок: часы интерфейса (now_ms, clock.v) или подмена теста (tip_clock_ms).
 fn (w &Window) tip_now() u64 {
 	if w.tip_clock_ms > 0 {
 		return w.tip_clock_ms
 	}
-	return C.SDL_GetTicks()
+	return now_ms()
 }
 
 // hit_at - верхний (по z-порядку) видимый виджет под точкой и подсказка для

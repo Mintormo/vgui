@@ -23,7 +23,7 @@ const tt_offset_x = f32(4) // slight right offset from cursor
 
 // Tooltip. Нулевой (a == 0) цвет в bg/text_color/border = взять из темы
 // (eff_tooltip_*). target - сырой указатель на виджет-цель (может быть nil до
-// attach(); тогда подсказка не показывается). hover_start - момент (мс SDL_GetTicks)
+// attach(); тогда подсказка не показывается). hover_start - момент (мс now_ms(), clock.v)
 // начала наведения, 0 = не наведено. showing - подсказка сейчас показывается.
 // Поле bounds в коде файла не используется.
 @[heap]
@@ -252,7 +252,7 @@ pub fn (mut t Tooltip) draw(mut ctx RenderContext) {
 
 	// Check delay every frame
 	if t.target_hover && !t.showing && t.hover_start > 0 {
-		elapsed := C.SDL_GetTicks() - t.hover_start
+		elapsed := now_ms() - t.hover_start
 		if elapsed >= t.delay_ms {
 			t.showing = true
 		}
@@ -264,7 +264,7 @@ pub fn (mut t Tooltip) draw(mut ctx RenderContext) {
 		if target_r.w > 0 && target_r.contains(ctx.mouse_x, ctx.mouse_y) {
 			t.target_hover = true
 			if t.hover_start == 0 {
-				t.hover_start = C.SDL_GetTicks()
+				t.hover_start = now_ms()
 			}
 		}
 	}
@@ -302,7 +302,7 @@ pub fn (mut t Tooltip) handle_event(event &GuiEvent, app &App) bool {
 			t.target_hover = target_r.contains(event.mouse_x, event.mouse_y)
 
 			if t.target_hover && !was_hover {
-				t.hover_start = C.SDL_GetTicks()
+				t.hover_start = now_ms()
 				t.showing = false
 			} else if !t.target_hover {
 				t.showing = false
@@ -310,7 +310,7 @@ pub fn (mut t Tooltip) handle_event(event &GuiEvent, app &App) bool {
 			}
 
 			if t.target_hover && !t.showing && t.hover_start > 0 {
-				elapsed := C.SDL_GetTicks() - t.hover_start
+				elapsed := now_ms() - t.hover_start
 				if elapsed >= t.delay_ms {
 					t.showing = true
 				}

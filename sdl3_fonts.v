@@ -46,11 +46,10 @@ pub fn (mut ctx RenderContext) clear_text_cache() {
 	}
 	ctx.text_cache = map[u64]TextCacheEntry{}
 	for _, t in ctx.icon_cache {
-		if unsafe { t != nil } {
-			C.SDL_DestroyTexture(t)
-		}
+		mut tex := t
+		tex.destroy()
 	}
-	ctx.icon_cache = map[string]voidptr{}
+	ctx.icon_cache = map[string]Texture{}
 }
 
 // Вытеснение по давности использования (LRU), когда кэш достиг cache_max: удаляются записи с
@@ -299,12 +298,95 @@ pub fn (mut ctx RenderContext) cleanup_fonts() {
 
 // ─── Text rendering ───
 
+// cached_text_texture возвращает текстуру строки text, отрисованной шрифтом font цветом c, и её
+// размер в физических пикселях - из text_cache или отрисовав заново. font_size и style_int входят в
+// ключ кэша (style_int - FontStyle как int, 99 - шрифт не из набора, icon_style_tag - глифы иконок).
+// Общий путь для draw_text_with_font и draw_icon_glyph (sdl3_icon_font.v). Шаги:
+// (1) по ключу ищется запись, при попадании сверяются текст/размер/стиль/цвет - защита от коллизии
+// хэша, поля верификации удалять нельзя; (2) при промахе текст рендерится в surface (Blended - с
+// антиалиасингом), превращается в текстуру, размеры берутся у TTF; перед вставкой при переполнении
+// кэша вытесняются старые записи (LRU по cache_tick). Ошибка отрисовки - nil.
+fn (mut ctx RenderContext) cached_text_texture(text string, font voidptr, font_size int, style_int int, c Color) (voidptr, int, int) {
+	key := text_cache_key(text, font_size, style_int, c)
+
+	// cache_tick - монотонный "счётчик времени" кэша; last_used хранит его значение для LRU.
+	ctx.cache_tick++
+
+	cached := ctx.text_cache[key] or {
+		TextCacheEntry{
+			texture: unsafe { nil }
+			w:       0
+			h:       0
+		}
+	}
+	mut texture := cached.texture
+
+	// FNV-1a collision check: a hash hit only counts if the entry was rendered
+	// from exactly the same inputs. On mismatch, drop the colliding texture and
+	// fall through to the miss path (re-render + overwrite) — costs one
+	// re-render instead of silently drawing the wrong text forever.
+	if unsafe { texture != nil } {
+		if cached.text != text || cached.font_size != font_size || cached.style_int != style_int
+			|| cached.color != c {
+			C.SDL_DestroyTexture(texture)
+			texture = unsafe { nil }
+		}
+	}
+
+	if unsafe { texture != nil } {
+		ctx.text_cache[key] = TextCacheEntry{
+			...cached
+			last_used: ctx.cache_tick
+		}
+		return texture, cached.w, cached.h
+	}
+
+	sdl_color := C.SDL_Color{
+		r: c.r
+		g: c.g
+		b: c.b
+		a: c.a
+	}
+	// SDL3_ttf: TTF_RenderText_Blended takes length (0 = auto from null-terminator)
+	surface := C.TTF_RenderText_Blended(font, text.str, usize(0), sdl_color)
+	if unsafe { surface == nil } {
+		return unsafe { nil }, 0, 0
+	}
+	texture = C.SDL_CreateTextureFromSurface(ctx.renderer, surface)
+	C.SDL_DestroySurface(surface)
+	if unsafe { texture == nil } {
+		return unsafe { nil }, 0, 0
+	}
+
+	C.SDL_SetTextureBlendMode(texture, sdl_blendmode_blend)
+	// Nearest-neighbour prevents SDL from blurring the already-antialiased glyph
+	// texture when it is displayed at a non-integer logical size
+	C.SDL_SetTextureScaleMode(texture, sdl_scalemode_nearest)
+
+	// SDL3_ttf: TTF_GetStringSize for text measurement
+	mut tw := 0
+	mut th := 0
+	C.TTF_GetStringSize(font, text.str, usize(0), &tw, &th)
+
+	if ctx.text_cache.len >= ctx.cache_max {
+		ctx.evict_text_cache_lru()
+	}
+	ctx.text_cache[key] = TextCacheEntry{
+		texture:   texture
+		w:         tw
+		h:         th
+		last_used: ctx.cache_tick
+		text:      text
+		font_size: font_size
+		style_int: style_int
+		color:     c
+	}
+	return texture, tw, th
+}
+
 // Рисует text в логической точке (x, y) (левый верхний угол) цветом c шрифтом font.
-// Алгоритм: (1) координаты привязываются к целым физическим пикселям; (2) по ключу ищется
-// текстура в кэше, при попадании сверяются текст/размер/стиль/цвет (защита от коллизии хэша -
-// поля верификации удалять нельзя); (3) при промахе текст рендерится в surface (Blended - с
-// антиалиасингом), превращается в текстуру, размеры берутся у TTF; перед вставкой при
-// переполнении кэша вытесняются старые записи; (4) текстура рисуется в логических единицах
+// Алгоритм: (1) координаты привязываются к целым физическим пикселям; (2) текстура строки
+// берётся из кэша текста или рендерится заново (cached_text_texture); (3) текстура рисуется в логических единицах
 // (физические размеры делятся на dpi*ui scale). Пустой текст и nil-шрифт - ничего не делают.
 pub fn (mut ctx RenderContext) draw_text_with_font(text string, x f32, y f32, c Color, font voidptr) {
 	if text.len == 0 || unsafe { font == nil } {
@@ -324,88 +406,9 @@ pub fn (mut ctx RenderContext) draw_text_with_font(text string, x f32, y f32, c 
 	font_size := info.font_size
 	style_int := info.style_int
 
-	key := text_cache_key(text, font_size, style_int, c)
-
-	// cache_tick - монотонный "счётчик времени" кэша; last_used хранит его значение для LRU.
-	ctx.cache_tick++
-
-	cached := ctx.text_cache[key] or {
-		TextCacheEntry{
-			texture: unsafe { nil }
-			w:       0
-			h:       0
-		}
-	}
-	mut texture := cached.texture
-	mut tw := cached.w
-	mut th := cached.h
-
-	// FNV-1a collision check: a hash hit only counts if the entry was rendered
-	// from exactly the same inputs. On mismatch, drop the colliding texture and
-	// fall through to the miss path (re-render + overwrite) — costs one
-	// re-render instead of silently drawing the wrong text forever.
-	if unsafe { texture != nil } {
-		if cached.text != text || cached.font_size != font_size || cached.style_int != style_int
-			|| cached.color != c {
-			C.SDL_DestroyTexture(texture)
-			texture = unsafe { nil }
-		}
-	}
-
-	if unsafe { texture != nil } {
-		ctx.text_cache[key] = TextCacheEntry{
-			texture:   texture
-			w:         tw
-			h:         th
-			last_used: ctx.cache_tick
-			text:      cached.text
-			font_size: cached.font_size
-			style_int: cached.style_int
-			color:     cached.color
-		}
-	} else {
-		sdl_color := C.SDL_Color{
-			r: c.r
-			g: c.g
-			b: c.b
-			a: c.a
-		}
-		// SDL3_ttf: TTF_RenderText_Blended takes length (0 = auto from null-terminator)
-		surface := C.TTF_RenderText_Blended(font, text.str, usize(0), sdl_color)
-		if unsafe { surface == nil } {
-			return
-		}
-		texture = C.SDL_CreateTextureFromSurface(ctx.renderer, surface)
-		C.SDL_DestroySurface(surface)
-		if unsafe { texture == nil } {
-			return
-		}
-
-		C.SDL_SetTextureBlendMode(texture, sdl_blendmode_blend)
-		// Nearest-neighbour prevents SDL from blurring the already-antialiased glyph
-		// texture when it is displayed at a non-integer logical size
-		C.SDL_SetTextureScaleMode(texture, sdl_scalemode_nearest)
-
-		// SDL3_ttf: TTF_GetStringSize for text measurement
-		mut iw := 0
-		mut ih := 0
-		C.TTF_GetStringSize(font, text.str, usize(0), &iw, &ih)
-		tw = iw
-		th = ih
-
-		if ctx.text_cache.len >= ctx.cache_max {
-			ctx.evict_text_cache_lru()
-		}
-		ctx.text_cache[key] = TextCacheEntry{
-			texture:   texture
-			w:         tw
-			h:         th
-			last_used: ctx.cache_tick
-			text:      text
-			font_size: font_size
-			style_int: style_int
-			color:     c
-		}
+	texture, tw, th := ctx.cached_text_texture(text, font, font_size, style_int, c)
+	if unsafe { texture == nil } {
+		return
 	}
 
 	// Keep texture dimensions in logical units as f32 — avoid int rounding

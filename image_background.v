@@ -31,7 +31,7 @@ pub enum BgMode {
 
 // ImageBackground - пассивный виджет-картинка (kind_image_background). Источник - файл (path) ИЛИ байты (data);
 // data приоритетнее. Текстура создаётся лениво в draw() (ensure_texture_loaded) и привязана к рендереру,
-// на котором создана (tex_renderer + tex_renderer_gen - защита от ABA, см. is_renderer_alive_gen).
+// на котором создана (Texture помнит рендерер и его поколение - защита от ABA, sdl3_texture.v).
 // tex_path - для какого path загружена текстура; служебное значение '\x00reload' требует перезагрузки.
 // bg_color (alpha > 0) - сплошная подложка под картинкой со скруглением corner_radius.
 @[heap]
@@ -48,13 +48,10 @@ pub mut:
 	dnd           &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
 	bg_color      Color     = Color{0, 0, 0, 0}
 	corner_radius f32
-	// Cached texture (same pattern + ABA guard as ImageView)
-	texture          voidptr = unsafe { nil }
-	tex_renderer     voidptr = unsafe { nil }
-	tex_renderer_gen u64
-	tex_w            int
-	tex_h            int
-	tex_path         string
+	// Кэш текстуры (sdl3_texture.v; освобождается только при живом рендерере,
+	// как у ImageView). Размер картинки - texture.w/texture.h.
+	texture  Texture
+	tex_path string
 	// Raw image bytes (for data-backed backgrounds with no file on disk)
 	data []u8
 }
@@ -108,78 +105,35 @@ pub fn (mut ib ImageBackground) set_bg_color(c Color) {
 // ─── Texture management ────────────────────────────────
 
 // ensure_texture_loaded лениво (пере)создаёт текстуру: нет источника или актуальная текстура уже есть - выход;
-// иначе уничтожает старую (SDL_DestroyTexture только пока жив её рендерер), грузит поверхность
-// (IMG_Load_IO для байт, IMG_Load для файла), делает текстуру и запоминает рендерер+поколение.
-// При ошибке загрузки tex_path всё равно ставится, чтобы не повторять загрузку каждый кадр (картинка просто не рисуется).
+// иначе уничтожает старую (Texture.destroy сам проверяет, жив ли её рендерер) и грузит новую - из байт
+// data, если они есть, иначе из файла path. При ошибке загрузки tex_path всё равно ставится, чтобы не
+// повторять загрузку каждый кадр (картинка просто не рисуется).
 fn (mut ib ImageBackground) ensure_texture_loaded(ctx &RenderContext) {
 	has_source := ib.path.len > 0 || ib.data.len > 0
 	if !has_source {
 		return
 	}
 	// A loaded texture for the current source — nothing to do.
-	if unsafe { ib.texture != nil } && ib.tex_path == ib.path && ib.tex_path != '\x00reload' {
+	if ib.texture.is_valid() && ib.tex_path == ib.path && ib.tex_path != '\x00reload' {
 		return
 	}
-	// Destroy a stale texture if any (only while its renderer is still alive).
-	if unsafe { ib.texture != nil } {
-		if is_renderer_alive_gen(ib.tex_renderer, ib.tex_renderer_gen) {
-			C.SDL_DestroyTexture(ib.texture)
-		}
-		ib.texture = unsafe { nil }
-		ib.tex_renderer = unsafe { nil }
-		ib.tex_renderer_gen = 0
-	}
-	ib.tex_w = 0
-	ib.tex_h = 0
-
-	mut surface := voidptr(unsafe { nil })
-	if ib.data.len > 0 {
-		io := C.SDL_IOFromConstMem(ib.data.data, usize(ib.data.len))
-		if unsafe { io != nil } {
-			surface = C.IMG_Load_IO(io, true)
-		}
+	ib.texture.destroy()
+	ib.texture = if ib.data.len > 0 {
+		ctx.texture_from_bytes(ib.data)
 	} else {
-		surface = C.IMG_Load(ib.path.str)
+		ctx.texture_from_file(ib.path)
 	}
-	if unsafe { surface == nil } {
-		ib.tex_path = ib.path
-		return
-	}
-	texture := C.SDL_CreateTextureFromSurface(ctx.renderer, surface)
-	C.SDL_DestroySurface(surface)
-	if unsafe { texture == nil } {
-		ib.tex_path = ib.path
-		return
-	}
-	C.SDL_SetTextureBlendMode(texture, sdl_blendmode_blend)
-
-	mut wf := f32(0)
-	mut hf := f32(0)
-	C.SDL_GetTextureSize(texture, &wf, &hf)
-	ib.tex_w = int(wf)
-	ib.tex_h = int(hf)
-
-	ib.texture = texture
-	ib.tex_renderer = ctx.renderer
-	ib.tex_renderer_gen = renderer_generation(ctx.renderer)
 	ib.tex_path = ib.path
 }
 
 // destroy_texture освобождает текстуру (только если рендерер ещё жив) и сбрасывает tex_path, чтобы следующий draw() загрузил её заново. Вызывается при очистке окна.
 pub fn (mut ib ImageBackground) destroy_texture() {
-	if unsafe { ib.texture != nil } {
-		if is_renderer_alive_gen(ib.tex_renderer, ib.tex_renderer_gen) {
-			C.SDL_DestroyTexture(ib.texture)
-		}
-		ib.texture = unsafe { nil }
-		ib.tex_renderer = unsafe { nil }
-		ib.tex_renderer_gen = 0
-	}
+	ib.texture.destroy()
 	ib.tex_path = ''
 }
 
 fn (ib &ImageBackground) has_texture() bool {
-	return unsafe { ib.texture != nil } && ib.tex_w > 0 && ib.tex_h > 0
+	return ib.texture.is_valid() && ib.texture.w > 0 && ib.texture.h > 0
 }
 
 // ─── Drawing ───────────────────────────────────────────
@@ -212,8 +166,8 @@ pub fn (mut ib ImageBackground) draw(mut ctx RenderContext) {
 	}
 
 	b := ib.bounds
-	tw := f32(ib.tex_w)
-	th := f32(ib.tex_h)
+	tw := f32(ib.texture.w)
+	th := f32(ib.texture.h)
 
 	ctx.push_clip(b)
 	match ib.mode {
@@ -254,13 +208,7 @@ pub fn (mut ib ImageBackground) draw(mut ctx RenderContext) {
 
 // blit - одна отрисовка всей текстуры в прямоугольник dst (координаты логические, масштаб рендера выставлен окном).
 fn (ib &ImageBackground) blit(mut ctx RenderContext, dst Rect) {
-	sdl_dst := C.SDL_FRect{
-		x: dst.x
-		y: dst.y
-		w: dst.w
-		h: dst.h
-	}
-	C.SDL_RenderTexture(ctx.renderer, ib.texture, unsafe { nil }, &sdl_dst)
+	ctx.draw_texture(ib.texture, dst)
 }
 
 // ─── Events ────────────────────────────────────────────

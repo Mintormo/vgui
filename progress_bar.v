@@ -6,7 +6,7 @@ module vgui
 //
 // Связи: размер считает measure() в layout_measure.v; события виджет не
 // принимает (handle_event всегда false) и в фокус-учёте не участвует.
-// Indeterminate-анимация зависит от времени SDL_GetTicks(), а не от Anim, и
+// Indeterminate-анимация зависит от времени now_ms() (clock.v), а не от Anim, и
 // держится на mark_anim_rect каждый кадр (см. draw). Цвета с a == 0 означают
 // «взять из темы» (eff_*_color). Сеттеры кадр не инвалидируют: после set_value
 // в своём цикле зовите Window.invalidate*.
@@ -250,7 +250,7 @@ fn (p &ProgressBar) draw_linear(mut ctx RenderContext) {
 
 	// Fill
 	if p.indeterminate {
-		ms := C.SDL_GetTicks()
+		ms := now_ms()
 		t := f32(ms) * 0.001 * p.anim_speed
 		// Indeterminate: положение бегущей полосы — функция времени. phase — доля
 		// периода (2 с при anim_speed = 1) в 0..1, остаток от деления считается
@@ -337,7 +337,7 @@ fn (p &ProgressBar) draw_circular(mut ctx RenderContext) {
 	spinner_draw_circle_arc(mut ctx, cx, cy, outer_r, thick, 0, 6.2831853, bg_c)
 
 	if p.indeterminate {
-		ms := C.SDL_GetTicks()
+		ms := now_ms()
 		t := f32(ms) * 0.001 * p.anim_speed
 		// indeterminate: один оборот в секунду при anim_speed = 1
 		angle := t * 6.2831853

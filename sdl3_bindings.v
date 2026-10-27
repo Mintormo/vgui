@@ -495,6 +495,25 @@ pub fn set_cursor(kind int) {
 	}
 }
 
+// open_system_browser открывает URL во внешней программе по умолчанию (SDL_OpenURL).
+pub fn open_system_browser(url string) {
+	C.SDL_OpenURL(url.str)
+}
+
+// current_cursor - непрозрачный хэндл курсора, стоящего сейчас (SDL_Cursor*), чтобы
+// потом вернуть его restore_cursor_handle. Виджету (Splitter) так не нужно звать SDL
+// самому. Курсоры vgui живут до конца процесса (g_cursors), их хэндл не протухает.
+fn current_cursor() voidptr {
+	return C.SDL_GetCursor()
+}
+
+// restore_cursor_handle ставит курсор по хэндлу из current_cursor; nil - no-op.
+fn restore_cursor_handle(cur voidptr) {
+	if cur != unsafe { nil } {
+		C.SDL_SetCursor(cur)
+	}
+}
+
 // Кэш системных курсоров по их типу (создаются один раз, живут до конца процесса). Глобальное
 // состояние главного потока.
 __global g_cursors = map[int]voidptr{}

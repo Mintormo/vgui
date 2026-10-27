@@ -563,7 +563,7 @@ fn (mut s Splitter) update_ratio_from_mouse(mx f32, my f32) {
 // запомнив прежний при первой установке.
 fn (mut s Splitter) set_resize_cursor() {
 	if s.saved_cursor == unsafe { nil } {
-		s.saved_cursor = C.SDL_GetCursor()
+		s.saved_cursor = current_cursor()
 	}
 	cursor_id := match s.dir {
 		.horizontal { sdl_system_cursor_sizewe }
@@ -578,7 +578,7 @@ fn (mut s Splitter) set_resize_cursor() {
 // на весь процесс (set_cursor), поэтому сохранённый указатель жив. Не запоминали - стрелка.
 fn (mut s Splitter) restore_cursor() {
 	if s.saved_cursor != unsafe { nil } {
-		C.SDL_SetCursor(s.saved_cursor)
+		restore_cursor_handle(s.saved_cursor)
 		s.saved_cursor = unsafe { nil }
 	} else {
 		set_cursor(sdl_system_cursor_arrow)

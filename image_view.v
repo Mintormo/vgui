@@ -23,9 +23,8 @@ module vgui
 //   .native  — original size with scrollbars
 //   .zoom    — user-controlled zoom + pan + scrollbars
 //
-// (Замечание: загрузка идёт через C.IMG_Load, как и в canvas.v; название «SDL2_image» ниже,
-// возможно, устарело - проект на SDL3.)
-// Supported formats (via SDL2_image):
+// Загрузка - через ctx.texture_from_file (sdl3_texture.v, внутри SDL3_image).
+// Supported formats:
 //   PNG, JPG/JPEG, BMP, TIF/TIFF, WEBP, GIF (first frame), SVG (static)
 //
 // Interactions:
@@ -55,7 +54,7 @@ const iv_max_zoom = f32(20.0)
 
 // ImageView: поля состояния сгруппированы - вид (path/mode/цвета), зум и прокрутка, перетаскивание
 // (pan_* - панорамирование средней/правой кнопкой, vsb_*/hsb_* - перетаскивание бегунков полос),
-// кэш текстуры (texture/tex_*), скорости (scroll_speed - px на шаг прокрутки, zoom_speed - доля
+// кэш текстуры (texture/tex_path), скорости (scroll_speed - px на шаг прокрутки, zoom_speed - доля
 // приращения зума на шаг колеса). scroll_x/scroll_y - смещение в пикселях УЖЕ отмасштабированной картинки.
 @[heap]
 pub struct ImageView {
@@ -96,19 +95,11 @@ pub mut:
 	hsb_hovered           bool
 	hsb_drag_start_x      f32
 	hsb_drag_start_scroll f32
-	// Cached texture
-	texture voidptr = unsafe { nil }
-	// Renderer the texture belongs to. SDL ties textures to their creating
-	// renderer; we must only SDL_DestroyTexture while that renderer is alive
-	// (see is_renderer_alive_gen / the live-renderer registry in sdl3_window.v).
-	// tex_renderer_gen is the registry generation snapshotted at texture
-	// creation: a bare pointer match is ABA-prone (a new renderer can reuse a
-	// dead one's address), the (pointer, generation) pair is not.
-	tex_renderer     voidptr = unsafe { nil }
-	tex_renderer_gen u64
-	tex_w            int
-	tex_h            int
-	tex_path         string
+	// Кэш текстуры картинки (sdl3_texture.v): Texture помнит рендерер-создатель
+	// и его поколение и освобождается только при живом рендерере (PROJECT.md,
+	// «Время жизни SDL-текстур»). Размер картинки - texture.w/texture.h.
+	texture  Texture
+	tex_path string
 	// Scroll settings
 	scroll_speed f32 = 40
 	zoom_speed   f32 = 0.15
@@ -188,89 +179,45 @@ pub fn (mut iv ImageView) reset_zoom() {
 
 // image_size - размер исходной картинки в пикселях; (0, 0), пока текстура не загружена или файл не открылся.
 pub fn (iv &ImageView) image_size() (int, int) {
-	return iv.tex_w, iv.tex_h
+	return iv.texture.w, iv.texture.h
 }
 
 // ─── Texture management ────────────────────────────────
 
 // ensure_texture_loaded лениво загружает файл в текстуру текущего renderer'а.
 // Ничего не делает, если путь пуст или текстура уже загружена для этого пути. При смене пути
-// старая текстура уничтожается - но только если её renderer ещё жив (иначе SDL уже освободил её
-// вместе с renderer'ом, и повторный SDL_DestroyTexture - двойное освобождение).
-// Ошибка загрузки (IMG_Load/CreateTexture вернули nil) не выбрасывается: tex_path запоминается,
+// старая текстура уничтожается (Texture.destroy сам проверяет, жив ли её renderer).
+// Ошибка загрузки (пустая Texture) не выбрасывается: tex_path запоминается,
 // чтобы не пытаться читать битый файл каждый кадр, а draw() покажет «Failed to load».
 fn (mut iv ImageView) ensure_texture_loaded(ctx &RenderContext) {
 	if iv.path.len == 0 {
 		return
 	}
-	if unsafe { iv.texture != nil } && iv.tex_path == iv.path {
+	if iv.texture.is_valid() && iv.tex_path == iv.path {
 		return
 	}
-	// Destroy old texture if any (only while its renderer is still alive —
-	// generation check guards against a new renderer reusing the old address)
-	if unsafe { iv.texture != nil } {
-		if is_renderer_alive_gen(iv.tex_renderer, iv.tex_renderer_gen) {
-			C.SDL_DestroyTexture(iv.texture)
-		}
-		iv.texture = unsafe { nil }
-		iv.tex_renderer = unsafe { nil }
-		iv.tex_renderer_gen = 0
-	}
-	iv.tex_w = 0
-	iv.tex_h = 0
-
-	// // Surface (память CPU) нужен только чтобы создать текстуру; сразу освобождаем.
-	// // Размер берём у текстуры (float в SDL3), а не у surface.
-	surface := C.IMG_Load(iv.path.str)
-	if unsafe { surface == nil } {
-		iv.tex_path = iv.path
-		return
-	}
-	texture := C.SDL_CreateTextureFromSurface(ctx.renderer, surface)
-	C.SDL_DestroySurface(surface)
-	if unsafe { texture == nil } {
-		iv.tex_path = iv.path
-		return
-	}
-	C.SDL_SetTextureBlendMode(texture, sdl_blendmode_blend)
-
-	// Query size from the texture
-	mut wf := f32(0)
-	mut hf := f32(0)
-	C.SDL_GetTextureSize(texture, &wf, &hf)
-	iv.tex_w = int(wf)
-	iv.tex_h = int(hf)
-
-	iv.texture = texture
-	iv.tex_renderer = ctx.renderer
-	// Запоминаем (renderer, поколение): одного указателя мало, новый renderer может получить адрес умершего (ABA).
-	iv.tex_renderer_gen = renderer_generation(ctx.renderer)
+	// Старая текстура: destroy() сам проверит, жив ли её рендерер (иначе SDL уже
+	// освободил её вместе с ним, и повторное освобождение - use-after-free).
+	iv.texture.destroy()
+	// Неудачная загрузка даёт пустую текстуру; tex_path запоминается всё равно,
+	// чтобы не читать битый файл каждый кадр.
+	iv.texture = ctx.texture_from_file(iv.path)
 	iv.tex_path = iv.path
 }
 
-// destroy_texture освобождает текстуру (идемпотентно); зовётся при уничтожении виджета/окна. Ниже - почему проверяется жизнь renderer'а.
+// destroy_texture освобождает текстуру (идемпотентно); зовётся при уничтожении
+// виджета/окна, в том числе когда окна уже нет (teardown из Python/GC) - тогда
+// Texture.destroy() не тронет текстуру мёртвого рендерера.
 pub fn (mut iv ImageView) destroy_texture() {
-	if unsafe { iv.texture != nil } {
-		// Only free if the owning renderer is still alive. If the window/renderer
-		// was already torn down, SDL has already destroyed this texture and a
-		// second SDL_DestroyTexture would be a use-after-free / double-free.
-		// The generation check additionally rejects a *different* renderer that
-		// happens to live at the old address (ABA).
-		if is_renderer_alive_gen(iv.tex_renderer, iv.tex_renderer_gen) {
-			C.SDL_DestroyTexture(iv.texture)
-		}
-		iv.texture = unsafe { nil }
-		iv.tex_renderer = unsafe { nil }
-		iv.tex_renderer_gen = 0
-	}
+	iv.texture.destroy()
 	iv.tex_path = ''
 }
 
 // ─── Geometry ──────────────────────────────────────────
 
-// has_texture - есть ли пригодная к рисованию текстура (не nil и ненулевой размер).
+// has_texture - есть ли пригодная к рисованию текстура (загружена и ненулевого размера).
 fn (iv &ImageView) has_texture() bool {
-	return unsafe { iv.texture != nil } && iv.tex_w > 0 && iv.tex_h > 0
+	return iv.texture.is_valid() && iv.texture.w > 0 && iv.texture.h > 0
 }
 
 // Inner rect (bounds minus padding)
@@ -290,13 +237,13 @@ fn (iv &ImageView) effective_zoom() f32 {
 	inner := iv.inner_rect()
 	match iv.mode {
 		.fit {
-			sx := inner.w / f32(iv.tex_w)
-			sy := inner.h / f32(iv.tex_h)
+			sx := inner.w / f32(iv.texture.w)
+			sy := inner.h / f32(iv.texture.h)
 			return min_f32(sx, sy)
 		}
 		.fill {
-			sx := inner.w / f32(iv.tex_w)
-			sy := inner.h / f32(iv.tex_h)
+			sx := inner.w / f32(iv.texture.w)
+			sy := inner.h / f32(iv.texture.h)
 			return max_f32(sx, sy)
 		}
 		.stretch {
@@ -322,7 +269,7 @@ fn (iv &ImageView) displayed_size() (f32, f32) {
 		return inner.w, inner.h
 	}
 	z := iv.effective_zoom()
-	return f32(iv.tex_w) * z, f32(iv.tex_h) * z
+	return f32(iv.texture.w) * z, f32(iv.texture.h) * z
 }
 
 // needs_scrollbars - (горизонтальная, вертикальная): полосы нужны только в .native/.zoom и когда
@@ -510,14 +457,7 @@ pub fn (mut iv ImageView) draw(mut ctx RenderContext) {
 
 	ctx.push_clip(vp)
 
-	// Render texture
-	sdl_dst := C.SDL_FRect{
-		x: dr.x
-		y: dr.y
-		w: dr.w
-		h: dr.h
-	}
-	C.SDL_RenderTexture(ctx.renderer, iv.texture, unsafe { nil }, &sdl_dst)
+	ctx.draw_texture(iv.texture, dr)
 
 	ctx.pop_clip()
 

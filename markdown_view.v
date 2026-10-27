@@ -235,8 +235,8 @@ const md_checkbox_size = f32(13)
 //     текст всегда переносится, поэтому горизонтальная прокрутка нужна лишь им);
 //   scroll_x / scroll_y - прокрутка; vsb_* / hsb_* - состояние полос и их перетаскивания;
 //   editor - вложенный CodeEditor для режима .source;
-//   image_cache - SDL-текстуры картинок по разрешённому пути вместе с рендерером, которому они принадлежат
-//     (см. MdImageTexture); image_size_cache - размеры в пикселях (для точной высоты картинок с масштабом
+//   image_cache - текстуры картинок по разрешённому пути; Texture помнит рендерер, которому принадлежит
+//     (см. image_texture); image_size_cache - размеры в пикселях (для точной высоты картинок с масштабом
 //     в раскладке);
 //   links / copy_btns - области под мышь, заполняются в draw(); hovered_* - что под курсором;
 //   anchor_map - slug заголовка -> y (для переходов по #якорям);
@@ -268,7 +268,7 @@ pub mut:
 	dirty                 bool = true
 	last_w                f32
 	editor                &CodeEditor = unsafe { nil }
-	image_cache           map[string]MdImageTexture
+	image_cache           map[string]Texture
 	image_size_cache      map[string][2]int // [w, h] in pixels
 	scroll_y              f32
 	scroll_x              f32
@@ -322,11 +322,6 @@ pub mut:
 }
 
 // ─── Constructors ──────────────────────────────────────
-
-// open_system_browser открывает URL во внешней программе по умолчанию (SDL_OpenURL).
-pub fn open_system_browser(url string) {
-	C.SDL_OpenURL(url.str)
-}
 
 // markdown_view создаёт пустой виджет вместе с внутренним CodeEditor для режима .source (без номеров строк и миникарты).
 pub fn markdown_view() &MarkdownView {
@@ -2478,7 +2473,7 @@ pub fn (mut md MarkdownView) draw(mut ctx RenderContext) {
 	// Link tooltip: check delay timer and enqueue for rendering
 	if md.hovered_link_url.len > 0 && md.link_hover_start > 0 {
 		if !md.link_tooltip_showing {
-			elapsed := C.SDL_GetTicks() - md.link_hover_start
+			elapsed := now_ms() - md.link_hover_start
 			if elapsed >= md.link_tooltip_delay {
 				md.link_tooltip_showing = true
 			} else {
@@ -2533,7 +2528,7 @@ fn (mut md MarkdownView) draw_copy_buttons(mut ctx RenderContext) {
 	if md.copy_btns.len == 0 {
 		return
 	}
-	now := C.SDL_GetTicks()
+	now := now_ms()
 	// Auto-clear "Copied" state after the feedback period
 	if md.copied_block_idx >= 0 && now - md.copied_at > md_copy_feedback_ms {
 		md.copied_block_idx = -1
@@ -2683,51 +2678,25 @@ fn (md &MarkdownView) image_path(url string) string {
 	return url
 }
 
-// MdImageTexture - текстура картинки в кэше вместе с рендерером, которому она принадлежит, и его
-// поколением в реестре живых рендереров. Текстура SDL живёт не дольше своего рендерера: когда окно
-// закрыто или рендерер пересоздан (сброс устройства Direct3D), SDL уже освободил её сам. Пара
-// renderer + gen позволяет это распознать: повторный SDL_DestroyTexture был бы double free, а
-// рисование такой текстурой на новом рендерере - обращение к освобождённой памяти. Поколение
-// отсекает и новый рендерер, случайно оказавшийся по старому адресу (ABA).
-struct MdImageTexture {
-	tex      voidptr
-	renderer voidptr
-	gen      u64
-}
-
-// destroy освобождает текстуру, только если её рендерер ещё жив (иначе SDL уже сделал это сам).
-fn (entry MdImageTexture) destroy() {
-	if unsafe { entry.tex != nil } && is_renderer_alive_gen(entry.renderer, entry.gen) {
-		C.SDL_DestroyTexture(entry.tex)
-	}
-}
-
 // image_texture возвращает текстуру картинки по разрешённому пути для рендерера ctx, загружая её
-// при первом обращении (nil - файл не прочитался). Запись кэша, созданная другим или уже мёртвым
-// рендерером (виджет перенесли в другое окно, рендерер пересоздан), не используется: она
-// освобождается (если её рендерер жив) и картинка загружается заново для текущего.
-fn (mut md MarkdownView) image_texture(path string, ctx &RenderContext) voidptr {
+// при первом обращении (пустая Texture - файл не прочитался). Текстура SDL живёт не дольше своего
+// рендерера: когда окно закрыто или рендерер пересоздан (сброс устройства Direct3D), SDL уже освободил
+// её сам. Поэтому запись кэша, созданная другим или уже мёртвым рендерером (виджет перенесли в другое
+// окно, рендерер пересоздан), не используется (Texture.belongs_to): рисовать ею - обращение к
+// освобождённой памяти. Она освобождается (destroy() сам проверит, жив ли её рендерер, - иначе
+// double free) и картинка загружается заново для текущего.
+fn (mut md MarkdownView) image_texture(path string, ctx &RenderContext) Texture {
 	if cached := md.image_cache[path] {
-		if cached.renderer == ctx.renderer && is_renderer_alive_gen(cached.renderer, cached.gen) {
-			return cached.tex
+		if cached.belongs_to(ctx) {
+			return cached
 		}
-		cached.destroy()
+		mut stale := cached
+		stale.destroy()
 		md.image_cache.delete(path)
 	}
-	surface := C.IMG_Load(path.str)
-	if unsafe { surface == nil } {
-		return unsafe { nil }
-	}
-	tex := C.SDL_CreateTextureFromSurface(ctx.renderer, surface)
-	C.SDL_DestroySurface(surface)
-	if unsafe { tex == nil } {
-		return unsafe { nil }
-	}
-	C.SDL_SetTextureBlendMode(tex, sdl_blendmode_blend)
-	md.image_cache[path] = MdImageTexture{
-		tex:      tex
-		renderer: ctx.renderer
-		gen:      renderer_generation(ctx.renderer)
+	tex := ctx.texture_from_file(path)
+	if tex.is_valid() {
+		md.image_cache[path] = tex
 	}
 	return tex
 }
@@ -2752,15 +2721,12 @@ fn (mut md MarkdownView) draw_inline_image(span MdRenderSpan, ix f32, ly f32, li
 
 	tex := md.image_texture(path, ctx)
 
-	if unsafe { tex == nil } {
+	if !tex.is_valid() {
 		return
 	}
 
-	mut tw_f := f32(0)
-	mut th_f := f32(0)
-	C.SDL_GetTextureSize(tex, &tw_f, &th_f)
-	tw := int(tw_f)
-	th := int(th_f)
+	tw := tex.w
+	th := tex.h
 	if tw <= 0 || th <= 0 {
 		return
 	}
@@ -2794,13 +2760,7 @@ fn (mut md MarkdownView) draw_inline_image(span MdRenderSpan, ix f32, ly f32, li
 		dw = dw * sh
 	}
 
-	dst := C.SDL_FRect{
-		x: ix
-		y: ly
-		w: dw
-		h: dh
-	}
-	C.SDL_RenderTexture(ctx.renderer, tex, unsafe { nil }, &dst)
+	ctx.draw_texture(tex, Rect{ix, ly, dw, dh})
 
 	// Multi-line caption below the image
 	if span.text.len > 0 && caption_h > 0 {
@@ -2934,15 +2894,12 @@ fn (mut md MarkdownView) draw_image_block(block MdBlock, ly f32, ox f32, vp Rect
 
 	tex := md.image_texture(path, ctx)
 
-	if unsafe { tex == nil } {
+	if !tex.is_valid() {
 		return
 	}
 
-	mut tw_f2 := f32(0)
-	mut th_f2 := f32(0)
-	C.SDL_GetTextureSize(tex, &tw_f2, &th_f2)
-	tw := int(tw_f2)
-	th := int(th_f2)
+	tw := tex.w
+	th := tex.h
 
 	if tw <= 0 || th <= 0 {
 		return
@@ -2981,13 +2938,7 @@ fn (mut md MarkdownView) draw_image_block(block MdBlock, ly f32, ox f32, vp Rect
 		else { base_x }
 	}
 
-	dst := C.SDL_FRect{
-		x: img_x
-		y: ly
-		w: dw
-		h: dh
-	}
-	C.SDL_RenderTexture(ctx.renderer, tex, unsafe { nil }, &dst)
+	ctx.draw_texture(tex, Rect{img_x, ly, dw, dh})
 
 	// Multi-line caption below the image
 	if block.image_alt.len > 0 && caption_h > 0 {
@@ -3134,7 +3085,7 @@ pub fn (mut md MarkdownView) handle_event(event &GuiEvent, app &App) bool {
 					md.on_link_hover(md.hovered_link_url)
 				}
 				if md.hovered_link_url.len > 0 {
-					md.link_hover_start = C.SDL_GetTicks()
+					md.link_hover_start = now_ms()
 					md.link_tooltip_showing = false
 				} else {
 					md.link_hover_start = 0
@@ -3170,7 +3121,7 @@ pub fn (mut md MarkdownView) handle_event(event &GuiEvent, app &App) bool {
 					if btn.block_idx >= 0 && btn.block_idx < md.blocks.len {
 						app.set_clipboard(md.blocks[btn.block_idx].code_text)
 						md.copied_block_idx = btn.block_idx
-						md.copied_at = C.SDL_GetTicks()
+						md.copied_at = now_ms()
 					}
 					return true
 				}
@@ -3466,12 +3417,13 @@ pub fn (md &MarkdownView) get_font_size_step() int {
 
 // cleanup освобождает SDL-текстуры картинок и кэши. Безопасна в любой момент teardown: текстура,
 // чей рендерер уже уничтожен (SDL освободил её вместе с ним), повторно не освобождается -
-// см. MdImageTexture и PROJECT.md, «Время жизни SDL-текстур». Повторный вызов ничего не делает.
+// см. Texture.destroy и PROJECT.md, «Время жизни SDL-текстур». Повторный вызов ничего не делает.
 // Мост (vgui_destroy) зовёт её при уничтожении виджета.
 pub fn (mut md MarkdownView) cleanup() {
 	for _, entry in md.image_cache {
-		entry.destroy()
+		mut tex := entry
+		tex.destroy()
 	}
-	md.image_cache = map[string]MdImageTexture{}
+	md.image_cache = map[string]Texture{}
 	md.image_size_cache = map[string][2]int{}
 }

@@ -141,7 +141,14 @@ fn test_render_frame_dt() {
 		assert false, 'window: ${err}'
 		return
 	}
-	now := C.SDL_GetTicks()
+	// Часы интерфейса остановлены (clock.v): раньше тест брал SDL_GetTicks()
+	// и `now - 10_000` переполнял u64 в первые 10 секунд процесса - проходил
+	// случайно, через переполнение.
+	now := u64(60_000)
+	set_clock_override(now)
+	defer {
+		clear_clock_override()
+	}
 	win.ctx.anim_last_ms = 1 // «давно»
 	win.ctx.needs_animation = false
 	win.render()

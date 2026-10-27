@@ -300,7 +300,7 @@ pub mut:
 	tooltip_delay_ms u32 = tt_default_delay
 	// Состояние менеджера подсказок окна: чья подсказка, когда показать.
 	tips TipManager
-	// tip_clock_ms — подмена часов подсказок в тестах (0 — SDL_GetTicks).
+	// tip_clock_ms — подмена часов подсказок в тестах (0 — общие часы now_ms(), clock.v).
 	tip_clock_ms u64
 }
 
@@ -1015,15 +1015,17 @@ fn (mut w Window) render() {
 	// анимировался (флаг ещё не сброшен строкой ниже): после простоя
 	// интервал — это секунды тишины, и анимация, начавшаяся сейчас,
 	// перепрыгнула бы в конец. Поэтому первый её кадр — номинальный.
-	now_ms := C.SDL_GetTicks()
+	frame_ms := now_ms()
 	w.ctx.anim_dt = if w.ctx.anim_fixed_dt > 0 {
 		w.ctx.anim_fixed_dt
-	} else if w.ctx.needs_animation && w.ctx.anim_last_ms > 0 {
-		clamp_f32(f32(now_ms - w.ctx.anim_last_ms), 0, anim_max_dt)
+	} else if w.ctx.needs_animation && w.ctx.anim_last_ms > 0 && frame_ms >= w.ctx.anim_last_ms {
+		// frame_ms >= anim_last_ms: часы можно подменить и назад
+		// (set_clock_override, clock.v) - u64-разность тогда переполнилась бы.
+		clamp_f32(f32(frame_ms - w.ctx.anim_last_ms), 0, anim_max_dt)
 	} else {
 		anim_nominal_dt
 	}
-	w.ctx.anim_last_ms = now_ms
+	w.ctx.anim_last_ms = frame_ms
 
 	w.ctx.needs_animation = false
 	w.ctx.anim_reason = ''

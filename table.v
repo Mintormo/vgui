@@ -1454,7 +1454,7 @@ pub fn (mut t TableView) draw(mut ctx RenderContext) {
 
 					// Мигание курсора: период 1060 мс, видим первые 530 мс. Перерисовку по таймеру
 					// (чтобы курсор мигал) этот код сам не запрашивает.
-					ms := C.SDL_GetTicks()
+					ms := now_ms()
 					if ms % u64(1060) < 530 {
 						text_before := if t.edit_cur > 0 && t.edit_cur <= t.edit_buf.len {
 							t.edit_buf[..t.edit_cur].string()
@@ -1942,7 +1942,7 @@ fn (mut t TableView) handle_edit_event(event &GuiEvent, app &App, _ &RenderConte
 		.text_input {
 			// При зажатом Ctrl SDL всё равно присылает text_input для горячих клавиш - такие
 			// символы вставлять нельзя.
-			mod_state := C.SDL_GetModState()
+			mod_state := event.mod_keys
 			if (mod_state & sdl_kmod_ctrl) != 0 {
 				return true
 			}

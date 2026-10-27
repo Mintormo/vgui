@@ -31,7 +31,7 @@ import math
 //     так оттенок не теряется при серых цветах (s=0 или v=0), а RGB выводится
 //     из HSV (update_current). Ввод в RGB/hex-поля идёт обратным путём.
 //   - Модальность реализована вложенным циклом событий прямо в
-//     cp_run_dialog (process_events/render_all/SDL_Delay), поэтому вызов
+//     cp_run_dialog (process_events/render_all/modal_loop_pause), поэтому вызов
 //     блокирует колбэк, из которого пришёл; результат - (цвет, подтверждено).
 //     color_dialog() - тот же диалог без виджета (отдельная функция для приложений).
 //   - Нативного диалога цвета в SDL3 нет (PROJECT.md, «Нативные диалоги ОС»),
@@ -548,7 +548,7 @@ fn cp_run_dialog(parent &Window, mut app App, initial Color, show_alpha bool, ti
 	// Modal loop
 	// Вложенный цикл: обрабатываем события всего приложения, синхронизируем
 	// поля ввода с состоянием (только не сфокусированные - чтобы не перебивать
-	// набор пользователя), рисуем кадр; SDL_Delay(16) ~ 60 кадров/с, чтобы цикл
+	// набор пользователя), рисуем кадр; app.modal_loop_pause() ~ 60 кадров/с, чтобы цикл
 	// не грел процессор. Выход - OK/Cancel, закрытие окна диалога или выход из приложения.
 	for app.running && dlg.is_open() && !state.confirmed && !state.cancelled {
 		app.process_events()
@@ -562,7 +562,7 @@ fn cp_run_dialog(parent &Window, mut app App, initial Color, show_alpha bool, ti
 		// Sync RGBA/HSV inputs (only when not focused)
 		cp_sync_inputs_if_not_focused(state)
 		app.render_all()
-		C.SDL_Delay(16)
+		app.modal_loop_pause()
 	}
 
 	result := state.current

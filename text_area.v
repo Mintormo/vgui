@@ -467,7 +467,7 @@ pub fn (mut ta TextArea) draw(mut ctx RenderContext) {
 
 	// Draw cursor
 	if ta.focused {
-		ms := C.SDL_GetTicks()
+		ms := now_ms()
 		phase := ms % u64(1060)
 		if phase < 530 {
 			cur_line_runes := ta.lines[ta.cur_l].runes()
