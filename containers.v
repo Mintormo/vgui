@@ -348,19 +348,6 @@ fn (mut b BoxLayout) draw_impl(mut ctx RenderContext) {
 	}
 }
 
-// event_impl - раздаёт событие детям с конца (последний добавленный - сверху); true, если кто-то поглотил.
-fn (mut b BoxLayout) event_impl(event &GuiEvent, app &App) bool {
-	if !b.visible || (!b.enabled && is_input_event(event)) {
-		return false
-	}
-	for i := b.children.len - 1; i >= 0; i-- {
-		if event_child(mut b.children[i].widget, event, app) {
-			return true
-		}
-	}
-	return false
-}
-
 // remove_child drops the child whose pointer matches `target` from the
 // children slice (by pointer identity). Returns true if something was
 // removed. The child struct itself is not freed here — ownership of that
@@ -376,6 +363,15 @@ fn (mut b BoxLayout) remove_child(target voidptr) bool {
 		}
 	}
 	return false
+}
+
+// fit_to_window — «корневой» бокс (bounds не задан родителем) при
+// изменении размера окна подгоняет размер под новое окно (HBox/VBox).
+fn (mut b BoxLayout) fit_to_window(event &GuiEvent) {
+	if is_bounds_unset(b.bounds) {
+		b.bounds.w = f32(event.win_w)
+		b.bounds.h = f32(event.win_h)
+	}
 }
 
 // clear_children drops all children (without freeing their structs).
@@ -476,15 +472,14 @@ pub fn (mut h HBox) draw(mut ctx RenderContext) {
 	h.box.draw_impl(mut ctx)
 }
 
-// handle_event: при window_resize "корневой" контейнер (bounds не задан родителем) подгоняет размер под новое окно, затем раздаёт событие детям.
+// handle_event: при window_resize "корневой" контейнер (bounds не задан родителем)
+// подгоняет размер под новое окно. Детям события не раздаёт - их доставляет окно
+// по маршруту (event_route.v, PROJECT.md «Доставка событий»).
 pub fn (mut h HBox) handle_event(event &GuiEvent, app &App) bool {
 	if event.typ == .window_resize {
-		if is_bounds_unset(h.box.bounds) {
-			h.box.bounds.w = f32(event.win_w)
-			h.box.bounds.h = f32(event.win_h)
-		}
+		h.box.fit_to_window(event)
 	}
-	return h.box.event_impl(event, app)
+	return false
 }
 
 // ═══════════════════════════════════════════════════════
@@ -569,12 +564,9 @@ pub fn (mut v VBox) draw(mut ctx RenderContext) {
 
 pub fn (mut v VBox) handle_event(event &GuiEvent, app &App) bool {
 	if event.typ == .window_resize {
-		if is_bounds_unset(v.box.bounds) {
-			v.box.bounds.w = f32(event.win_w)
-			v.box.bounds.h = f32(event.win_h)
-		}
+		v.box.fit_to_window(event)
 	}
-	return v.box.event_impl(event, app)
+	return false
 }
 
 // ═══════════════════════════════════════════════════════
@@ -644,13 +636,9 @@ pub fn (mut p Panel) draw(mut ctx RenderContext) {
 	}
 }
 
+// handle_event: своих событий у панели нет, ребёнку их доставляет окно по
+// маршруту (event_route.v).
 pub fn (mut p Panel) handle_event(event &GuiEvent, app &App) bool {
-	if !p.visible || (!p.enabled && is_input_event(event)) {
-		return false
-	}
-	if unsafe { p.child != nil } {
-		return event_child(mut p.child, event, app)
-	}
 	return false
 }
 
@@ -721,15 +709,9 @@ pub fn (mut s Stack) draw(mut ctx RenderContext) {
 	ctx.end_disabled(s.enabled)
 }
 
+// handle_event: своих событий у стопки нет, детям их доставляет окно по
+// маршруту (event_route.v; верхний по z-порядку ребёнок - widget_path_at).
 pub fn (mut s Stack) handle_event(event &GuiEvent, app &App) bool {
-	if !s.visible || (!s.enabled && is_input_event(event)) {
-		return false
-	}
-	for i := s.children.len - 1; i >= 0; i-- {
-		if event_child(mut s.children[i], event, app) {
-			return true
-		}
-	}
 	return false
 }
 
@@ -848,9 +830,7 @@ pub fn (mut c Centered) handle_event(event &GuiEvent, app &App) bool {
 			c.bounds.h = f32(event.win_h)
 		}
 	}
-	if unsafe { c.child != nil } && (c.enabled || !is_input_event(event)) {
-		return event_child(mut c.child, event, app)
-	}
+	// ребёнку события доставляет окно по маршруту (event_route.v)
 	return false
 }
 
@@ -1024,6 +1004,16 @@ fn (s &ScrollBox) eff_sb_thumb_drag(ctx &RenderContext) Color {
 }
 
 // has_scrollbar - полоса нужна, только если содержимое выше (шире) видимой области за вычетом pad.
+// hits_self — точка на полосе прокрутки: она нарисована поверх содержимого,
+// и клик по ней - прокрутка, а не ребёнку под ней (HitsSelf, event_route.v).
+pub fn (s &ScrollBox) hits_self(x f32, y f32) bool {
+	if !s.has_scrollbar() {
+		return false
+	}
+	track, _ := s.scrollbar_rects()
+	return track.contains(x, y)
+}
+
 fn (s &ScrollBox) has_scrollbar() bool {
 	if s.dir == .vertical {
 		return s.eff_content_h > s.bounds.h - s.pad * 2
@@ -1292,6 +1282,13 @@ pub fn (mut s ScrollBox) handle_event(event &GuiEvent, app &App) bool {
 		return true
 	}
 
+	// курсор ушёл (event_route.v) - снять наведение с области и полосы
+	if event.typ == .mouse_leave {
+		s.hovered = false
+		s.sb_hovered = false
+		return false
+	}
+
 	// Для колеса позиция мыши берётся из активного контекста (в самом событии колеса координат мыши нет), иначе - из события.
 	mx := if event.typ == .mouse_wheel {
 		ctx_ptr := app.get_active_ctx()
@@ -1365,12 +1362,8 @@ pub fn (mut s ScrollBox) handle_event(event &GuiEvent, app &App) bool {
 		else {}
 	}
 
-	// ── Pass events to children FIRST ──
-	for i := s.children.len - 1; i >= 0; i-- {
-		if event_child(mut s.children[i], event, app) {
-			return true
-		}
-	}
+	// Дети получили событие раньше (маршрут идёт от листа к корню,
+	// event_route.v); сюда оно дошло, только если они его не поглотили.
 
 	// ── ScrollBox own wheel scroll (only if children didn't handle it) ──
 	if event.typ == .mouse_wheel && !s.wheel {

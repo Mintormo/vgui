@@ -821,20 +821,12 @@ fn test_list_box_hit_children_h_excludes_trailing_stale_row() {
 // Регрессия: 1 колонка, но 3 ячейки в строке (add_row_widgets создаёт
 // max(columns.len, widgets.len) ячеек — см. list_box.v — так что это
 // достижимо через публичный API без ручного конструирования LbRow).
-// dispatch_to_row_widgets суммировал ширины колонок по индексу ячейки
-// (`for k in 0 .. ci { cx += lb.columns[k].width }`), поэтому ci=2 при
-// columns.len=1 читал lb.columns[1] и падал `index out of range`.
-// Любое событие мыши должно просто пройти сквозь лишние ячейки, не
-// уронив приложение.
-//
-// dispatch_to_row_widgets теперь клампит цикл по ячейкам к
-// min(cells.len, columns.len) — тем же клампом, что уже использует
-// hit_children() (widget_tree.v). Ячейка с ci >= columns.len не рисуется
-// (draw() тоже ограничен columns.len) и получила бы вырожденный
-// col_w=0/inner.w<0 из старого кода — событий она получать не должна.
-// Поэтому событие теперь доходит только до w0 (единственная реальная
-// колонка); w1/w2 — лишние ячейки без места в раскладке.
-fn test_list_box_dispatch_v_survives_more_cells_than_columns() {
+// Раньше раздача событий ячейкам суммировала ширины колонок по индексу
+// ячейки и при ci >= columns.len падала `index out of range`. Теперь
+// адресата события ищет окно по hit_children (event_route.v), а он
+// клампит ячейки к min(cells.len, columns.len): ячейка без колонки не
+// рисуется и событий не получает.
+fn test_list_box_hit_children_survives_more_cells_than_columns() {
 	mut lb := &ListBox{
 		bounds: Rect{0, 0, 100, 100}
 	}
@@ -846,24 +838,13 @@ fn test_list_box_dispatch_v_survives_more_cells_than_columns() {
 	lb.add_row_widgets([&Widget(w0), &Widget(w1), &Widget(w2)])
 	assert lb.rows[0].cells.len == 3
 
-	app := &App{}
-	ev := GuiEvent{
-		typ: .mouse_move
-	}
-	// Раньше здесь была паника; сейчас — просто обработка без падения,
-	// и лишние ячейки (за пределами columns.len) событие не получают.
-	handled := lb.dispatch_to_row_widgets(&ev, app)
-	assert handled == false
-	assert w0.handled_count == 1
-	assert w1.handled_count == 0
-	assert w2.handled_count == 0
+	kids := lb.hit_children()
+	assert kids.len == 1
+	assert widget_object_addr(kids[0]) == voidptr(w0)
 }
 
-// RecordingWidget — минимальный Widget, который только считает вызовы
-// handle_event; используется ниже, чтобы напрямую проверить, каким
-// строкам ListBox реально доставляет события (а не то, какие строки
-// hit_children() СЧИТАЕТ видимыми — это разные пути с разной историей
-// багов, см. test_list_box_dispatch_h_excludes_trailing_stale_row).
+// RecordingWidget — минимальный Widget для проверок дерева: событий не
+// поглощает, только считает вызовы handle_event.
 struct RecordingWidget {
 mut:
 	handled_count int
@@ -874,42 +855,6 @@ pub fn (mut w RecordingWidget) draw(mut ctx RenderContext) {}
 pub fn (mut w RecordingWidget) handle_event(event &GuiEvent, app &App) bool {
 	w.handled_count++
 	return false
-}
-
-// Зеркало test_list_box_hit_children_h_excludes_trailing_stale_row, но
-// по пути dispatch_to_row_widgets_h (события мыши), а не hit_children()
-// (hit-testing). До этой правки dispatch_to_row_widgets_h не применял
-// row_visible_h вовсе, поэтому row1 (входящий в консервативный диапазон
-// visible_row_range_h, но реально невидимый) получал бы события мыши
-// наравне с row0.
-fn test_list_box_dispatch_h_excludes_trailing_stale_row() {
-	mut lb := &ListBox{
-		bounds:     Rect{0, 0, 92, 100}
-		horizontal: true
-		item_width: 120
-	}
-	mut recorders := []&RecordingWidget{}
-	for _ in 0 .. 5 {
-		mut w := &RecordingWidget{}
-		recorders << w
-		lb.rows << LbRow{
-			cells: [LbCell{
-				widget: unsafe { w }
-			}]
-		}
-	}
-
-	app := &App{}
-	ev := GuiEvent{
-		typ: .mouse_move
-	}
-	handled := lb.dispatch_to_row_widgets_h(&ev, app)
-	assert handled == false // RecordingWidget.handle_event всегда возвращает false
-
-	assert recorders[0].handled_count == 1
-	for i in 1 .. 5 {
-		assert recorders[i].handled_count == 0
-	}
 }
 
 // Пустой список — hit_children() не должен паниковать ни в одном

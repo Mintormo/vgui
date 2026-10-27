@@ -305,7 +305,7 @@ pub mut:
 }
 
 // Конкретные структуры событий (поле type читается из общего начала union).
-// В V поле SDL `repeat` названо repeat_.
+// Поле repeat - автоповтор удерживаемой клавиши (GuiEvent.repeat).
 @[typedef]
 struct C.SDL_KeyboardEvent {
 pub mut:
@@ -319,7 +319,7 @@ pub mut:
 	mod_keys  u16
 	raw       u16
 	down      bool
-	repeat_   bool
+	repeat    bool
 }
 
 @[typedef]

@@ -549,6 +549,16 @@ fn (c &Calendar) hit_year_day(mx f32, my f32) (int, int) {
 pub fn (mut c Calendar) handle_event(event &GuiEvent, app &App) bool {
 	if !c.visible || !c.enabled { return false }
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			c.hov_prev = false
+			c.hov_next = false
+			c.hov_title = false
+			c.hov_day = 0
+			c.hov_month = 0
+			c.hov_year = 0
+			return false
+		}
 		.mouse_move {
 			return c.on_mouse_move(event)
 		}

@@ -61,6 +61,12 @@ pub mut:
 
 // ─── Constructors ──────────────────────────────────────
 
+// owns_focus — фокус у внутреннего поля ввода: клавиши ему доставляются через
+// Spinbox, который его и рисует (FocusOwner, event_route.v).
+pub fn (s &Spinbox) owns_focus(ptr voidptr) bool {
+	return !isnil(s.text_input) && voidptr(s.text_input) == ptr
+}
+
 // Создаёт Spinbox (0..100, шаг 1) с внутренним TextInput: плоский (чтобы не было скруглённого
 // прямоугольника внутри скруглённого), максимум 64 символа (число плюс prefix/suffix),
 // ввод проверяет accepts_text: целое с необязательным минусом, окружённое необязательными
@@ -282,6 +288,16 @@ pub fn (mut s Spinbox) handle_event(event &GuiEvent, app &App) bool {
 	mut ti_handled := false
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			s.hovered_dec = false
+			s.hovered_inc = false
+			// и внутреннему полю ввода - его рисует и кормит событиями Spinbox
+			if s.text_input != unsafe { nil } {
+				mut ti := unsafe { s.text_input }
+				ti.handle_event(event, app)
+			}
+		}
 		.mouse_move {
 			dec_rect, inc_rect := s.init_buttons_bounds()
 			s.hovered_dec = dec_rect.contains(event.mouse_x, event.mouse_y)

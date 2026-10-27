@@ -594,6 +594,12 @@ pub fn (mut iv ImageView) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			iv.hovered = false
+			iv.vsb_hovered = false
+			iv.hsb_hovered = false
+		}
 		.mouse_move {
 			iv.hovered = iv.bounds.contains(event.mouse_x, event.mouse_y)
 			if iv.hovered {

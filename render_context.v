@@ -130,7 +130,7 @@ pub mut:
 	arrange_depth int
 	// Таблица стилей окна (css_apply.v; nil - стилей нет) и цепочка предков
 	// текущего виджета для селекторов вида `.sidebar button` - её наполняют
-	// draw_child, measure_widget, arrange_widget и event_child по ходу обхода
+	// draw_child, measure_widget, arrange_widget и маршрут событий по ходу обхода
 	// дерева сверху вниз. css_box - padding/gap из CSS у текущего виджета.
 	stylesheet &Stylesheet = unsafe { nil }
 	css_stack  []CssNode

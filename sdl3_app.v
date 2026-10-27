@@ -67,7 +67,9 @@ pub mut:
 	running    bool
 	active_ctx &RenderContext = unsafe { nil }
 	hotkeys    HotkeyManager
-	cleaned    bool
+	// Фильтры событий приложения (add_event_filter): раньше фильтров окна
+	event_filters []EventFilter
+	cleaned       bool
 	// Таблица стилей приложения (css_apply.v; nil - нет) и слежение за её
 	// файлом: css_path непуст при load_stylesheet(path, true).
 	stylesheet     &Stylesheet = unsafe { nil }
@@ -879,4 +881,16 @@ pub fn (mut app App) set_hotkey_enabled(shortcut string, enabled bool) {
 
 pub fn (mut app App) clear_hotkeys() {
 	app.hotkeys.clear()
+}
+
+// bind_hold_hotkey — удержание клавиши во всех окнах приложения
+// (HotkeyManager.bind_hold).
+pub fn (mut app App) bind_hold_hotkey(shortcut string, on_press fn (), on_release fn ()) {
+	app.hotkeys.bind_hold(shortcut, on_press, on_release)
+}
+
+// add_event_filter — фильтр событий всех окон приложения: раньше фильтров окна
+// и маршрута; true - событие поглощено (Window.add_event_filter).
+pub fn (mut app App) add_event_filter(f EventFilter) {
+	app.event_filters << f
 }

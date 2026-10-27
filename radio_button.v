@@ -193,6 +193,11 @@ pub fn (mut rb RadioButton) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			rb.hovered = false
+			rb.pressed = false
+		}
 		.mouse_move {
 			rb.hovered = rb.bounds.contains(event.mouse_x, event.mouse_y)
 			if !rb.hovered {

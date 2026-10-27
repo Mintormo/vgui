@@ -32,6 +32,11 @@ pub enum EventType {
 	// курсор ушёл из окна (SDL_EVENT_WINDOW_MOUSE_LEAVE): гасит подсказку
 	// (tooltip_manager.v). Добавлено в конец - номера прочих не сдвигаются.
 	window_mouse_leave
+	// курсор вошёл в виджет / ушёл из него (event_route.v): окно шлёт их
+	// виджетам, вошедшим в путь под курсором и вышедшим из него. Координаты -
+	// текущего положения курсора. Виджет по ним ставит и снимает наведение.
+	mouse_enter
+	mouse_leave
 }
 
 // MouseButton - кнопка мыши, вызвавшая событие; none_ - не левая/средняя/правая (боковые и т.п.) или событие без кнопки.
@@ -74,6 +79,9 @@ pub mut:
 	// вид, даже когда курсор ушёл далеко за его пределы, поэтому такой кадр
 	// обязан остаться полным.
 	mouse_buttons u32
+	// key_down — повтор при удержании клавиши (автоповтор системы), а не
+	// новое нажатие; как QKeyEvent::isAutoRepeat в Qt
+	repeat        bool
 	clicks        int
 	wheel_x       f32
 	wheel_y       f32
@@ -175,6 +183,7 @@ pub fn parse_sdl_event(raw &C.SDL_Event) GuiEvent {
 			ev.typ = .key_down
 			ev.keycode = kb.key
 			ev.scancode = kb.scancode
+			ev.repeat = kb.repeat
 			ev.mod_keys = C.SDL_GetModState()
 			ev.timestamp = kb.timestamp
 		}

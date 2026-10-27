@@ -1513,6 +1513,12 @@ pub fn (mut mb MenuBar) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			for i in 0 .. mb.entries.len {
+				mb.entries[i].hovered = false
+			}
+		}
 		.mouse_move {
 			bar_r := Rect{mb.bounds.x, mb.bounds.y, mb.bounds.w, mb.bar_height}
 			in_bar := bar_r.contains(event.mouse_x, event.mouse_y)

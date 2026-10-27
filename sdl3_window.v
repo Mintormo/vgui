@@ -207,23 +207,26 @@ pub fn is_renderer_alive_gen(ren voidptr, gen u64) bool {
 // инвалидации hover (hover_*) и пометка prev_overlayish; подробности в комментариях к полям.
 pub struct Window {
 pub mut:
-	sdl_window    voidptr
-	sdl_id        u32
-	renderer      voidptr
-	ctx           RenderContext
-	config        WindowConfig
-	widgets       []&Widget
-	focused       int = -1
-	open          bool
-	visible       bool = true
-	minimized     bool
-	maximized     bool
-	mouse_x       f32
-	mouse_y       f32
-	on_close      fn (mut vgui.Window) = unsafe { nil }
-	on_drop_file  fn (path string)     = unsafe { nil }
-	on_drop_text  fn (text string)     = unsafe { nil }
-	hotkeys       HotkeyManager
+	sdl_window   voidptr
+	sdl_id       u32
+	renderer     voidptr
+	ctx          RenderContext
+	config       WindowConfig
+	widgets      []&Widget
+	focused      int = -1
+	open         bool
+	visible      bool = true
+	minimized    bool
+	maximized    bool
+	mouse_x      f32
+	mouse_y      f32
+	on_close     fn (mut vgui.Window) = unsafe { nil }
+	on_drop_file fn (path string)     = unsafe { nil }
+	on_drop_text fn (text string)     = unsafe { nil }
+	hotkeys      HotkeyManager
+	// Фильтры событий окна (add_event_filter): видят каждое событие раньше
+	// маршрута и могут его поглотить - как installEventFilter в Qt
+	event_filters []EventFilter
 	hittest_data  voidptr = unsafe { nil }
 	in_drag_zone  bool
 	last_layout_w f32
@@ -288,6 +291,14 @@ pub mut:
 	// а не свежие bounds уже мёртвого объекта.
 	hover_widget voidptr = unsafe { nil }
 	hover_rect   Rect
+	// Маршрут событий мыши (event_route.v): route_capture - путь от корня до
+	// виджета, поглотившего нажатие (ведёт жест до отпускания), route_hover -
+	// путь под курсором после прошлого движения (кому сообщить об уходе).
+	// В отличие от hover_widget, по ним события доставляются: память виджетов
+	// освобождает GC, а эти ссылки держат удалённый виджет лишь до следующего
+	// движения/отпускания (и снимаются в cleanup - route_forget).
+	route_capture []&Widget
+	route_hover   []&Widget
 	// Whether the PREVIOUS frame drew an overlay/tooltip/modal-backdrop, all
 	// of which paint outside any widget's own bounds without clipping. If the
 	// next frame closes them without a full repaint, their pixels would be
@@ -1305,7 +1316,7 @@ fn (mut w Window) render() {
 // движение мыши фокус не меняет).
 fn (mut w Window) dispatch_event_with_app(ev &GuiEvent, app &App) {
 	// Активный контекст - этого окна: по нему виджеты меряют текст в
-	// handle_event, а event_child берёт шрифт и отступы из CSS. Цикл App
+	// handle_event, а маршрут событий - шрифт и отступы из CSS. Цикл App
 	// ставит его сам; прямой вызов (тесты, свой цикл) - здесь, как dnd_deliver_in.
 	if !isnil(app) && isnil(app.active_ctx) {
 		mut mapp := unsafe { &App(app) }
@@ -1399,6 +1410,31 @@ fn (mut w Window) dispatch_event_inner(ev &GuiEvent, app &App) {
 	// событие (переключение вкладки, скролл, add в контейнер) взвело
 	// layout_dirty через invalidate_all() в конце этой же функции.
 	w.arrange_if_needed()
+	mut mapp := unsafe { &App(app) }
+	// Отпускание клавиши удержания (bind_hold) - всегда, даже если событие
+	// заберёт фильтр или виджет: удержание не должно зависнуть. Потеря фокуса
+	// окном отпускает все удержания - отпускание придёт другому окну.
+	if ev.typ == .key_up {
+		w.hotkeys.try_release(ev)
+		mapp.hotkeys.try_release(ev)
+	} else if ev.typ == .window_focus_lost {
+		w.hotkeys.release_all()
+		mapp.hotkeys.release_all()
+	}
+	// Фильтры событий (add_event_filter): приложения, затем окна - раньше
+	// всего остального, как installEventFilter в Qt
+	for f in app.event_filters {
+		if f(ev) {
+			w.ctx.invalidate_all()
+			return
+		}
+	}
+	for f in w.event_filters {
+		if f(ev) {
+			w.ctx.invalidate_all()
+			return
+		}
+	}
 	// Перетаскивание между виджетами (dnd.v): нажатие его взводит, сдвиг за
 	// порог начинает, а идущее перетаскивание съедает мышь и клавиши - ни
 	// оверлей, ни виджеты их не видят. Кадр полный: призрак у курсора.
@@ -1416,28 +1452,25 @@ fn (mut w Window) dispatch_event_inner(ev &GuiEvent, app &App) {
 		}
 	}
 	mut handled := false
-	if w.focused >= 0 && w.focused < w.widgets.len {
-		mut widget := w.widgets[w.focused]
-		handled = event_child(mut widget, ev, app)
-	}
-	if !handled {
-		for i := w.widgets.len - 1; i >= 0; i-- {
-			if i == w.focused {
-				continue
-			}
-			mut widget := w.widgets[i]
-			if event_child(mut widget, ev, app) {
-				handled = true
-				break
-			}
-		}
+	if is_routed_mouse_event(ev) {
+		// Мышь - по маршруту: виджету под курсором и вверх к корню, с
+		// захватом жеста, входом и уходом курсора (event_route.v)
+		handled = w.route_mouse_event(ev, app)
+	} else if is_routed_key_event(ev) {
+		// Клавиатура и текст - по маршруту: виджету с фокусом, под курсором,
+		// глобальным слушателям (event_route.v)
+		handled = w.route_key_event(ev, app)
+	} else {
+		// Сброс файлов и события окна - рассылкой всем видимым, пока кто-то
+		// не поглотит
+		handled = w.route_broadcast(ev, app)
 	}
 	if !handled && ev.typ == .key_down {
 		if w.hotkeys.try_match(ev) {
 			w.ctx.invalidate_all()
 			return
 		}
-		if app.hotkeys.try_match(ev) {
+		if mapp.hotkeys.try_match(ev) {
 			w.ctx.invalidate_all()
 			return
 		}
@@ -1613,6 +1646,7 @@ fn (mut w Window) invalidate_hover_change(ev &GuiEvent) {
 // SDL_DestroyWindow. Идемпотентна: указатели обнуляются, повторный вызов безопасен.
 pub fn (mut w Window) cleanup() {
 	dnd_forget_window(&w)
+	w.route_forget()
 	if unsafe { w.sdl_window != nil } {
 		C.SDL_StopTextInput(w.sdl_window)
 	}
@@ -2116,6 +2150,19 @@ pub fn (mut w Window) set_hotkey_enabled(shortcut string, enabled bool) {
 
 pub fn (mut w Window) clear_hotkeys() {
 	w.hotkeys.clear()
+}
+
+// bind_hold_hotkey — удержание клавиши окна: on_press при нажатии, on_release
+// при отпускании (HotkeyManager.bind_hold).
+pub fn (mut w Window) bind_hold_hotkey(shortcut string, on_press fn (), on_release fn ()) {
+	w.hotkeys.bind_hold(shortcut, on_press, on_release)
+}
+
+// add_event_filter — фильтр событий окна: видит каждое событие раньше маршрута
+// (виджетов, меню, горячих клавиш) и может его поглотить, вернув true. Как
+// installEventFilter в Qt; фильтры приложения (App.add_event_filter) - раньше.
+pub fn (mut w Window) add_event_filter(f EventFilter) {
+	w.event_filters << f
 }
 
 // Масштаб интерфейса диалога: делегаты к окну диалога.

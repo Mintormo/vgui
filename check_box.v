@@ -165,6 +165,11 @@ pub fn (mut cb CheckBox) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			cb.hovered = false
+			cb.pressed = false
+		}
 		.mouse_move {
 			cb.hovered = cb.bounds.contains(event.mouse_x, event.mouse_y)
 			if !cb.hovered {

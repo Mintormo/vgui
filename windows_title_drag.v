@@ -122,17 +122,15 @@ pub fn (mut d WindowTitleDrag) draw(mut ctx RenderContext) {
 
 // ─── Events ────────────────────────────────────────────
 
-// handle_event отдаёт событие детям (кнопки управления окном внутри строки работают);
-// возвращает true, только если его обработал ребёнок.
+// handle_event: своих событий у строки заголовка нет (перетаскивание окна - SDL
+// hit-test, borderless.v).
 pub fn (mut d WindowTitleDrag) handle_event(event &GuiEvent, app &App) bool {
 	if !d.visible {
 		return false
 	}
 
-	// Let children handle first
-	if d.box.event_impl(event, app) {
-		return true
-	}
+	// Кнопки управления окном внутри строки получают события сами - по
+	// маршруту окна (event_route.v), раньше этой строки.
 
 	// We don't handle drag ourselves — SDL hit-test does it.
 	// Double-click maximize/restore is handled in sdl2_app.v process_events

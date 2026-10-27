@@ -231,6 +231,10 @@ pub fn (mut cp ColorPicker) handle_event(event &GuiEvent, app &App) bool {
 		return false
 	}
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			cp.hovered = false
+		}
 		.mouse_move {
 			cp.hovered = cp.bounds.contains(event.mouse_x, event.mouse_y)
 		}

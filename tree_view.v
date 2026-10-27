@@ -1328,6 +1328,13 @@ pub fn (mut tv TreeView) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			tv.hovered = false
+			tv.hover_node = unsafe { nil }
+			tv.vsb_hovered = false
+			tv.hsb_hovered = false
+		}
 		.mouse_move {
 			tv.hovered = tv.bounds.contains(event.mouse_x, event.mouse_y)
 			if tv.hovered && unsafe { ctx_ptr != nil } {
@@ -1392,13 +1399,8 @@ pub fn (mut tv TreeView) handle_event(event &GuiEvent, app &App) bool {
 				}
 				return true
 			}
-			if tv.focused && !tv.hovered {
-				if unsafe { ctx_ptr != nil } {
-					mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
-					ctx_mut.focus.blur_current()
-				}
-				tv.focused = false
-			}
+			// нажатие мимо дерева сюда не приходит: фокус снимает окно
+			// (event_route.v, route_blur_outside)
 		}
 		// Двойной клик: по стрелке - ничего сверх нажатия (mouse_down того же клика
 		// уже переключил ветку); по узлу - начать правку (если editable) либо

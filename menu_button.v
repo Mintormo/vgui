@@ -636,6 +636,13 @@ pub fn (mut mb MenuButton) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			mb.hovered = false
+			mb.hovered_arrow = false
+			mb.pressed = false
+			mb.pressed_arrow = false
+		}
 		.mouse_move {
 			mb.hovered = mb.bounds.contains(event.mouse_x, event.mouse_y)
 			mb.hovered_arrow = mb.hovered

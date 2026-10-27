@@ -177,6 +177,11 @@ pub fn (mut ts ToggleSwitch) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			ts.hovered = false
+			ts.pressed = false
+		}
 		.mouse_move {
 			ts.hovered = ts.bounds.contains(event.mouse_x, event.mouse_y)
 			if !ts.hovered {

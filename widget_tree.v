@@ -743,7 +743,7 @@ pub fn (w &Accordion) hit_children() []&Widget {
 }
 
 // ListBox использует те же visible_row_range_v/_h + row_visible_v/_h,
-// что dispatch_to_row_widgets/_h (list_box.v) — единый источник правды
+// что draw() и arrange() (list_box.v) — единый источник правды
 // для "какие строки реально на экране прямо сейчас", вместо третьей
 // копии тех же формул. Диапазон first..last, который отдают
 // visible_row_range_*, — консервативный супернабор (последний индекс
@@ -928,6 +928,12 @@ fn widget_at_impl(w &Widget, x f32, y f32, depth int, mut tip TipHit) ?&Widget {
 	if !b.contains(x, y) {
 		return none
 	}
+	// своя «рамка» контейнера поверх детей (полоса прокрутки, зона
+	// разделителя) - точка его, в детей не спускаемся (event_route.v)
+	if widget_hits_self(w, x, y) {
+		take_tip(mut tip, w)
+		return unsafe { w }
+	}
 	if depth < widget_tree_max_depth {
 		children := if w is HitTestable {
 			w.hit_children()
@@ -980,6 +986,11 @@ fn widget_path_impl(w &Widget, x f32, y f32, depth int, mut path []&Widget) bool
 	b := get_widget_bounds(w)
 	if b.w <= 0 || b.h <= 0 || !b.contains(x, y) {
 		return false
+	}
+	// своя «рамка» контейнера - как в widget_at_impl
+	if widget_hits_self(w, x, y) {
+		path << unsafe { w }
+		return true
 	}
 	if depth < widget_tree_max_depth {
 		children := if w is HitTestable {

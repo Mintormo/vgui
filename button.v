@@ -415,6 +415,11 @@ pub fn (mut b Button) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			b.hovered = false
+			b.pressed = false
+		}
 		.mouse_move {
 			b.hovered = b.bounds.contains(event.mouse_x, event.mouse_y)
 			if !b.hovered {

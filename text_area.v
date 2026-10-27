@@ -515,6 +515,11 @@ pub fn (mut ta TextArea) handle_event(ev &GuiEvent, app &App) bool {
 	}
 
 	match ev.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			ta.hovered = false
+			return false
+		}
 		.mouse_move {
 			return ta.on_mouse_move(ev, app)
 		}
@@ -696,16 +701,8 @@ fn (mut ta TextArea) on_mouse_down(ev &GuiEvent, app &App) bool {
 		ta.drag = true
 		return true
 	}
-	if ta.focused && !ta.hovered {
-		ctx_ptr := app.get_active_ctx()
-		if unsafe { ctx_ptr != nil } {
-			mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
-			ctx_mut.focus.blur_current()
-		}
-		ta.focused = false
-		ta.drag = false
-		ta.clear_sel()
-	}
+	// Нажатие мимо области сюда не приходит: фокус снимает окно (event_route.v,
+	// route_blur_outside), выделение и перетаскивание - blur_current.
 	return false
 }
 

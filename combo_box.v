@@ -411,7 +411,9 @@ fn (mut cb ComboBox) dispatch_to_item_widgets(event &GuiEvent, app &App) bool {
 		r := Rect{inner.x, iy, text_w, h}
 		mut w := unsafe { cb.entries[i].widget }
 		set_widget_bounds(mut w, r)
-		if event_child(mut w, event, app) {
+		// внутренняя часть выпадающего списка (оверлей, не дерево окна) -
+		// событие напрямую
+		if w.handle_event(event, app) {
 			return true
 		}
 	}
@@ -869,6 +871,10 @@ pub fn (mut cb ComboBox) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			cb.hovered = false
+		}
 		.mouse_move {
 			cb.hovered = cb.bounds.contains(event.mouse_x, event.mouse_y)
 		}

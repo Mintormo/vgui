@@ -144,8 +144,8 @@ mode. Масштаб рендера выставляется заново пос
 **Неактивное состояние** («Неактивное состояние (enabled)»). У каждого виджета поле `enabled bool = true`
 (у HBox/VBox/WindowTitleDrag - `box.enabled`). В `draw()` - один раз `en := ctx.is_enabled(w.enabled)` и
 дальше только `en` (учитывает отключённых предков); focusable регистрируется при `en`, иначе
-`ctx.focus_block(&w)`. Контейнер рисует детей между `ctx.begin_disabled(own)`/`end_disabled(own)` и при
-`!enabled` не передаёт им ввод (`is_input_event`).
+`ctx.focus_block(&w)`. Контейнер рисует детей между `ctx.begin_disabled(own)`/`end_disabled(own)`;
+ввод отключённой ветке не доставляет окно (маршрут обрывается на отключённом виджете).
 
 **Подсказки** («Подсказки»). Поле `tooltip` у любого виджета; показывает её менеджер окна
 (`tooltip_manager.v`) по тому же обходу `widget_at`, что и hover. Виджет подсказку не рисует. Служебный
@@ -160,8 +160,10 @@ mode. Масштаб рендера выставляется заново пос
 `ctx.set_overlay(owner, draw, ev, close)` / `ctx.clear_overlay(owner)`, никогда не присваивание
 `overlay_cb`/`overlay_ev`. `owner` - адрес самого виджета.
 
-**Стили CSS** («Стили CSS»). Контейнер рисует детей через `ctx.draw_child(mut w)`, не `w.draw(mut ctx)`, и
-раздаёт им события через `event_child(mut w, ev, app)` - иначе правила с предками (`.bar button`) его не видят.
+**Доставка событий** («Доставка событий»). Адресата находит окно (`event_route.v`); **контейнер событий детям не
+раздаёт** (рамка поверх детей - `HitsSelf`); наведение снимается по `mouse_leave`; фокус - только фокус-учёт (`FocusOwner`).
+**Стили CSS** («Стили CSS»). Контейнер рисует детей через `ctx.draw_child(mut w)`, не `w.draw(mut ctx)` -
+иначе правила с предками (`.bar button`) его не видят.
 Стиль = подмена `ctx.theme` на время поддерева; шрифт, padding/gap, margin и размеры из CSS видят и measure/arrange/события -
 отступы виджет читает `ctx.css_pad_of(себя, pad)`, bounds ребёнку контейнер выдаёт `arrange_child`/`place_child`
 (вычитают margin), не `set_widget_bounds`. Метки - поле `css CssTags`; через интерфейс менять только присваиванием целиком.

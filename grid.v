@@ -333,7 +333,8 @@ pub fn (mut g GridLayout) draw(mut ctx RenderContext) {
 	}
 }
 
-// handle_event: ячейки получают событие с конца списка (последняя добавленная - сверху); при window_resize корневая сетка подгоняет размер под окно.
+// handle_event: при window_resize корневая сетка подгоняет размер под окно; ячейкам
+// события доставляет окно по маршруту (event_route.v).
 pub fn (mut g GridLayout) handle_event(event &GuiEvent, app &App) bool {
 	if !g.visible || (!g.enabled && is_input_event(event)) {
 		return false
@@ -344,10 +345,6 @@ pub fn (mut g GridLayout) handle_event(event &GuiEvent, app &App) bool {
 			g.bounds.h = f32(event.win_h)
 		}
 	}
-	for i := g.cells.len - 1; i >= 0; i-- {
-		if event_child(mut g.cells[i].widget, event, app) {
-			return true
-		}
-	}
+	// ячейкам события доставляет окно по маршруту (event_route.v)
 	return false
 }

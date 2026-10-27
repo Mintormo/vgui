@@ -1330,6 +1330,13 @@ pub fn (mut e CodeEditor) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			e.hovered = false
+			e.vsb_hovered = false
+			e.hsb_hovered = false
+			e.minimap_hovered = false
+		}
 		.mouse_move {
 			e.hovered = e.bounds.contains(event.mouse_x, event.mouse_y)
 			// Выделение мышью: пока кнопка зажата, подвижный конец выделения
@@ -1417,13 +1424,8 @@ pub fn (mut e CodeEditor) handle_event(event &GuiEvent, app &App) bool {
 				}
 				return true
 			}
-			// Нажатие мимо редактора снимает фокус и выделение.
-			if e.focused && !e.hovered {
-				e.drop_focus(ctx_ptr)
-				e.focused = false
-				e.drag = false
-				e.clear_sel()
-			}
+			// Нажатие мимо редактора сюда не приходит: фокус снимает окно
+			// (event_route.v, route_blur_outside), выделение - blur_current.
 		}
 		.mouse_up {
 			if event.mouse_btn == .left && e.drag {

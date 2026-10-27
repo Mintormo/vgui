@@ -589,6 +589,12 @@ pub fn (mut a Accordion) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			for i in 0 .. a.sections.len {
+				a.sections[i].hovered = false
+			}
+		}
 		.mouse_move {
 			in_bounds := a.area().contains(event.mouse_x, event.mouse_y)
 			for i in 0 .. a.sections.len {
@@ -633,15 +639,7 @@ pub fn (mut a Accordion) handle_event(event &GuiEvent, app &App) bool {
 		else {}
 	}
 
-	// Pass events to expanded section children
-	for i in 0 .. a.sections.len {
-		mut sec := a.sections[i]
-		if sec.expanded && sec.anim.value > 0.5 && unsafe { sec.widget != nil } {
-			if event_child(mut sec.widget, event, app) {
-				return true
-			}
-		}
-	}
-
+	// Содержимому секций события доставляет окно по маршруту (event_route.v;
+	// раскрытые секции - hit_children).
 	return false
 }

@@ -565,6 +565,10 @@ pub fn (mut s Slider) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			s.hovered = false
+		}
 		.mouse_move {
 			s.hovered = s.bounds.contains(event.mouse_x, event.mouse_y)
 		}
@@ -585,11 +589,8 @@ pub fn (mut s Slider) handle_event(event &GuiEvent, app &App) bool {
 					}
 					return true
 				}
-				if s.focused && !s.bounds.contains(event.mouse_x, event.mouse_y) {
-					mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
-					ctx_mut.focus.blur_current()
-					s.focused = false
-				}
+				// нажатие мимо ползунка сюда не приходит: фокус снимает окно
+				// (event_route.v, route_blur_outside)
 			}
 		}
 		.mouse_wheel {

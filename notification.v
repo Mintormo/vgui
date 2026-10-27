@@ -576,6 +576,11 @@ pub fn (mut n Notification) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			n.hovered = false
+			n.close_hover = false
+		}
 		.mouse_move {
 			n.hovered = n.bounds.contains(event.mouse_x, event.mouse_y)
 			if n.closable {

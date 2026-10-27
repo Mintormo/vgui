@@ -1246,6 +1246,17 @@ pub fn (mut c Canvas) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			// событие leave приложению - как при движении за пределы
+			if c.inside {
+				c.emit_pointer(.leave, event)
+			}
+			c.inside = false
+			c.hovered = false
+			c.vsb_hovered = false
+			c.hsb_hovered = false
+		}
 		.mouse_move {
 			now_inside := c.bounds.contains(event.mouse_x, event.mouse_y)
 			// enter / leave bracket the pointer crossing the widget; hover is a
@@ -1280,13 +1291,9 @@ pub fn (mut c Canvas) handle_event(event &GuiEvent, app &App) bool {
 		// Второй быстрый щелчок приходит обычным mouse_down с clicks = 2 (его
 		// получает и on_input); следующий за ним mouse_dbl_click холсту не нужен
 		.mouse_down {
+			// нажатие мимо холста сюда не приходит: фокус снимает окно
+			// (event_route.v, route_blur_outside)
 			if !c.bounds.contains(event.mouse_x, event.mouse_y) {
-				// A click elsewhere releases keyboard focus (mirrors text widgets).
-				if c.focused && unsafe { ctx_ptr != nil } {
-					mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
-					ctx_mut.focus.blur_current()
-					c.focused = false
-				}
 				return false
 			}
 			btn := event.mouse_btn

@@ -979,14 +979,18 @@ pub fn (mut tb TabBox) handle_event(event &GuiEvent, app &App) bool {
 		}
 	}
 
-	// Delegate to active child
-	if tb.active >= 0 && tb.active < tb.tabs.len {
-		if event_child(mut tb.tabs[tb.active].widget, event, app) {
-			return true
-		}
-	}
+	// Содержимому активной вкладки события доставляет окно по маршруту
+	// (event_route.v; активная вкладка - hit_children).
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			for i in 0 .. tb.tabs.len {
+				tb.tabs[i].hovered = false
+			}
+			tb.scroll_prev_hov = false
+			tb.scroll_next_hov = false
+		}
 		.mouse_move {
 			if unsafe { ctx_ptr != nil } {
 				for i in 0 .. tb.tabs.len {

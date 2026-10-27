@@ -560,6 +560,15 @@ pub fn (mut bc Breadcrumbs) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			// курсор «рука» над сегментом - вернуть стрелку
+			if bc.hover_seg >= 0 {
+				set_cursor(sdl_system_cursor_arrow)
+			}
+			bc.hovered = false
+			bc.hover_seg = -1
+		}
 		.mouse_move {
 			bc.hovered = bc.bounds.contains(event.mouse_x, event.mouse_y)
 			bc.hover_seg = -1

@@ -68,6 +68,12 @@ pub mut:
 	readonly   bool
 }
 
+// owns_focus — фокус у временного поля правки значения (FocusOwner,
+// event_route.v): клавиши ему доставляются через PropertyGrid.
+pub fn (pg &PropertyGrid) owns_focus(ptr voidptr) bool {
+	return !isnil(pg.edit_text_input) && voidptr(pg.edit_text_input) == ptr
+}
+
 // Конструкторы property_* создают лист нужного вида (без родителя); property_group — раскрытую группу. property_choice клонирует список вариантов.
 // ─── Property constructors ─────────────────────────────
 
@@ -1686,6 +1692,16 @@ pub fn (mut pg PropertyGrid) handle_event(event &GuiEvent, app &App) bool {
 		.mouse_up {
 			pg.splitter_dragging = false
 			pg.vsb_dragging = false
+		}
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			if pg.splitter_hovered {
+				set_cursor(sdl_system_cursor_arrow)
+			}
+			pg.splitter_hovered = false
+			for r in pg.roots {
+				pg_clear_hover(r)
+			}
 		}
 		.mouse_move {
 			mx := event.mouse_x

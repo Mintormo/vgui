@@ -459,6 +459,11 @@ pub fn (mut t TextInput) handle_event(ev &GuiEvent, app &App) bool {
 	}
 
 	match ev.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			t.hovered = false
+			return false
+		}
 		.mouse_move {
 			return t.on_mouse_move(ev, app)
 		}
@@ -520,17 +525,8 @@ fn (mut t TextInput) on_mouse_down(ev &GuiEvent, app &App) bool {
 		t.drag = true
 		return true
 	}
-	if t.focused && !t.hovered {
-		ctx_ptr := app.get_active_ctx()
-		if unsafe { ctx_ptr != nil } {
-			mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
-			ctx_mut.focus.blur_current()
-		}
-		t.focused = false
-		t.drag = false
-		t.clear_sel()
-		return false
-	}
+	// Нажатие мимо поля сюда не приходит: фокус снимает окно (event_route.v,
+	// route_blur_outside), выделение и перетаскивание - blur_current.
 	return false
 }
 

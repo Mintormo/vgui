@@ -195,6 +195,10 @@ pub fn (mut dp DatePicker) handle_event(event &GuiEvent, app &App) bool {
 		return false
 	}
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			dp.hovered = false
+		}
 		.mouse_move {
 			dp.hovered = dp.bounds.contains(event.mouse_x, event.mouse_y)
 		}
@@ -520,6 +524,10 @@ fn (mut a DpArea) handle_event(event &GuiEvent, app &App) bool {
 	days := dp_days_in_month(s.year, s.month)
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			a.hovered = -1
+		}
 		.mouse_move {
 			a.hovered = -1
 			if event.mouse_y >= grid_y {

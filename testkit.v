@@ -551,6 +551,36 @@ pub fn (mut t TestUi) wheel(x f32, y f32, dy f32) {
 	sim_wheel(mut t.app, t.win, x, y, 0, dy, 0)
 }
 
+// sim_key_event - одно событие клавиши: нажатие (down) или отпускание, repeat - автоповтор
+// при удержании. Для проверок удержания (HotkeyManager.bind_hold), где нажатие и
+// отпускание разнесены во времени.
+pub fn sim_key_event(mut app App, w &Window, keycode int, scancode int, mods u16, down bool, repeat bool) {
+	mut ev := C.SDL_Event{}
+	mut kb := unsafe { &C.SDL_KeyboardEvent(&ev) }
+	kb.@type = if down { sdl_keydown } else { sdl_keyup }
+	kb.windowID = w.sdl_id
+	kb.key = keycode
+	kb.scancode = scancode
+	kb.down = down
+	kb.repeat = repeat
+	C.SDL_PushEvent(&ev)
+	sim_pump(mut app, mods)
+}
+
+// key_press / key_release - нажать и отпустить клавишу по отдельности;
+// key_repeat - автоповтор удерживаемой клавиши.
+pub fn (mut t TestUi) key_press(keycode int, scancode int, mods u16) {
+	sim_key_event(mut t.app, t.win, keycode, scancode, mods, true, false)
+}
+
+pub fn (mut t TestUi) key_repeat(keycode int, scancode int, mods u16) {
+	sim_key_event(mut t.app, t.win, keycode, scancode, mods, true, true)
+}
+
+pub fn (mut t TestUi) key_release(keycode int, scancode int, mods u16) {
+	sim_key_event(mut t.app, t.win, keycode, scancode, mods, false, false)
+}
+
 // key - клавиша с модификаторами: t.key(sdl_k_tab, 0), t.key(`s`, sdl_kmod_ctrl).
 pub fn (mut t TestUi) key(keycode int, mods u16) {
 	sim_key(mut t.app, t.win, keycode, mods)

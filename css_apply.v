@@ -315,7 +315,7 @@ fn (ctx &RenderContext) css_box_owner_of(b &BoxLayout) voidptr {
 //
 // Таблица стилей действует на виджет в четырёх обходах дерева: отрисовка
 // (draw_child), измерение (measure_widget), раскладка (arrange_widget) и
-// события (event_child). Отрисовка применяет все подошедшие правила; три
+// события (маршрут окна, event_route.v). Отрисовка применяет все подошедшие правила; три
 // остальных - только объявления, от которых зависят размеры и геометрия
 // текста (шрифт, padding, gap - CssDecl.layout), и только если такие в
 // таблице вообще есть (Stylesheet.has_layout). Иначе раскладка с шрифтом
@@ -415,7 +415,7 @@ struct CssTraversalSaved {
 // содержимого) начинается с чистого состояния: пустой стек предков, тема окна,
 // отступов нет. Обычно оно и так чистое (проверка - и выход, без копий). Не
 // чистое - если обход начался посреди другого: обработчик клика (внутри
-// event_child, с подменённым шрифтом кнопки) открыл модальный диалог, и его
+// маршрута событий, с подменённым шрифтом кнопки) открыл модальный диалог, и его
 // цикл перерисовывает и это окно. Состояние прерванного обхода сохраняется и
 // возвращается в css_end_traversal.
 //
@@ -447,25 +447,6 @@ fn (w &Window) css_end_traversal(s CssTraversalSaved) {
 	ctx.css_stack = s.stack
 	ctx.theme = s.theme
 	ctx.css_box = s.box
-}
-
-// event_child передаёт событие ребёнку контейнера с учётом таблицы стилей
-// (шрифт и отступы ребёнка - как при отрисовке). Контейнеры, рисующие детей
-// через draw_child, раздают им события через неё. Без правил о шрифте и
-// отступах - просто w.handle_event().
-//
-// Контекст - окна, которое сейчас обрабатывает событие (app.active_ctx; его
-// же виджеты берут в handle_event для измерения текста). Его поля шрифта и
-// отступов меняются на время вызова, как в measure_widget.
-pub fn event_child(mut w Widget, ev &GuiEvent, app &App) bool {
-	if isnil(app) || isnil(app.active_ctx) || !app.active_ctx.css_layout_active() {
-		return w.handle_event(ev, app)
-	}
-	mut ctx := unsafe { &RenderContext(app.active_ctx) }
-	saved := ctx.css_enter_layout(widget_object_addr(&w), css_tags_of(&w))
-	handled := w.handle_event(ev, app)
-	ctx.css_leave_layout(saved)
-	return handled
 }
 
 // ─── Отрисовка с подменой темы ─────────────────────────

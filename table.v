@@ -1298,6 +1298,15 @@ pub fn (mut t TableView) draw(mut ctx RenderContext) {
 		}
 	}
 
+	// Фокус - через фокус-учёт окна (focus.v, .table_view), как у ListBox:
+	// регистрация каждый кадр, свой флаг focused - по нему
+	if en {
+		ctx.focus.register_table_view(&t, t.focus_group)
+	} else {
+		ctx.focus_block(&t)
+	}
+	t.focused = ctx.focus.is_focused(unsafe { &t })
+
 	t.scroll_x = clamp_f32(t.scroll_x, 0, t.max_scroll_x())
 	t.scroll_y = clamp_f32(t.scroll_y, 0, t.max_scroll_y())
 
@@ -1689,6 +1698,17 @@ pub fn (mut t TableView) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			// курсор изменения размера колонки/строки - вернуть стрелку
+			if t.hovered {
+				set_cursor(sdl_system_cursor_arrow)
+			}
+			t.hovered = false
+			t.hover_row = -1
+			t.vsb_hovered = false
+			t.hsb_hovered = false
+		}
 		.mouse_move {
 			t.hovered = t.bounds.contains(event.mouse_x, event.mouse_y)
 			if t.hovered {
@@ -1761,6 +1781,10 @@ pub fn (mut t TableView) handle_event(event &GuiEvent, app &App) bool {
 				row, col := t.hit_cell(event.mouse_x, event.mouse_y)
 				if row >= 0 && col >= 0 {
 					t.focused = true
+					if unsafe { ctx_ptr != nil } {
+						mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
+						ctx_mut.focus.focus_table_view(&t, t.focus_group)
+					}
 					t.sel_row = row
 					t.sel_col = col
 					t.fire_select()
@@ -1813,7 +1837,7 @@ pub fn (mut t TableView) handle_event(event &GuiEvent, app &App) bool {
 			if !t.focused {
 				return false
 			}
-			return t.handle_nav_key(event)
+			return t.handle_nav_key(event, app)
 		}
 		else {}
 	}
@@ -1829,7 +1853,7 @@ pub fn (mut t TableView) handle_event(event &GuiEvent, app &App) bool {
 // колонка), Escape (снять фокус). Любое
 // перемещение прокручивает к ячейке и вызывает on_select. Стрелки и Tab поглощают
 // событие (true) даже на границе, чтобы фокус не ушёл дальше.
-fn (mut t TableView) handle_nav_key(event &GuiEvent) bool {
+fn (mut t TableView) handle_nav_key(event &GuiEvent, app &App) bool {
 	if t.row_total() == 0 || t.columns.len == 0 {
 		return false
 	}
@@ -1895,6 +1919,13 @@ fn (mut t TableView) handle_nav_key(event &GuiEvent) bool {
 		}
 		sdl_k_escape {
 			t.focused = false
+			ctx_ptr := app.get_active_ctx()
+			if unsafe { ctx_ptr != nil } {
+				mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
+				if ctx_mut.focus.is_focused(unsafe { &t }) {
+					ctx_mut.focus.blur_current()
+				}
+			}
 			return true
 		}
 		else {}

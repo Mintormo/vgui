@@ -1240,6 +1240,12 @@ pub fn (mut p PlotView) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			p.hovered = false
+			p.hsb_hovered = false
+			p.vsb_hovered = false
+		}
 		.mouse_move {
 			p.hovered = p.bounds.contains(event.mouse_x, event.mouse_y)
 			// Scrollbar hover

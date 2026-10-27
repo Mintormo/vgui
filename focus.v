@@ -28,6 +28,9 @@ pub enum FocusKind {
 	property_grid
 	calendar
 	canvas
+	// таблица (TableView) - с 27.10.2026: раньше держала свой флаг focused
+	// мимо фокус-учёта, и в фокусе могли быть две таблицы сразу
+	table_view
 }
 
 // FocusManager - учёт фокуса одного окна (RenderContext.focus). Виджеты регистрируют себя сами при рисовании
@@ -234,6 +237,14 @@ pub fn (mut fm FocusManager) focus_text_area(ta &TextArea, group int) {
 	fm.focus_ptr(unsafe { voidptr(ta) }, .text_area, group)
 }
 
+pub fn (mut fm FocusManager) register_table_view(t &TableView, group int) {
+	fm.register_ptr(unsafe { voidptr(t) }, .table_view, group)
+}
+
+pub fn (mut fm FocusManager) focus_table_view(t &TableView, group int) {
+	fm.focus_ptr(unsafe { voidptr(t) }, .table_view, group)
+}
+
 pub fn (mut fm FocusManager) focus_button(b &Button, group int) {
 	fm.focus_ptr(unsafe { voidptr(b) }, .button, group)
 }
@@ -365,6 +376,10 @@ pub fn (mut fm FocusManager) blur_current() {
 			cv.drawing = false
 			cv.draw_button = .none_
 		}
+		.table_view {
+			mut tv := unsafe { &TableView(e.ptr) }
+			tv.focused = false
+		}
 	}
 
 	fm.current = -1
@@ -431,6 +446,10 @@ fn (mut fm FocusManager) focus_index(idx int) {
 		.canvas {
 			mut cv := unsafe { &Canvas(e.ptr) }
 			cv.focused = true
+		}
+		.table_view {
+			mut tv := unsafe { &TableView(e.ptr) }
+			tv.focused = true
 		}
 	}
 }
@@ -555,6 +574,10 @@ fn (fm &FocusManager) is_entry_available(e FocusEntry) bool {
 		.canvas {
 			cv := unsafe { &Canvas(e.ptr) }
 			return cv.visible && cv.enabled
+		}
+		.table_view {
+			tv := unsafe { &TableView(e.ptr) }
+			return tv.visible && tv.enabled
 		}
 	}
 }

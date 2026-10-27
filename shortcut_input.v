@@ -54,6 +54,11 @@ mut:
 	ctx &RenderContext = unsafe { nil }
 }
 
+// owns_focus — фокус у внутренней кнопки (FocusOwner, event_route.v).
+pub fn (si &ShortcutInput) owns_focus(ptr voidptr) bool {
+	return !isnil(si.btn) && voidptr(si.btn) == ptr
+}
+
 // shortcut_input создаёт поле с сочетанием shortcut (приводится к каноническому виду).
 pub fn shortcut_input(shortcut string) &ShortcutInput {
 	mut si := &ShortcutInput{

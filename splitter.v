@@ -229,6 +229,13 @@ fn (s &Splitter) clamped_ratio() f32 {
 
 // Прямоугольники трёх частей: first (от начала), bar (сразу за first), second (всё, что осталось
 // после полосы до конца bounds).
+// hits_self — точка в зоне захвата разделителя: она шире самой полосы и
+// заходит на детей, а нажатие в ней - начало перетаскивания (HitsSelf,
+// event_route.v).
+pub fn (s &Splitter) hits_self(x f32, y f32) bool {
+	return s.bar_hit_rect().contains(x, y)
+}
+
 fn (s &Splitter) first_rect() Rect {
 	r := s.clamped_ratio()
 	usable := s.total_main() - s.bar_size
@@ -463,6 +470,13 @@ pub fn (mut s Splitter) handle_event(event &GuiEvent, app &App) bool {
 	hit := s.bar_hit_rect()
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			if s.hovered {
+				s.restore_cursor()
+			}
+			s.hovered = false
+		}
 		.mouse_move {
 			was_hovered := s.hovered
 			s.hovered = hit.contains(event.mouse_x, event.mouse_y)
@@ -511,18 +525,7 @@ pub fn (mut s Splitter) handle_event(event &GuiEvent, app &App) bool {
 		else {}
 	}
 
-	// Pass events to children (second first for z-order, then first)
-	if unsafe { s.second != nil } {
-		if event_child(mut s.second, event, app) {
-			return true
-		}
-	}
-	if unsafe { s.first != nil } {
-		if event_child(mut s.first, event, app) {
-			return true
-		}
-	}
-
+	// Панелям события доставляет окно по маршруту (event_route.v)
 	return false
 }
 

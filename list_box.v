@@ -1146,7 +1146,7 @@ fn (lb &ListBox) viewport_rect() Rect {
 //
 // The formulas below are the single source of truth for "which rows can
 // possibly be on screen right now" in each layout mode. arrange(), draw(),
-// dispatch_to_row_widgets[_h]() (this file) and widget_tree.v's
+// (this file) and widget_tree.v's
 // ListBox.hit_children() all call these two functions instead of each
 // hand-rolling its own skip/break arithmetic — the range they return is
 // a CONSERVATIVE SUPERSET (the `+1` at the end covers a
@@ -1952,6 +1952,19 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			// курсор изменения ширины колонки - вернуть стрелку
+			if lb.resize_hover_col >= 0 {
+				set_cursor(sdl_system_cursor_arrow)
+			}
+			lb.hovered = false
+			lb.hover_index = -1
+			lb.sort_hover_col = -1
+			lb.resize_hover_col = -1
+			lb.sb_hovered = false
+			lb.hsb_hovered = false
+		}
 		.mouse_move {
 			lb.hovered = lb.bounds.contains(event.mouse_x, event.mouse_y)
 			lb.sort_hover_col = -1
@@ -2006,12 +2019,6 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 				lb.hover_index = -1
 				lb.sb_hovered = false
 				lb.hsb_hovered = false
-			}
-
-			// // Виджеты-ячейки получают mouse_move для собственного hover.
-			// Pass move events to widget cells (for hover effects inside custom widgets)
-			if lb.columns.len > 0 || lb.horizontal {
-				lb.dispatch_to_row_widgets(event, app)
 			}
 		}
 		.mouse_down {
@@ -2088,11 +2095,9 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 					}
 				}
 
-				// // Клик сначала отдаём виджету-ячейке (кнопке и т.п.); выбор строки - только если ячейка событие не взяла.
-				// Try to dispatch to row widget first
-				if (lb.columns.len > 0 || lb.horizontal) && lb.dispatch_to_row_widgets(event, app) {
-					return true
-				}
+				// Виджет-ячейка (кнопка и т.п.) получил клик раньше - по маршруту
+				// окна (event_route.v); сюда клик дошёл, только если ячейка его не
+				// взяла, и он выбирает строку.
 
 				// Row selection
 				vp := lb.viewport_rect()
@@ -2127,30 +2132,13 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 				}
 			}
 			// // Клик мимо списка: снимаем фокус (событие не поглощаем - его обработают другие виджеты).
-			if lb.focused && !lb.hovered {
-				ctx_ptr := app.get_active_ctx()
-				if unsafe { ctx_ptr != nil } {
-					mut ctx_mut := unsafe { &RenderContext(ctx_ptr) }
-					ctx_mut.focus.blur_current()
-				}
-				lb.focused = false
-				return false
-			}
+			// нажатие мимо списка сюда не приходит: фокус снимает окно
+			// (event_route.v, route_blur_outside)
 		}
 		.mouse_up {
-			// Forward to widget cells
-			if lb.columns.len > 0 || lb.horizontal {
-				if lb.dispatch_to_row_widgets(event, app) {
-					return true
-				}
-			}
 		}
 		.mouse_dbl_click {
 			if lb.hovered && lb.focused {
-				// Forward to widget cells first
-				if (lb.columns.len > 0 || lb.horizontal) && lb.dispatch_to_row_widgets(event, app) {
-					return true
-				}
 				vp := lb.viewport_rect()
 				if lb.horizontal {
 					if vp.contains(event.mouse_x, event.mouse_y) {
@@ -2218,13 +2206,6 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 			// App-level hook (custom shortcuts) wins over built-in navigation.
 			if lb.on_key_down != unsafe { nil } && lb.on_key_down(event) {
 				return true
-			}
-
-			// Forward key events to focused widget inside a row first
-			if lb.columns.len > 0 || lb.horizontal {
-				if lb.dispatch_to_row_widgets(event, app) {
-					return true
-				}
 			}
 
 			// // Home/End/PageUp/PageDown: выбор прыгает, затем ensure_visible (прокрутка) и key_select (Shift - диапазон).
@@ -2356,91 +2337,6 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 }
 
 // Dispatch an event to visible cell widgets. Returns true if any widget handled it.
-// dispatch_to_row_widgets пересылает событие виджетам-ячейкам видимых строк (снизу вверх - верхний
-// рисуется последним, значит первым должен получить событие). Перед этим bounds ячейки пересчитываются
-// заново (set_widget_bounds): arrange() мог ещё не успеть после прокрутки/смены колонок, а hit-test виджета
-// опирается на его bounds. true - какой-то виджет событие обработал.
-fn (mut lb ListBox) dispatch_to_row_widgets(event &GuiEvent, app &App) bool {
-	if lb.horizontal {
-		return lb.dispatch_to_row_widgets_h(event, app)
-	}
-	if lb.columns.len == 0 {
-		return false
-	}
-	vp := lb.viewport_rect()
-
-	first, last := lb.visible_row_range_v(vp)
-	if last < first {
-		return false
-	}
-
-	for i := last; i >= first; i-- {
-		if i < 0 || i >= lb.rows.len {
-			continue
-		}
-		if !lb.row_visible_v(i, vp) {
-			continue
-		}
-		// Update widget bounds to current position (needed for hit-testing)
-		iy := lb.row_screen_y(i, vp)
-		for ci in 0 .. min_int(lb.rows[i].cells.len, lb.columns.len) {
-			mut cell := lb.rows[i].cells[ci]
-			if unsafe { cell.widget == nil } {
-				continue
-			}
-			mut cx := vp.x - lb.scroll_x
-			for k in 0 .. min_int(ci, lb.columns.len) {
-				cx += lb.columns[k].width
-			}
-			col_w := if ci < lb.columns.len { lb.columns[ci].width } else { f32(0) }
-			inner := Rect{cx + lb_cell_pad, iy + 1, col_w - lb_cell_pad * 2, lb.item_height - 2}
-			mut w := unsafe { cell.widget }
-			set_widget_bounds(mut w, inner)
-			if event_child(mut w, event, app) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// dispatch_to_row_widgets_h - то же для горизонтального режима (виджет только в cells[0]).
-fn (mut lb ListBox) dispatch_to_row_widgets_h(event &GuiEvent, app &App) bool {
-	vp := lb.viewport_rect()
-	iw := lb.eff_item_width()
-	ih := vp.h
-
-	first, last := lb.visible_row_range_h(vp, iw)
-	if last < first {
-		return false
-	}
-
-	for i := last; i >= first; i-- {
-		if i < 0 || i >= lb.rows.len {
-			continue
-		}
-		if !lb.row_visible_h(i, vp, iw) {
-			continue
-		}
-		if lb.rows[i].cells.len == 0 {
-			continue
-		}
-		mut cell := lb.rows[i].cells[0]
-		if unsafe { cell.widget == nil } {
-			continue
-		}
-		ix := lb.item_screen_x(i, vp, iw)
-		inner :=
-			Rect{ix + lb_cell_pad, vp.y + lb_cell_pad, iw - lb_cell_pad * 2, ih - lb_cell_pad * 2}
-		mut w := unsafe { cell.widget }
-		set_widget_bounds(mut w, inner)
-		if event_child(mut w, event, app) {
-			return true
-		}
-	}
-	return false
-}
-
 // ─── Перетаскивание строк (DndBuiltin, dnd.v) ──────────
 
 // can_reorder - можно ли сейчас переставлять строки мышью: включено reorder,

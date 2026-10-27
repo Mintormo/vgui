@@ -3037,6 +3037,28 @@ pub fn (mut md MarkdownView) handle_event(event &GuiEvent, app &App) bool {
 	}
 
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			// курсор «рука» над ссылкой или кнопкой копирования - вернуть стрелку
+			if md.hovered_link_idx >= 0 || md.hovered_copy_idx >= 0 {
+				set_cursor(sdl_system_cursor_arrow)
+			}
+			had_link := md.hovered_link_url.len > 0
+			md.hovered = false
+			md.hovered_link_idx = -1
+			md.hovered_link_url = ''
+			md.hovered_copy_idx = -1
+			md.vsb_hovered = false
+			md.hsb_hovered = false
+			// ссылка под курсором сменилась на «нет» - приложению и подсказке
+			if had_link {
+				if md.on_link_hover != unsafe { nil } {
+					md.on_link_hover('')
+				}
+				md.link_hover_start = 0
+				md.link_tooltip_showing = false
+			}
+		}
 		.mouse_move {
 			md.hovered = md.bounds.contains(event.mouse_x, event.mouse_y)
 

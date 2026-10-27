@@ -443,6 +443,10 @@ pub fn (mut ce CurveEditor) handle_event(event &GuiEvent, app &App) bool {
 	r := ce.plot_rect()
 	inside := ce.bounds.contains(event.mouse_x, event.mouse_y)
 	match event.typ {
+		.mouse_leave {
+			// курсор ушёл с виджета (event_route.v) - как движение за его пределы
+			ce.hovered_pt = -1
+		}
 		.mouse_move {
 			if ce.drag_pt >= 0 {
 				x, y := ce.from_screen(r, event.mouse_x, event.mouse_y)
