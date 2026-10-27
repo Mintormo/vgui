@@ -510,7 +510,15 @@ fn (w &Window) route_key_listeners() []&Widget {
 }
 
 fn route_collect_listeners(n &Widget, mut out []&Widget, depth int) {
-	if depth > widget_tree_max_depth || !widget_is_visible(n) || !widget_enabled(n) {
+	if depth > widget_tree_max_depth || !widget_enabled(n) {
+		return
+	}
+	if !widget_is_visible(n) {
+		// скрытая строка меню с keys_when_hidden (полноэкранный режим
+		// приложения) сочетания своих пунктов ловит и скрытой
+		if n is MenuBar && n.keys_when_hidden {
+			out << unsafe { n }
+		}
 		return
 	}
 	if route_is_key_listener(n) {

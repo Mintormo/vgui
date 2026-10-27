@@ -182,3 +182,30 @@ fn test_tables_share_window_focus() {
 	t.frame()
 	assert tb.focused && !ta.focused
 }
+
+// Скрытая строка меню с keys_when_hidden (полноэкранный режим приложения)
+// ловит сочетания своих пунктов, без флага - нет.
+fn test_hidden_menu_bar_keeps_shortcuts() {
+	mut t := new_test_ui(width: 300, height: 200)!
+	defer {
+		t.close()
+	}
+	mut log := &RouteLog{}
+	mut mb := menu_bar()
+	mut it := menu_action('F6')
+	it.shortcut = 'F6'
+	it.on_click = fn [mut log] () {
+		log.clicks << 'F6'
+	}
+	mb.add_menu('Вид', [it])
+	mut root := create_vbox_fill()
+	root.add(mb)
+	root.add(button('x'), flex: 1)
+	t.add(root)
+	mb.visible = false
+	t.key(sdl_k_f6, 0)
+	assert log.clicks.len == 0, 'скрытое меню без keys_when_hidden клавиш не ловит'
+	mb.keys_when_hidden = true
+	t.key(sdl_k_f6, 0)
+	assert log.clicks == ['F6'], 'скрытое меню с keys_when_hidden ловит сочетание'
+}
