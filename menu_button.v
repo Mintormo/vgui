@@ -53,7 +53,8 @@ pub mut:
 	visible     bool        = true
 	enabled     bool        = true
 	tooltip     string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
-	hovered     bool   // mouse over the widget as a whole
+	dnd         &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
+	hovered     bool // mouse over the widget as a whole
 	// hovered_arrow — курсор над зоной стрелки (подмножество hovered); pressed / pressed_arrow — какая зона зажата (клик срабатывает по отпусканию)
 	hovered_arrow bool // mouse over the arrow zone specifically
 	pressed       bool // action zone pressed

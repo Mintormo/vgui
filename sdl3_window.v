@@ -704,6 +704,8 @@ pub fn (mut w Window) center() {
 // Ресурсы SDL при этом НЕ освобождаются - это делает cleanup() (App.cleanup / вызывающий код).
 pub fn (mut w Window) close() {
 	w.open = false
+	// Сеанс перетаскивания не должен ссылаться на закрытое окно (dnd.v)
+	dnd_forget_window(&w)
 	w.visible = false
 	if unsafe { w.sdl_window != nil } {
 		C.SDL_HideWindow(w.sdl_window)
@@ -1055,6 +1057,9 @@ fn (mut w Window) render() {
 	// decision below is taken from the live state, not these snapshots.
 	tooltips_active_before := w.ctx.pending_tooltips.len > 0
 	overlay_active_before := w.ctx.overlay_cb != unsafe { nil }
+	// Призрак перетаскивания и подсветка цели (dnd.v) рисуются поверх
+	// виджетов, как подсказка, - кадр с ними тоже полный.
+	dnd_now := dnd_paints(&w)
 
 	// A frame is FULL when: the render target was just (re)created (fresh
 	// texture, undefined content); the window resized; something explicitly
@@ -1064,7 +1069,8 @@ fn (mut w Window) render() {
 	// opening or closing one leaves a ghost on the persistent target unless
 	// the whole frame is repainted.
 	full := rt_recreated || size_changed || w.ctx.dirty.full || overlay_active_before
-		|| tooltips_active_before || w.has_modal_child || w.prev_overlayish || w.rt == unsafe { nil }
+		|| tooltips_active_before || w.has_modal_child || w.prev_overlayish || dnd_now
+		|| w.rt == unsafe { nil }
 
 	// Nothing-changed fast path: no forcing condition fired and no rect was
 	// accumulated since the last frame, so the persistent target's existing
@@ -1248,7 +1254,14 @@ fn (mut w Window) render() {
 			w.ctx.pending_tooltips.clear()
 		}
 
-		w.prev_overlayish = (w.ctx.overlay_cb != unsafe { nil }) || tooltips_now || w.has_modal_child
+		// Перетаскивание - поверх всего, даже подсказок
+		if dnd_now {
+			C.SDL_SetRenderClipRect(w.renderer, unsafe { nil })
+			dnd_draw(mut w)
+		}
+
+		w.prev_overlayish = (w.ctx.overlay_cb != unsafe { nil }) || tooltips_now
+			|| w.has_modal_child || dnd_now
 	}
 
 	// Blit the persistent render target to the window's real backbuffer and
@@ -1362,6 +1375,13 @@ fn (mut w Window) dispatch_event_inner(ev &GuiEvent, app &App) {
 	// событие (переключение вкладки, скролл, add в контейнер) взвело
 	// layout_dirty через invalidate_all() в конце этой же функции.
 	w.arrange_if_needed()
+	// Перетаскивание между виджетами (dnd.v): нажатие его взводит, сдвиг за
+	// порог начинает, а идущее перетаскивание съедает мышь и клавиши - ни
+	// оверлей, ни виджеты их не видят. Кадр полный: призрак у курсора.
+	if dnd_on_event(mut w, ev, app) {
+		w.ctx.invalidate_all()
+		return
+	}
 	// Подсказка: клик, клавиша, колесо её прячут, уход мыши - сбрасывает.
 	// До оверлея - попап может поглотить событие.
 	w.tip_on_event(ev)
@@ -1396,6 +1416,14 @@ fn (mut w Window) dispatch_event_inner(ev &GuiEvent, app &App) {
 		if app.hotkeys.try_match(ev) {
 			w.ctx.invalidate_all()
 			return
+		}
+	}
+	// Сброс из другого приложения: сначала виджеты (DropZone, выше), затем
+	// цели с полем dnd, принимающие 'files' / 'text/plain' (dnd.v), и только
+	// потом оконный обработчик ниже.
+	if ev.typ in [.drop_begin, .drop_position, .drop_complete, .drop_file, .drop_text] {
+		if dnd_external_event(mut w, ev, handled, app) {
+			handled = true
 		}
 	}
 	// Drop fallback: if no widget (drop zone) consumed the file/text, deliver
@@ -1560,6 +1588,7 @@ fn (mut w Window) invalidate_hover_change(ev &GuiEvent) {
 // рендерера с учёта (его текстуры умирают вместе с ним) -> SDL_DestroyRenderer ->
 // SDL_DestroyWindow. Идемпотентна: указатели обнуляются, повторный вызов безопасен.
 pub fn (mut w Window) cleanup() {
+	dnd_forget_window(&w)
 	if unsafe { w.sdl_window != nil } {
 		C.SDL_StopTextInput(w.sdl_window)
 	}

@@ -44,8 +44,9 @@ pub mut:
 	visible  bool = true
 	enabled  bool = true // false - приглушённые цвета (enabled.v)
 	tooltip  string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
-	pad_x    f32 = 7
-	pad_y    f32 = 3
+	dnd      &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
+	pad_x    f32       = 7
+	pad_y    f32       = 3
 }
 
 // badge создаёт значок с произвольным текстом (вариант .info).

@@ -59,6 +59,7 @@ pub mut:
 	visible  bool = true
 	enabled  bool = true
 	tooltip  string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	dnd      &DragSpec    = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
 	points   []CurvePoint = [CurvePoint{0, 0}, CurvePoint{1, 1}]
 	// Цвет кривой; a == 0 — акцент темы. Значение по умолчанию задано
 	// явно: у Color альфа по умолчанию 255 (это был бы чёрный)

@@ -39,6 +39,7 @@ pub mut:
 	visible    bool = true
 	enabled    bool = true // false - не нажимается, ожидание прерывается (enabled.v)
 	tooltip    string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	dnd        &DragSpec   = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
 	on_change  fn (string) = unsafe { nil }
 	on_reject  fn (string) = unsafe { nil }
 	on_wait    fn (bool)   = unsafe { nil }

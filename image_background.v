@@ -45,7 +45,8 @@ pub mut:
 	visible       bool   = true
 	enabled       bool   = true // false - картинка приглушена вуалью (enabled.v)
 	tooltip       string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
-	bg_color      Color = Color{0, 0, 0, 0}
+	dnd           &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
+	bg_color      Color     = Color{0, 0, 0, 0}
 	corner_radius f32
 	// Cached texture (same pattern + ABA guard as ImageView)
 	texture          voidptr = unsafe { nil }

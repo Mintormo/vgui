@@ -51,7 +51,8 @@ pub mut:
 	visible      bool = true
 	enabled      bool = true // false - неактивны все ячейки (enabled.v)
 	tooltip      string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
-	clip         bool = true
+	dnd          &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
+	clip         bool      = true
 }
 
 // create_grid создаёт сетку; cols и rows меньше 1 заменяются на 1. Все дорожки изначально авто-размера (по содержимому), без весов.

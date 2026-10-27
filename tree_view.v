@@ -22,6 +22,8 @@
 // делением на item_height (строки одной высоты).
 module vgui
 
+import math
+
 // ═══════════════════════════════════════════════════════
 // TreeView — hierarchical tree widget with icons,
 // expand/collapse, keyboard navigation, dual scrollbars,
@@ -220,6 +222,7 @@ pub mut:
 	visible     bool      = true
 	enabled     bool      = true
 	tooltip     string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	dnd         &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
 	focused     bool
 	hovered     bool
 	focus_anim  Anim = anim_smooth(anim_tau_focus)
@@ -275,7 +278,30 @@ pub mut:
 	hsb_hovered           bool
 	hsb_drag_start_x      f32
 	hsb_drag_start_scroll f32
+	// ── Перетаскивание узлов (dnd.v, PROJECT.md «Перетаскивание между виджетами») ──
+	// drag_nodes - узел можно утащить мышью в другую цель: данные
+	// DragData{kind: tv_drag_kind, text: текст узла, node: узел}.
+	// reorder - узлы можно переносить внутри дерева: перед узлом, после него
+	// или внутрь (верхняя/нижняя четверть строки - между узлами, середина -
+	// внутрь). Включает и drag_nodes. Узел нельзя перенести в собственное
+	// поддерево. После переноса - on_node_moved(узел, новый родитель (nil -
+	// верхний уровень), позиция среди его детей).
+	// Принять чужие данные - через поле dnd: accepts + on_drop, в DropInfo
+	// придут node/pos/parent/index.
+	drag_nodes    bool
+	reorder       bool
+	on_node_moved fn (node &TreeNode, parent &TreeNode, index int) = unsafe { nil }
+	// индикатор места сброса во время перетаскивания: узел под курсором и
+	// положение относительно него; dnd_show = false - индикатора нет.
+	// dnd_node - сырой адрес только на время перетаскивания (снимает
+	// dnd_leave/dnd_drop), иначе пинил бы узел для GC.
+	dnd_show bool
+	dnd_node &TreeNode = unsafe { nil }
+	dnd_pos  DropPos
 }
+
+// tv_drag_kind - тип данных узла, утащенного из TreeView (DragData.kind).
+pub const tv_drag_kind = 'vgui/tree-node'
 
 // Конструктор: пустое дерево, редактирование включено (editable = true).
 pub fn tree_view() &TreeView {
@@ -1222,6 +1248,11 @@ pub fn (mut tv TreeView) draw(mut ctx RenderContext) {
 		}
 	}
 
+	// Индикатор места сброса во время перетаскивания (dnd.v)
+	if tv.dnd_show {
+		tv.draw_dnd_marker(mut ctx)
+	}
+
 	ctx.pop_clip()
 
 	// ── Scrollbars ──
@@ -2005,5 +2036,298 @@ fn (mut tv TreeView) handle_hsb_drag(event &GuiEvent, ctx_ptr &RenderContext) bo
 		else {}
 	}
 
+	return true
+}
+
+// ─── Перетаскивание узлов (DndBuiltin, dnd.v) ──────────
+
+// TvDropSpot - куда упадёт сброс в точке: узел под курсором (nil - пустое
+// дерево или место ниже всех строк), положение относительно него, будущий
+// родитель (nil - верхний уровень) и позиция среди его детей.
+struct TvDropSpot {
+	node   &TreeNode = unsafe { nil }
+	pos    DropPos
+	parent &TreeNode = unsafe { nil }
+	index  int
+}
+
+// dnd_node_at - видимый узел под точкой (x, y) в области строк (не на
+// полосах прокрутки - там своё перетаскивание), иначе nil.
+fn (tv &TreeView) dnd_node_at(x f32, y f32) &TreeNode {
+	if !tv.inner_rect().contains(x, y) {
+		return unsafe { nil }
+	}
+	inner := tv.inner_rect()
+	idx := int(math.floor((y - inner.y + tv.scroll_y) / tv.item_height))
+	flat := tv.build_flat()
+	if idx < 0 || idx >= flat.len {
+		return unsafe { nil }
+	}
+	return flat[idx].node
+}
+
+// siblings_index - позиция узла среди детей его родителя (у узла верхнего
+// уровня - среди roots); -1 - узел в дереве не найден.
+fn (tv &TreeView) siblings_index(node &TreeNode) int {
+	list := if unsafe { node.parent != nil } { node.parent.children } else { tv.roots }
+	for i, n in list {
+		if voidptr(n) == voidptr(node) {
+			return i
+		}
+	}
+	return -1
+}
+
+// dnd_spot - место сброса для точки с высотой y (по горизонтали строка
+// любая). Строка делится на четверти:
+// верхняя - перед узлом, нижняя - после, середина - внутрь. «После»
+// раскрытого узла с детьми - это первым ребёнком (линия рисуется под его
+// строкой, над первым ребёнком: так и выглядит). Ниже всех строк - в конец
+// верхнего уровня.
+fn (tv &TreeView) dnd_spot(y f32) TvDropSpot {
+	inner := tv.inner_rect()
+	flat := tv.build_flat()
+	rel := y - inner.y + tv.scroll_y
+	idx := int(math.floor(rel / tv.item_height))
+	if flat.len == 0 || idx >= flat.len || idx < 0 {
+		// Пустое место под строками (или над ними при прокрутке): конец
+		// верхнего уровня; индикатор - под последней строкой
+		last := if flat.len > 0 { flat[flat.len - 1].node } else { unsafe { &TreeNode(nil) } }
+		if idx < 0 && flat.len > 0 {
+			return TvDropSpot{
+				node:  flat[0].node
+				pos:   .before
+				index: 0
+			}
+		}
+		return TvDropSpot{
+			node:  last
+			pos:   .after
+			index: tv.roots.len
+		}
+	}
+	node := flat[idx].node
+	frac := (rel - f32(idx) * tv.item_height) / tv.item_height
+	if frac < 0.25 {
+		return TvDropSpot{
+			node:   node
+			pos:    .before
+			parent: node.parent
+			index:  tv.siblings_index(node)
+		}
+	}
+	if frac > 0.75 {
+		if node.expanded && node.has_children() {
+			return TvDropSpot{
+				node:   node
+				pos:    .inside
+				parent: node
+				index:  0
+			}
+		}
+		return TvDropSpot{
+			node:   node
+			pos:    .after
+			parent: node.parent
+			index:  tv.siblings_index(node) + 1
+		}
+	}
+	return TvDropSpot{
+		node:   node
+		pos:    .inside
+		parent: node
+		index:  node.children.len
+	}
+}
+
+// draw_dnd_marker рисует индикатор места сброса: линию перед/после строки
+// узла (с отступом его уровня) или рамку вокруг строки для «внутрь».
+// «Первым ребёнком раскрытого узла» (dnd_spot) - линия под строкой узла с
+// отступом детей.
+fn (tv &TreeView) draw_dnd_marker(mut ctx RenderContext) {
+	inner := tv.inner_rect()
+	c := ctx.theme.accent
+	flat := tv.build_flat()
+	mut idx := -1
+	mut depth := 0
+	for i, f in flat {
+		if voidptr(f.node) == voidptr(tv.dnd_node) {
+			idx = i
+			depth = f.depth
+			break
+		}
+	}
+	if idx < 0 {
+		// Узла нет среди видимых (пустое дерево): линия по верху области
+		ctx.fill_rect(Rect{inner.x, inner.y, inner.w, 2}, c)
+		return
+	}
+	row_y := inner.y + f32(idx) * tv.item_height - tv.scroll_y
+	x := inner.x + f32(depth) * tv.indent - tv.scroll_x
+	match tv.dnd_pos {
+		.before {
+			ctx.fill_rect(Rect{x, max_f32(row_y - 1, inner.y), inner.x + inner.w - x, 2}, c)
+		}
+		.after {
+			ly := min_f32(row_y + tv.item_height - 1, inner.y + inner.h - 2)
+			ctx.fill_rect(Rect{x, ly, inner.x + inner.w - x, 2}, c)
+		}
+		.inside {
+			r := Rect{x, row_y, inner.x + inner.w - x, tv.item_height}
+			ctx.draw_rounded_rect(r, c, 3)
+			ctx.draw_rounded_rect(r.shrunk(1), c, 3)
+		}
+	}
+}
+
+// dnd_begin - перетаскивание началось нажатием в (x, y). При drag_nodes или
+// reorder тянется узел под точкой. Во время правки текста узла и при
+// перетаскивании ползунка - ничего (это свои жесты). Без флагов - общий
+// источник поля dnd (on_drag_start).
+pub fn (mut tv TreeView) dnd_begin(x f32, y f32) DragData {
+	if tv.editing || tv.vsb_dragging || tv.hsb_dragging {
+		return DragData{}
+	}
+	if tv.drag_nodes || tv.reorder {
+		node := tv.dnd_node_at(x, y)
+		if unsafe { node == nil } {
+			return DragData{}
+		}
+		return DragData{
+			kind: tv_drag_kind
+			text: node.text
+			node: node
+		}
+	}
+	if unsafe { tv.dnd != nil } && tv.dnd.on_drag_start != unsafe { nil } {
+		return tv.dnd.on_drag_start(x, y)
+	}
+	return DragData{}
+}
+
+// dnd_reorder_ok - сброс data в место spot будет переносом узла внутри
+// этого дерева, и он допустим: не в собственное поддерево.
+fn (tv &TreeView) dnd_reorder_ok(data DragData, same bool, spot TvDropSpot) bool {
+	if !same || !tv.reorder || data.kind != tv_drag_kind || unsafe { data.node == nil } {
+		return false
+	}
+	if unsafe { spot.parent != nil } && spot.parent.is_self_or_ancestor_of_node(data.node) {
+		return false
+	}
+	return true
+}
+
+// dnd_over - примет ли дерево сброс в (x, y): свой узел - перенос (если
+// допустим), прочее - по полю dnd. Принимает - запоминает индикатор.
+pub fn (mut tv TreeView) dnd_over(data DragData, same bool, x f32, y f32) bool {
+	spot := tv.dnd_spot(y)
+	ok := tv.dnd_reorder_ok(data, same, spot) || dnd_spec_accepts(tv.dnd, data, x, y)
+	tv.dnd_show = ok
+	tv.dnd_node = if ok { spot.node } else { unsafe { nil } }
+	tv.dnd_pos = spot.pos
+	return ok
+}
+
+// dnd_leave - курсор ушёл: убрать индикатор и забыть узел.
+pub fn (mut tv TreeView) dnd_leave() {
+	tv.dnd_show = false
+	tv.dnd_node = unsafe { nil }
+}
+
+// dnd_drop - сброс в точке info.x/y. Свой узел - move_node и on_node_moved;
+// чужие данные - on_drop поля dnd с местом сброса (node/pos/parent/index).
+pub fn (mut tv TreeView) dnd_drop(info DropInfo, app &App) bool {
+	_ = app // контекст окна нужен только текстовым целям (dnd.v)
+	tv.dnd_leave()
+	spot := tv.dnd_spot(info.y)
+	if tv.dnd_reorder_ok(info.data, info.same, spot) {
+		node := info.data.node
+		if tv.move_node(node, spot.parent, spot.index) && tv.on_node_moved != unsafe { nil } {
+			tv.on_node_moved(node, spot.parent, tv.siblings_index(node))
+		}
+		return true
+	}
+	if !dnd_spec_accepts(tv.dnd, info.data, info.x, info.y) {
+		return false
+	}
+	tv.dnd.on_drop(DropInfo{
+		...info
+		node:   spot.node
+		pos:    spot.pos
+		parent: spot.parent
+		index:  spot.index
+	})
+	return true
+}
+
+// remove_node снимает узел (вместе с поддеревом) с дерева: у ребёнка - из
+// детей родителя, у узла верхнего уровня - из roots. Выбор, наведение и
+// правка, указывавшие внутрь снятого поддерева, сбрасываются. false - узла
+// в дереве нет. Сам узел не уничтожается (его можно добавить снова).
+pub fn (mut tv TreeView) remove_node(node &TreeNode) bool {
+	if unsafe { node == nil } {
+		return false
+	}
+	idx := tv.siblings_index(node)
+	if idx < 0 {
+		return false
+	}
+	if tv.editing && unsafe { tv.edit_node != nil }
+		&& tv.edit_node.is_self_or_ancestor_of_node(node) {
+		tv.cancel_edit()
+	}
+	if unsafe { node.parent != nil } {
+		mut p := node.parent
+		p.remove_at(idx)
+	} else {
+		tv.roots.delete(idx)
+	}
+	if unsafe { tv.selected != nil } && tv.selected.is_self_or_ancestor_of_node(node) {
+		tv.selected = unsafe { nil }
+	}
+	if unsafe { tv.hover_node != nil } && tv.hover_node.is_self_or_ancestor_of_node(node) {
+		tv.hover_node = unsafe { nil }
+	}
+	return true
+}
+
+// move_node переносит узел к новому родителю parent (nil - на верхний
+// уровень) на позицию index среди его детей. index считается по списку ДО
+// снятия узла с прежнего места (как его видит пользователь, глядя на линию
+// вставки): при переносе ниже в пределах того же списка он уменьшается на
+// единицу. Новый родитель раскрывается, чтобы перенесённый узел было видно.
+// false - узел nil, или parent - сам узел или его потомок (цикл).
+pub fn (mut tv TreeView) move_node(node &TreeNode, parent &TreeNode, index int) bool {
+	if unsafe { node == nil } {
+		return false
+	}
+	if unsafe { parent != nil } && parent.is_self_or_ancestor_of_node(node) {
+		return false
+	}
+	mut idx := index
+	old_parent := node.parent
+	old_idx := tv.siblings_index(node)
+	if voidptr(old_parent) == voidptr(parent) && old_idx >= 0 && old_idx < idx {
+		idx--
+	}
+	// Снять с прежнего места: у ребёнка - из детей родителя, у узла
+	// верхнего уровня - из roots
+	mut n := unsafe { node }
+	if unsafe { old_parent != nil } {
+		mut op := unsafe { old_parent }
+		if old_idx >= 0 {
+			op.children.delete(old_idx)
+		}
+		n.parent = unsafe { nil }
+	} else if old_idx >= 0 {
+		tv.roots.delete(old_idx)
+	}
+	if unsafe { parent != nil } {
+		mut p := unsafe { parent }
+		p.insert_at(idx, node)
+		p.expanded = true
+	} else {
+		tv.roots.insert(clamp_int(idx, 0, tv.roots.len), n)
+	}
 	return true
 }

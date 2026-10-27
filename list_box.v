@@ -117,6 +117,7 @@ pub mut:
 	visible     bool = true
 	enabled     bool = true
 	tooltip     string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	dnd         &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
 	focused     bool
 	hovered     bool
 	hover_index int = -1
@@ -201,7 +202,26 @@ pub mut:
 	virtual_count int
 	virtual_text  fn (row int, col int) string = unsafe { nil }
 	virtual_icon  fn (row int) ItemIcon        = unsafe { nil }
+	// ── Перетаскивание строк (dnd.v, PROJECT.md «Перетаскивание между виджетами») ──
+	// drag_rows - строку можно утащить мышью в другую цель: данные
+	// DragData{kind: lb_drag_kind, text: текст строки, index: номер строки}.
+	// reorder - строки можно переставлять внутри списка перетаскиванием
+	// (включает и drag_rows). Не действует, пока список отсортирован
+	// (auto_sort с индикатором) или виртуальный - порядок там задаёт не
+	// пользователь. После перестановки - on_reorder(откуда, куда): куда -
+	// новый номер перенесённой строки.
+	// Принять строки из других списков (и любые другие данные) - через поле
+	// dnd: accepts + on_drop, в DropInfo.index придёт позиция вставки.
+	drag_rows  bool
+	reorder    bool
+	on_reorder fn (from int, to int) = unsafe { nil }
+	// позиция линии вставки под курсором во время перетаскивания (0..число
+	// строк; -1 - линии нет). Ставит dnd_over, снимают dnd_leave/dnd_drop.
+	dnd_insert int = -1
 }
+
+// lb_drag_kind - тип данных строки, утащенной из ListBox (DragData.kind).
+pub const lb_drag_kind = 'vgui/list-row'
 
 // ─── Constructors ──────────────────────────────────────
 
@@ -654,6 +674,67 @@ pub fn (mut lb ListBox) add_items(items []string) {
 	for item in items {
 		lb.add_item(item)
 	}
+}
+
+// insert_item вставляет однострочную строку text на позицию idx (зажимается
+// в 0..число строк) - например, туда, куда её бросили перетаскиванием
+// (DropInfo.index). Отсортированный по колонке список ставит строку на её
+// место по порядку, как add_item. Выбор и отметки за точкой вставки
+// сдвигаются. У виртуального списка строк нет - ничего не делает.
+pub fn (mut lb ListBox) insert_item(idx int, text string) {
+	if lb.is_virtual {
+		return
+	}
+	mut row := LbRow{
+		text:  text
+		cells: [LbCell{
+			text: text
+		}]
+		seq:   lb.next_seq
+	}
+	if lb.auto_sort && lb.sorted_col() >= 0 {
+		lb.push_row(row, text)
+		return
+	}
+	lb.next_seq++
+	pos := clamp_int(idx, 0, lb.rows.len)
+	lb.rows.insert(pos, row)
+	lb.items.insert(pos, text)
+	if lb.selected >= pos {
+		lb.selected++
+	}
+	if lb.sel_anchor >= pos {
+		lb.sel_anchor++
+	}
+	lb.sel_marks = lb.sel_marks.map(if it >= pos { it + 1 } else { it })
+	lb.hover_index = -1
+}
+
+// remove_row удаляет строку idx (вне списка - false). Выбранная строка
+// теряет выбор, строки ниже сдвигаются вверх вместе с выбором и отметками.
+// Виджеты в ячейках не освобождаются (ListBox ими не владеет).
+pub fn (mut lb ListBox) remove_row(idx int) bool {
+	if lb.is_virtual || idx < 0 || idx >= lb.rows.len {
+		return false
+	}
+	lb.rows.delete(idx)
+	if idx < lb.items.len {
+		lb.items.delete(idx)
+	}
+	lb.selected = lb_removed_index(lb.selected, idx)
+	lb.sel_anchor = lb_removed_index(lb.sel_anchor, idx)
+	lb.sel_marks = lb.sel_marks.filter(it != idx).map(lb_removed_index(it, idx))
+	lb.hover_index = -1
+	return true
+}
+
+// lb_removed_index - номер строки i после удаления строки removed: сама
+// удалённая - -1 («нет»), ниже неё - на одну выше.
+fn lb_removed_index(i int, removed int) int {
+	if i == removed {
+		return -1
+	}
+	return if i > removed { i - 1 } else { i }
 }
 
 // clear удаляет все строки, сбрасывает выбор, прокрутку и hover; колонки остаются.
@@ -1715,6 +1796,12 @@ pub fn (mut lb ListBox) draw(mut ctx RenderContext) {
 		}
 	}
 
+	// Линия вставки во время перетаскивания (dnd.v): между строками, куда
+	// упадёт сброс. Внутри клипа области строк - за край не вылезает.
+	if lb.dnd_insert >= 0 {
+		lb.draw_dnd_insert(mut ctx, vp)
+	}
+
 	ctx.pop_clip()
 
 	// ── Vertical Scrollbar ──
@@ -2345,4 +2432,173 @@ fn (mut lb ListBox) dispatch_to_row_widgets_h(event &GuiEvent, app &App) bool {
 		}
 	}
 	return false
+}
+
+// ─── Перетаскивание строк (DndBuiltin, dnd.v) ──────────
+
+// can_reorder - можно ли сейчас переставлять строки мышью: включено reorder,
+// список не виртуальный (строк у него нет - порядок у приложения) и не
+// отсортирован по колонке (после перестановки сортировка вернула бы строку
+// на место).
+fn (lb &ListBox) can_reorder() bool {
+	if !lb.reorder || lb.is_virtual {
+		return false
+	}
+	return !lb.auto_sort || lb.sorted_col() < 0
+}
+
+// dnd_row_at - строка под точкой (x, y), если точка в области строк
+// (не в шапке, не на полосах прокрутки), иначе -1.
+fn (lb &ListBox) dnd_row_at(x f32, y f32) int {
+	vp := lb.viewport_rect()
+	if !vp.contains(x, y) {
+		return -1
+	}
+	return if lb.horizontal { lb.hit_item_h(x) } else { lb.hit_item(y) }
+}
+
+// dnd_insert_at - позиция вставки для точки (x, y): граница строк,
+// ближайшая к курсору (верхняя половина строки - перед ней, нижняя - после).
+// 0..row_total(); точка выше/ниже области строк - к краю.
+fn (lb &ListBox) dnd_insert_at(x f32, y f32) int {
+	vp := lb.viewport_rect()
+	total := lb.row_total()
+	rel := if lb.horizontal {
+		(f64(x) - f64(vp.x) + f64(lb.scroll_x)) / f64(lb.eff_item_width())
+	} else {
+		(f64(y) - f64(vp.y) + f64(lb.scroll_y)) / f64(lb.item_height)
+	}
+	idx := int(math.floor(rel + 0.5))
+	return clamp_int(idx, 0, total)
+}
+
+// draw_dnd_insert рисует линию вставки (2 px, цвет акцента) перед строкой
+// dnd_insert; в горизонтальном режиме - вертикальную перед элементом. Линия
+// прижимается внутрь области строк, чтобы у первой и последней позиции не
+// срезалась пополам.
+fn (lb &ListBox) draw_dnd_insert(mut ctx RenderContext, vp Rect) {
+	c := ctx.theme.accent
+	if lb.horizontal {
+		x := clamp_f32(lb.item_screen_x(lb.dnd_insert, vp, lb.eff_item_width()), vp.x + 1,
+			vp.x + vp.w - 1)
+		ctx.fill_rect(Rect{x - 1, vp.y, 2, vp.h}, c)
+	} else {
+		y := clamp_f32(lb.row_screen_y(lb.dnd_insert, vp), vp.y + 1, vp.y + vp.h - 1)
+		ctx.fill_rect(Rect{vp.x, y - 1, vp.w, 2}, c)
+	}
+}
+
+// dnd_begin - перетаскивание началось нажатием в (x, y). При drag_rows или
+// reorder тянется строка под точкой (мимо строк - ничего). Без них - общий
+// источник поля dnd (on_drag_start), как у любого виджета.
+pub fn (mut lb ListBox) dnd_begin(x f32, y f32) DragData {
+	// Нажатие начало свой жест списка (бегунок, граница колонки) - не тянем
+	if lb.sb_dragging || lb.hsb_dragging || lb.col_resizing {
+		return DragData{}
+	}
+	if lb.drag_rows || lb.reorder {
+		idx := lb.dnd_row_at(x, y)
+		if idx < 0 {
+			return DragData{}
+		}
+		return DragData{
+			kind:  lb_drag_kind
+			text:  lb.item_text(idx)
+			index: idx
+		}
+	}
+	if unsafe { lb.dnd != nil } && lb.dnd.on_drag_start != unsafe { nil } {
+		return lb.dnd.on_drag_start(x, y)
+	}
+	return DragData{}
+}
+
+// dnd_over - примет ли список сброс в (x, y): своя строка - перестановка
+// (если она сейчас возможна), прочее - по полю dnd. Принимает - запоминает
+// позицию линии вставки.
+pub fn (mut lb ListBox) dnd_over(data DragData, same bool, x f32, y f32) bool {
+	ok := lb.dnd_reorders(data, same) || dnd_spec_accepts(lb.dnd, data, x, y)
+	lb.dnd_insert = if ok { lb.dnd_insert_at(x, y) } else { -1 }
+	return ok
+}
+
+// dnd_reorders - сброс data будет перестановкой строк этого же списка.
+fn (lb &ListBox) dnd_reorders(data DragData, same bool) bool {
+	return same && data.kind == lb_drag_kind && data.index >= 0 && lb.can_reorder()
+}
+
+// dnd_leave - курсор ушёл: убрать линию вставки.
+pub fn (mut lb ListBox) dnd_leave() {
+	lb.dnd_insert = -1
+}
+
+// dnd_drop - сброс в точке info.x/y. Своя строка - перестановка move_row и
+// on_reorder; чужие данные - on_drop поля dnd с позицией вставки в index.
+pub fn (mut lb ListBox) dnd_drop(info DropInfo, app &App) bool {
+	_ = app // контекст окна нужен только текстовым целям (dnd.v)
+	lb.dnd_insert = -1
+	insert := lb.dnd_insert_at(info.x, info.y)
+	if lb.dnd_reorders(info.data, info.same) {
+		from := info.data.index
+		// Позиция вставки считается «до удаления строки»: ниже исходной
+		// строки номер после переноса на единицу меньше.
+		to := if insert > from { insert - 1 } else { insert }
+		if lb.move_row(from, to) && lb.on_reorder != unsafe { nil } {
+			lb.on_reorder(from, to)
+		}
+		return true
+	}
+	if !dnd_spec_accepts(lb.dnd, info.data, info.x, info.y) {
+		return false
+	}
+	lb.dnd.on_drop(DropInfo{
+		...info
+		index: insert
+	})
+	return true
+}
+
+// move_row переносит строку from на место to (оба - номера строк, to - номер
+// строки ПОСЛЕ переноса). Выбор, отметки множественного выбора и якорь едут
+// вместе со строками. false - номера вне списка, совпадают или список
+// виртуальный (своих строк нет). Кадр не инвалидирует (как прочие сеттеры).
+pub fn (mut lb ListBox) move_row(from int, to int) bool {
+	n := lb.rows.len
+	if lb.is_virtual || from == to || from < 0 || to < 0 || from >= n || to >= n {
+		return false
+	}
+	row := lb.rows[from]
+	lb.rows.delete(from)
+	lb.rows.insert(to, row)
+	if from < lb.items.len && to < lb.items.len {
+		item := lb.items[from]
+		lb.items.delete(from)
+		lb.items.insert(to, item)
+	}
+	lb.selected = lb_moved_index(lb.selected, from, to)
+	lb.sel_anchor = lb_moved_index(lb.sel_anchor, from, to)
+	mut marks := lb.sel_marks.map(lb_moved_index(it, from, to))
+	marks.sort()
+	lb.sel_marks = marks
+	lb.hover_index = -1
+	return true
+}
+
+// lb_moved_index - куда попадает строка i, когда строку from переносят на
+// место to: сама from - в to, строки между ними сдвигаются на одну к from,
+// остальные (и -1 - «нет») не меняются.
+fn lb_moved_index(i int, from int, to int) int {
+	if i < 0 {
+		return i
+	}
+	if i == from {
+		return to
+	}
+	if from < to && i > from && i <= to {
+		return i - 1
+	}
+	if to < from && i >= to && i < from {
+		return i + 1
+	}
+	return i
 }

@@ -52,6 +52,7 @@ pub mut:
 	visible    bool  = true
 	enabled    bool  = true
 	tooltip    string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	dnd        &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
 	hovered    bool
 	show_alpha bool       = true
 	on_change  fn (Color) = unsafe { nil }

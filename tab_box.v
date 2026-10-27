@@ -97,6 +97,7 @@ pub mut:
 	visible     bool       = true
 	enabled     bool       = true
 	tooltip     string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	dnd         &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
 	focused     bool
 	focus_anim  Anim = anim_smooth(anim_tau_focus)
 	focus_group int

@@ -71,6 +71,8 @@ pub mut:
 	visible      bool      = true
 	enabled      bool      = true
 	tooltip      string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	dnd          &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
+	accept_drops bool      = true         // встроенный приём перетаскивания (dnd.v): брошенная картинка открывается; false - выключен
 	hovered      bool
 	pad          f32   = 2
 	bg_color     Color = Color{0, 0, 0, 0}
@@ -854,4 +856,37 @@ fn (mut iv ImageView) zoom_to_center(new_zoom f32) {
 	iv.scroll_x = cx * iv.zoom - half_w
 	iv.scroll_y = cy * iv.zoom - half_h
 	iv.clamp_scroll()
+}
+
+// ─── Встроенный приём перетаскивания (DndBuiltin, dnd.v) ─
+
+// dnd_begin - источник только по полю dnd (нажатие с протяжкой у ImageView -
+// панорама).
+pub fn (mut iv ImageView) dnd_begin(x f32, y f32) DragData {
+	return dnd_spec_source(iv.dnd, x, y)
+}
+
+// dnd_over - примет ли виджет сброс: по полю dnd или встроенно - любой файл
+// при accept_drops (путь до самого сброса неизвестен, проверка - в dnd_drop).
+pub fn (mut iv ImageView) dnd_over(data DragData, same bool, x f32, y f32) bool {
+	return dnd_spec_or_builtin_over(iv.dnd, iv.accept_drops && data.kind == dnd_kind_files,
+		data, same, x, y)
+}
+
+// dnd_leave - своего индикатора нет (рамку рисует окно).
+pub fn (mut iv ImageView) dnd_leave() {}
+
+// dnd_drop - сначала поле dnd; иначе брошенная картинка открывается
+// (set_path, текстура загрузится в следующем кадре). Не картинка - false:
+// сброс уходит дальше, оконному on_drop_file.
+pub fn (mut iv ImageView) dnd_drop(info DropInfo, app &App) bool {
+	if dnd_spec_drop(iv.dnd, info) {
+		return true
+	}
+	if !iv.accept_drops || info.data.kind != dnd_kind_files
+		|| !dnd_is_image_path(info.data.text) {
+		return false
+	}
+	iv.set_path(info.data.text)
+	return true
 }

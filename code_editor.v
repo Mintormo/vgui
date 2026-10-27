@@ -125,17 +125,19 @@ pub mut:
 	block_states_hl  voidptr
 	// Колесо мыши: false - виджет его не берёт (прокрутка уходит
 	// контейнеру, например панели в ScrollBox)
-	wheel    bool = true
-	bounds   Rect
-	visible  bool = true
-	enabled  bool = true
-	tooltip  string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
-	focused  bool
-	hovered  bool
-	readonly bool
-	lines    [][]rune
-	cur_line int
-	cur_col  int
+	wheel        bool = true
+	bounds       Rect
+	visible      bool = true
+	enabled      bool = true
+	tooltip      string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	dnd          &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
+	accept_drops bool      = true         // встроенный приём перетаскивания (dnd.v): текст или путь файла вставляется в точку сброса; false - выключен
+	focused      bool
+	hovered      bool
+	readonly     bool
+	lines        [][]rune
+	cur_line     int
+	cur_col      int
 	// «Желаемая» колонка вертикального движения: проход стрелками через
 	// короткую строку не теряет исходную колонку. Действует, пока курсор
 	// стоит там, куда его поставило последнее вертикальное движение (goal_at);
@@ -2281,5 +2283,50 @@ pub fn (mut e CodeEditor) load_file_auto(path string, fallback_encoding string) 
 	}
 	text := decode_bytes(data, enc)
 	e.set_text(text)
+	return true
+}
+
+// ─── Встроенный приём перетаскивания (DndBuiltin, dnd.v) ─
+
+// dnd_begin - источник только по полю dnd: нажатие с протяжкой у редактора -
+// выделение текста.
+pub fn (mut e CodeEditor) dnd_begin(x f32, y f32) DragData {
+	return dnd_spec_source(e.dnd, x, y)
+}
+
+// dnd_over - примет ли редактор сброс: по полю dnd или встроенно - текст и
+// файлы при accept_drops, если редактор не только для чтения.
+pub fn (mut e CodeEditor) dnd_over(data DragData, same bool, x f32, y f32) bool {
+	return dnd_spec_or_builtin_over(e.dnd, e.builtin_drop_ok(data.kind), data, same,
+		x, y)
+}
+
+// builtin_drop_ok - встроенный приём данных вида kind возможен.
+fn (e &CodeEditor) builtin_drop_ok(kind string) bool {
+	return e.accept_drops && !e.readonly && dnd_is_text_kind(kind)
+}
+
+// dnd_leave - своего индикатора нет (рамку рисует окно).
+pub fn (mut e CodeEditor) dnd_leave() {}
+
+// dnd_drop - сначала поле dnd; иначе курсор встаёт в точку сброса, выделение
+// снимается, и туда вставляется текст или путь файла (insert_text: undo,
+// on_change). Открыть брошенный файл целиком - через поле dnd и load_file.
+pub fn (mut e CodeEditor) dnd_drop(info DropInfo, app &App) bool {
+	if dnd_spec_drop(e.dnd, info) {
+		return true
+	}
+	if !e.builtin_drop_ok(info.data.kind) {
+		return false
+	}
+	ctx := app.get_active_ctx()
+	if unsafe { ctx != nil } {
+		pos := e.hit_pos(info.x, info.y, ctx)
+		e.cur_line = pos.line
+		e.cur_col = pos.col
+	}
+	e.sel_a = CePos{-1, -1}
+	e.sel_b = CePos{-1, -1}
+	e.insert_text(info.data.text)
 	return true
 }

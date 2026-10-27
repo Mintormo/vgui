@@ -84,6 +84,7 @@ pub mut:
 	visible   bool  = true
 	enabled   bool  = true // false - полоса не тянется, обе панели неактивны (enabled.v)
 	tooltip   string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	dnd       &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
 	// Children
 	first  &Widget = unsafe { nil }
 	second &Widget = unsafe { nil }

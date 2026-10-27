@@ -186,6 +186,50 @@ pub fn sim_text(mut app App, w &Window, text string) {
 	sim_pump(mut app, 0)
 }
 
+// sim_push_drop - событие SDL drop_* окну w в точке (x, y). data - путь
+// файла или текст (только у drop_file/drop_text), SDL хранит указатель, а
+// не копию: строка должна жить до разбора события (sim_pump).
+fn sim_push_drop(w &Window, typ u32, x f32, y f32, data string) {
+	s := sim_scale(w)
+	mut ev := C.SDL_Event{}
+	mut de := unsafe { &C.SDL_DropEvent(&ev) }
+	de.@type = typ
+	de.windowID = w.sdl_id
+	de.x = x * s
+	de.y = y * s
+	if data.len > 0 {
+		de.data = &char(data.str)
+	}
+	C.SDL_PushEvent(&ev)
+}
+
+// sim_drop_files - файлы, брошенные в окно из другого приложения, как их
+// шлёт SDL: drop_begin и drop_position (отдельный кадр - цель успевает
+// подсветиться), затем drop_file на каждый путь и drop_complete.
+pub fn sim_drop_files(mut app App, w &Window, x f32, y f32, paths []string) {
+	held := paths.map(it.clone())
+	sim_push_drop(w, sdl_event_drop_begin, x, y, '')
+	sim_push_drop(w, sdl_event_drop_position, x, y, '')
+	sim_pump(mut app, 0)
+	for p in held {
+		sim_push_drop(w, sdl_event_drop_file, x, y, p)
+	}
+	sim_push_drop(w, sdl_event_drop_complete, x, y, '')
+	sim_pump(mut app, 0)
+}
+
+// sim_drop_text - текст, брошенный в окно из другого приложения (как
+// sim_drop_files, но одно событие drop_text).
+pub fn sim_drop_text(mut app App, w &Window, x f32, y f32, text string) {
+	held := text.clone()
+	sim_push_drop(w, sdl_event_drop_begin, x, y, '')
+	sim_push_drop(w, sdl_event_drop_position, x, y, '')
+	sim_pump(mut app, 0)
+	sim_push_drop(w, sdl_event_drop_text, x, y, held)
+	sim_push_drop(w, sdl_event_drop_complete, x, y, '')
+	sim_pump(mut app, 0)
+}
+
 // ─── Кадр ──────────────────────────────────────────────
 
 // Frame - снимок кадра в физических пикселях: pixels - RGBA построчно
@@ -349,7 +393,6 @@ pub fn (f &Frame) diff(other &Frame, tol int) FrameDiff {
 		max_delta: maxd
 	}
 }
-
 
 // ─── Снапшоты ──────────────────────────────────────────
 
@@ -521,6 +564,16 @@ pub fn (mut t TestUi) key_sc(keycode int, scancode int, mods u16) {
 // type_text - ввод текста в виджет с фокусом.
 pub fn (mut t TestUi) type_text(text string) {
 	sim_text(mut t.app, t.win, text)
+}
+
+// drop_files / drop_text - сброс файлов / текста из другого приложения в
+// точку окна (sim_drop_files / sim_drop_text).
+pub fn (mut t TestUi) drop_files(x f32, y f32, paths []string) {
+	sim_drop_files(mut t.app, t.win, x, y, paths)
+}
+
+pub fn (mut t TestUi) drop_text(x f32, y f32, text string) {
+	sim_drop_text(mut t.app, t.win, x, y, text)
 }
 
 // center_of - центр bounds виджета (логические координаты).

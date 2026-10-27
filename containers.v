@@ -372,6 +372,7 @@ pub mut:
 	type_tag int = kind_hbox // тег типа, см. widget_tag.v
 	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	tooltip  string  // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	dnd      &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
 	box      BoxLayout
 }
 
@@ -463,6 +464,7 @@ pub mut:
 	type_tag int = kind_vbox // тег типа, см. widget_tag.v
 	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	tooltip  string  // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	dnd      &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
 	box      BoxLayout
 }
 
@@ -560,7 +562,8 @@ pub mut:
 	visible  bool  = true
 	enabled  bool  = true // false - неактивно всё содержимое (enabled.v)
 	tooltip  string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
-	child    &Widget = unsafe { nil }
+	dnd      &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
+	child    &Widget   = unsafe { nil }
 }
 
 // set_child назначает ребёнка (предыдущий просто забывается, не освобождается).
@@ -632,7 +635,8 @@ pub mut:
 	visible  bool = true
 	enabled  bool = true // false - неактивны все слои (enabled.v)
 	tooltip  string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
-	bg       Color = Color{0, 0, 0, 0}
+	dnd      &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
+	bg       Color     = Color{0, 0, 0, 0}
 }
 
 pub fn (mut s Stack) add(w &Widget) {
@@ -709,6 +713,7 @@ pub mut:
 	visible  bool = true
 	enabled  bool = true // ни на что не влияет: флаг для единообразия set_enabled
 	tooltip  string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	dnd      &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
 }
 
 // create_spacer - распорка: забирает свободное место (прижать
@@ -741,8 +746,9 @@ pub mut:
 	visible  bool = true
 	enabled  bool = true // false - неактивен ребёнок (enabled.v)
 	tooltip  string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
-	bg       Color   = Color{0, 0, 0, 0}
-	child    &Widget = unsafe { nil }
+	dnd      &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
+	bg       Color     = Color{0, 0, 0, 0}
+	child    &Widget   = unsafe { nil }
 }
 
 // create_centered - bounds выдаст родитель; create_centered_fill - нулевые bounds, т.е. займёт окно, если родитель их не задаст.
@@ -856,7 +862,8 @@ pub mut:
 	visible      bool = true
 	enabled      bool = true // false - не прокручивается, содержимое неактивно (enabled.v)
 	tooltip      string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
-	bg           Color = Color{0, 0, 0, 0}
+	dnd          &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
+	bg           Color     = Color{0, 0, 0, 0}
 	children     []&Widget
 	scroll_speed f32 = 30
 	pad          f32 = 2

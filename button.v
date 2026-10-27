@@ -74,7 +74,8 @@ pub mut:
 	// виджетов; показывает подсказку окно (tooltip_manager.v), сама кнопка её
 	// не рисует.
 	tooltip      string
-	radius       f32       = -1 // < 0 - брать радиус из темы (eff_radius)
+	dnd          &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
+	radius       f32       = -1           // < 0 - брать радиус из темы (eff_radius)
 	border_width f32       = 1
 	font_style   FontStyle = .regular
 	font_size    int // 0 - размер по умолчанию

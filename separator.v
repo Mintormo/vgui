@@ -58,6 +58,7 @@ pub mut:
 	visible   bool = true
 	enabled   bool = true // false - линия приглушена (enabled.v)
 	tooltip   string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	dnd       &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
 }
 
 // ─── Constructors ──────────────────────────────────────

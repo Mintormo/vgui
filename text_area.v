@@ -53,17 +53,19 @@ pub mut:
 	css      CssTags // #id и классы для селекторов CSS (css_apply.v)
 	// Колесо мыши: false - виджет его не берёт (прокрутка уходит
 	// контейнеру, например панели в ScrollBox)
-	wheel       bool = true
-	bounds      Rect
-	pad         f32      = 6
-	lines       []string = ['']
-	placeholder string
-	visible     bool = true
-	enabled     bool = true
-	tooltip     string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
-	focused     bool
-	hovered     bool
-	max_len     int = 262144
+	wheel        bool = true
+	bounds       Rect
+	pad          f32      = 6
+	lines        []string = ['']
+	placeholder  string
+	visible      bool = true
+	enabled      bool = true
+	tooltip      string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	dnd          &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
+	accept_drops bool      = true         // встроенный приём перетаскивания (dnd.v): текст или путь файла вставляется в точку сброса; false - выключен
+	focused      bool
+	hovered      bool
+	max_len      int = 262144
 	// cursor position: line index + column (rune index within line)
 	cur_l int
 	cur_c int
@@ -1238,4 +1240,39 @@ fn (mut ta TextArea) fire() {
 	if ta.on_change != unsafe { nil } {
 		ta.on_change(ta.get_text())
 	}
+}
+
+// ─── Встроенный приём перетаскивания (DndBuiltin, dnd.v) ─
+
+// dnd_begin - источник только по полю dnd: нажатие с протяжкой у области -
+// выделение текста.
+pub fn (mut ta TextArea) dnd_begin(x f32, y f32) DragData {
+	return dnd_spec_source(ta.dnd, x, y)
+}
+
+// dnd_over - примет ли область сброс: по полю dnd или встроенно - текст и
+// файлы при accept_drops.
+pub fn (mut ta TextArea) dnd_over(data DragData, same bool, x f32, y f32) bool {
+	return dnd_spec_or_builtin_over(ta.dnd, ta.accept_drops && dnd_is_text_kind(data.kind),
+		data, same, x, y)
+}
+
+// dnd_leave - своего индикатора нет (рамку рисует окно).
+pub fn (mut ta TextArea) dnd_leave() {}
+
+// dnd_drop - сначала поле dnd; иначе курсор встаёт в точку сброса, выделение
+// снимается, и туда вставляется текст (многострочный - как есть) или путь
+// файла - обычным insert_text (max_len, undo, on_change).
+pub fn (mut ta TextArea) dnd_drop(info DropInfo, app &App) bool {
+	if dnd_spec_drop(ta.dnd, info) {
+		return true
+	}
+	if !ta.accept_drops || !dnd_is_text_kind(info.data.kind) {
+		return false
+	}
+	ta.cur_l, ta.cur_c = ta.hit_pos(info.x, info.y, app)
+	ta.sel_al = -1
+	ta.sel_ac = -1
+	ta.insert_text(info.data.text)
+	return true
 }

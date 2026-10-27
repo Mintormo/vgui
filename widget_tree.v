@@ -946,6 +946,53 @@ fn widget_at_impl(w &Widget, x f32, y f32, depth int, mut tip TipHit) ?&Widget {
 	return unsafe { w }
 }
 
+// widget_path_at — путь от w до самого глубокого виджета под точкой (x, y):
+// path[0] == w, последний элемент — то, что вернул бы widget_at. Пусто —
+// точка мимо. Правила спуска те же, что у widget_at (видимость, нулевые
+// bounds, HitTestable, прозрачные слои). Нужен, когда важен не только лист,
+// но и его предки: перетаскивание (dnd.v) ищет ближайшего к курсору
+// источника или цель среди них и проверяет, не отключён ли предок.
+pub fn widget_path_at(w &Widget, x f32, y f32) []&Widget {
+	mut path := []&Widget{}
+	widget_path_impl(w, x, y, 0, mut path)
+	return path.reverse()
+}
+
+// widget_path_impl — рекурсия widget_path_at. Путь собирается на обратном
+// ходе (сначала лист, потом предки), поэтому вызывающий его переворачивает.
+// true — точка попала в w или его потомка.
+fn widget_path_impl(w &Widget, x f32, y f32, depth int, mut path []&Widget) bool {
+	b := get_widget_bounds(w)
+	if b.w <= 0 || b.h <= 0 || !b.contains(x, y) {
+		return false
+	}
+	if depth < widget_tree_max_depth {
+		children := if w is HitTestable {
+			w.hit_children()
+		} else if w is HasChildren {
+			w.child_widgets()
+		} else {
+			[]&Widget{}
+		}
+		// С конца: верхний по z-порядку ребёнок побеждает (как в widget_at_impl)
+		for i := children.len - 1; i >= 0; i-- {
+			c := children[i]
+			if unsafe { c == nil } || !widget_is_visible(c) {
+				continue
+			}
+			if widget_path_impl(c, x, y, depth + 1, mut path) {
+				path << unsafe { w }
+				return true
+			}
+		}
+	}
+	if hit_passes_through(w, x, y) {
+		return false
+	}
+	path << unsafe { w }
+	return true
+}
+
 // take_tip делает w владельцем подсказки, если её ещё нет, а у w есть текст.
 fn take_tip(mut tip TipHit, w &Widget) {
 	if unsafe { tip.owner != nil } {

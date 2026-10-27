@@ -80,19 +80,21 @@ pub enum InputFilterMode {
 @[heap]
 pub struct TextInput {
 pub mut:
-	type_tag    int = kind_text_input // тег типа, см. widget_tag.v
-	css         CssTags // #id и классы для селекторов CSS (css_apply.v)
-	bounds      Rect
-	pad         f32 = 6
-	buf         []rune
-	placeholder string
-	visible     bool = true
-	enabled     bool = true
-	tooltip     string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
-	focused     bool
-	hovered     bool
-	pw_mode     bool
-	max_len     int = 4096
+	type_tag     int = kind_text_input // тег типа, см. widget_tag.v
+	css          CssTags // #id и классы для селекторов CSS (css_apply.v)
+	bounds       Rect
+	pad          f32 = 6
+	buf          []rune
+	placeholder  string
+	visible      bool = true
+	enabled      bool = true
+	tooltip      string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
+	dnd          &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
+	accept_drops bool      = true         // встроенный приём перетаскивания (dnd.v): текст или путь файла вставляется в точку сброса; false - выключен
+	focused      bool
+	hovered      bool
+	pw_mode      bool
+	max_len      int = 4096
 	// Ширина поля в символах (как size у HTML-поля): > 0 - поле
 	// такой ширины и не растягивается; 0 - заполняет место в ряду
 	chars             int
@@ -1052,4 +1054,41 @@ fn (mut t TextInput) hit_pos(mx f32, app &App) int {
 		}
 	}
 	return best
+}
+
+// ─── Встроенный приём перетаскивания (DndBuiltin, dnd.v) ─
+
+// dnd_begin - источник только по полю dnd: своих перетаскиваемых элементов
+// у поля нет (нажатие с протяжкой - выделение текста).
+pub fn (mut t TextInput) dnd_begin(x f32, y f32) DragData {
+	return dnd_spec_source(t.dnd, x, y)
+}
+
+// dnd_over - примет ли поле сброс: по полю dnd или встроенно - текст и
+// файлы при accept_drops.
+pub fn (mut t TextInput) dnd_over(data DragData, same bool, x f32, y f32) bool {
+	return dnd_spec_or_builtin_over(t.dnd, t.accept_drops && dnd_is_text_kind(data.kind),
+		data, same, x, y)
+}
+
+// dnd_leave - своего индикатора нет (рамку рисует окно).
+pub fn (mut t TextInput) dnd_leave() {}
+
+// dnd_drop - сначала поле dnd; иначе курсор встаёт в точку сброса и туда
+// вставляется текст (переводы строк - пробелами: поле однострочное) или путь
+// файла. Вставка идёт обычным путём insert: фильтры, max_len, undo и
+// on_change работают как при вводе.
+pub fn (mut t TextInput) dnd_drop(info DropInfo, app &App) bool {
+	if dnd_spec_drop(t.dnd, info) {
+		return true
+	}
+	if !t.accept_drops || !dnd_is_text_kind(info.data.kind) {
+		return false
+	}
+	t.cur = t.hit_pos(info.x, app)
+	t.sel_a = -1
+	t.sel_b = -1
+	text := info.data.text.replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
+	t.insert(text)
+	return true
 }

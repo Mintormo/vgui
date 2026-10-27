@@ -34,8 +34,9 @@ pub mut:
 	visible      bool   = true
 	enabled      bool   = true // false - сбросы и клик не принимаются, вид приглушён (enabled.v)
 	tooltip      string // всплывающая подсказка ("" - нет); показывает окно (tooltip_manager.v)
-	accept_files bool = true
-	accept_text  bool = true
+	dnd          &DragSpec = unsafe { nil } // роль в перетаскивании (nil - нет); ведёт окно, см. dnd.v
+	accept_files bool      = true
+	accept_text  bool      = true
 	hovering     bool // drag currently over the zone
 	// Click-to-browse: a left click opens a file-open dialog.
 	click_to_browse        bool
