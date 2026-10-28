@@ -259,3 +259,50 @@ fn test_node_graph_changes_request_redraw() {
 	t.frame()
 	assert !t.app.needs_animation_now()
 }
+
+// Своя ширина ноды: по умолчанию - ширина типа, зажим в min_width..max_width, 0 - сброс,
+// сохраняется в JSON (старое сохранение без width - ширина типа).
+fn test_node_graph_width() {
+	mut g := sample_graph()
+	g.types['mix'].max_width = 300
+	m := g.add_node('mix', 0, 0)!
+	assert g.node_width(m) == 150
+	assert g.set_node_width(m, 220)
+	assert g.node_width(m) == 220
+	g.set_node_width(m, 10)
+	assert g.node_width(m) == 80, 'не уже min_width'
+	g.set_node_width(m, 1000)
+	assert g.node_width(m) == 300, 'не шире max_width'
+	g.set_node_width(m, 0)
+	assert g.node_width(m) == 150, '0 - ширина типа'
+	g.set_node_width(m, 200)
+	mut h := sample_graph()
+	h.load_json(g.to_json())!
+	assert h.node_width(m) == 200
+	old := '{"version":1,"nodes":[{"id":1,"type":"mix","x":0,"y":0,"collapsed":false,"values":[]}],"links":[]}'
+	h.load_json(old)!
+	assert h.node_width(1) == 150
+	assert !g.set_node_width(99, 100)
+}
+
+// Своя высота: не меньше содержимого (шапка 24 + 4 строки по 22 + поле 6 = 118 у mix), 0 - по
+// содержимому, у свёрнутой - шапка; сохраняется в JSON.
+fn test_node_graph_height() {
+	mut g := sample_graph()
+	m := g.add_node('mix', 0, 0)!
+	assert g.node_height(m) == 118
+	assert g.set_node_height(m, 200)
+	assert g.node_height(m) == 200
+	g.set_node_height(m, 50)
+	assert g.node_height(m) == 118, 'не меньше содержимого'
+	g.set_node_height(m, 160)
+	g.set_collapsed(m, true)
+	assert g.node_height(m) == 24
+	g.set_collapsed(m, false)
+	assert g.node_height(m) == 160, 'после разворачивания высота прежняя'
+	mut h := sample_graph()
+	h.load_json(g.to_json())!
+	assert h.node_height(m) == 160
+	g.set_node_height(m, 0)
+	assert g.node_height(m) == 118
+}

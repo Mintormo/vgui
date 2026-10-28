@@ -38,9 +38,17 @@ const ne_row_h = f32(22) // строка сокета
 const ne_pad_bottom = f32(6) // поле под последней строкой
 const ne_socket_r = f32(5) // радиус значка сокета
 const ne_field_inset = f32(10) // отступ поля значения от краёв ноды
-const ne_radius = f32(5) // скругление карточки
 const ne_grid = f32(20) // шаг мелкой сетки
 const ne_socket_hit_px = f32(9) // захват сокета мышью, экранные px
+const ne_edge_hit_px = f32(4) // захват края ноды (изменение размера), экранные px по обе стороны
+const ne_corner_hit_px = f32(8) // захват угла снаружи карточки - угол ловить легче, как у окна
+
+// Края ноды под курсором при изменении размера - битовая маска (NodeHit.slot у .edge): угол -
+// два бита сразу (низ + право - правый нижний угол).
+const ne_edge_left = 1
+const ne_edge_right = 2
+const ne_edge_top = 4
+const ne_edge_bottom = 8
 const ne_drag_threshold = f32(3) // сдвиг, после которого нажатие становится протяжкой, px
 const ne_text_min_zoom = f32(0.45) // мельче - текст не рисуется
 const ne_menu_w = f32(260) // ширина меню добавления
@@ -58,6 +66,7 @@ pub enum NodeEventKind {
 	collapsed
 	selection_changed
 	graph_restored // отмена/повтор вернули граф к снимку
+	node_resized   // пользователь изменил ширину ноды, потянув край
 }
 
 // NodeEvent - событие редактора: вид, нода и слот (вход), связь (для link_*).
@@ -78,6 +87,7 @@ enum NodeHitKind {
 	collapse
 	header
 	body
+	edge // край или угол ноды (NodeHit.slot - маска ne_edge_*): тянуть - менять размер
 }
 
 struct NodeHit {
@@ -95,6 +105,7 @@ enum NodeDrag {
 	link
 	cut
 	number
+	resize
 }
 
 // NodeAddMenu - состояние меню добавления ноды: где открыто (экран), куда ставить ноду (холст),
@@ -154,6 +165,12 @@ mut:
 	link_from_out bool
 	link_detached int
 	cut_pts       []Vec2
+	// Изменение размера: нода, какие края тянут (маска ne_edge_*), прямоугольник ноды в начале
+	// жеста (единицы холста); курсор до того, как над краем поставили «стрелку» (nil - не меняли)
+	resize_node  int
+	resize_edges int
+	resize_start Rect
+	saved_cursor voidptr
 	// Протяжка числа: нода, вход, значение в начале
 	num_node  int
 	num_slot  int
@@ -333,14 +350,10 @@ fn (ne &NodeEditor) type_of(n &GraphNode) NodeTypeDef {
 	}
 }
 
+// node_world_rect - карточка ноды на холсте: размеры - своя ширина/высота или по типу и
+// содержимому (NodeGraph.width_of / height_of).
 fn (ne &NodeEditor) node_world_rect(n &GraphNode) Rect {
-	t := ne.type_of(n)
-	h := if n.collapsed {
-		ne_header_h
-	} else {
-		ne_header_h + f32(t.outputs.len + t.inputs.len) * ne_row_h + ne_pad_bottom
-	}
-	return Rect{n.x, n.y, t.width, h}
+	return Rect{n.x, n.y, ne.graph.width_of(n), ne.graph.height_of(n)}
 }
 
 // row_y - верх строки row (выходы - строки 0..outputs-1, затем входы).
@@ -352,7 +365,7 @@ fn ne_row_y(n &GraphNode, row int) f32 {
 // все сокеты - на середине шапки, по краям.
 fn (ne &NodeEditor) socket_pos(n &GraphNode, out bool, slot int) (f32, f32) {
 	t := ne.type_of(n)
-	x := if out { n.x + t.width } else { n.x }
+	x := if out { n.x + ne.graph.width_of(n) } else { n.x }
 	if n.collapsed {
 		return x, n.y + ne_header_h * 0.5
 	}
@@ -371,7 +384,7 @@ fn (ne &NodeEditor) field_rect(n &GraphNode, slot int) Rect {
 		return Rect{}
 	}
 	y := ne_row_y(n, t.outputs.len + slot)
-	return Rect{n.x + ne_field_inset, y + 2, t.width - ne_field_inset * 2, ne_row_h - 4}
+	return Rect{n.x + ne_field_inset, y + 2, ne.graph.width_of(n) - ne_field_inset * 2, ne_row_h - 4}
 }
 
 fn ne_collapse_rect(n &GraphNode) Rect {
@@ -381,7 +394,9 @@ fn ne_collapse_rect(n &GraphNode) Rect {
 // ─── Попадание ─────────────────────────────────────────
 
 // hit_test - что под точкой экрана. Сначала сокеты всех нод сверху вниз (значки выступают за
-// край карточки и не должны теряться под соседней нодой), затем сами ноды.
+// край карточки и не должны теряться под соседней нодой), затем сами ноды сверху вниз; у каждой
+// ноды - сначала её края и углы (изменение размера, edge_mask), потом содержимое. Сокеты стоят
+// на боковых краях, но проверены раньше: край тянется там, где их нет.
 fn (ne &NodeEditor) hit_test(sx f32, sy f32) NodeHit {
 	if !ne.bounds.contains(sx, sy) {
 		return NodeHit{}
@@ -406,7 +421,12 @@ fn (ne &NodeEditor) hit_test(sx f32, sy f32) NodeHit {
 	}
 	for i := ne.graph.nodes.len - 1; i >= 0; i-- {
 		n := ne.graph.nodes[i]
-		if !ne.node_world_rect(n).contains(wx, wy) {
+		r := ne.node_world_rect(n)
+		edges := ne.edge_mask(n, r, wx, wy)
+		if edges != 0 {
+			return NodeHit{.edge, n.id, edges}
+		}
+		if !r.contains(wx, wy) {
 			continue
 		}
 		if ne_collapse_rect(n).contains(wx, wy) {
@@ -424,6 +444,59 @@ fn (ne &NodeEditor) hit_test(sx f32, sy f32) NodeHit {
 		return NodeHit{.body, n.id, 0}
 	}
 	return NodeHit{}
+}
+
+// edge_mask - какие края ноды под точкой холста (wx, wy): маска ne_edge_*, 0 - не край.
+// Край ловится в полоске ne_edge_hit_px по обе стороны линии края, угол - ещё и снаружи до
+// ne_corner_hit_px (как у окна: в угол легче попасть). У свёрнутой ноды высота не меняется:
+// верх и низ не ловятся, а угол тянет только ширину - на боковых краях свёрнутой ноды почти всю
+// высоту шапки занимают сокеты, и без углов ширину было бы не ухватить.
+fn (ne &NodeEditor) edge_mask(n &GraphNode, r Rect, wx f32, wy f32) int {
+	tol := ne_edge_hit_px / ne.zoom
+	ctol := ne_corner_hit_px / ne.zoom
+	// Расстояния до краёв: положительные - снаружи карточки, отрицательные - внутри
+	out_l := r.x - wx
+	out_r := wx - (r.x + r.w)
+	out_t := r.y - wy
+	out_b := wy - (r.y + r.h)
+	near_l, near_r := out_l >= -tol && out_l <= tol, out_r >= -tol && out_r <= tol
+	near_t, near_b := out_t >= -tol && out_t <= tol, out_b >= -tol && out_b <= tol
+	// Угол: у обоих краёв, снаружи - с большим запасом
+	corner_x := if out_l >= -tol && out_l <= ctol {
+		ne_edge_left
+	} else if out_r >= -tol && out_r <= ctol {
+		ne_edge_right
+	} else {
+		0
+	}
+	corner_y := if out_t >= -tol && out_t <= ctol {
+		ne_edge_top
+	} else if out_b >= -tol && out_b <= ctol {
+		ne_edge_bottom
+	} else {
+		0
+	}
+	if corner_x != 0 && corner_y != 0 {
+		return if n.collapsed { corner_x } else { corner_x | corner_y }
+	}
+	inside_y := wy >= r.y && wy <= r.y + r.h
+	inside_x := wx >= r.x && wx <= r.x + r.w
+	if inside_y && near_l {
+		return ne_edge_left
+	}
+	if inside_y && near_r {
+		return ne_edge_right
+	}
+	if n.collapsed {
+		return 0
+	}
+	if inside_x && near_t {
+		return ne_edge_top
+	}
+	if inside_x && near_b {
+		return ne_edge_bottom
+	}
+	return 0
 }
 
 fn ne_near(x f32, y f32, px f32, py f32, tol f32) bool {
@@ -596,13 +669,12 @@ pub fn (mut ne NodeEditor) draw(mut ctx RenderContext) {
 // когда её линии ближе 8 px (сетка превратилась бы в сплошной фон).
 fn (ne &NodeEditor) draw_background(mut ctx RenderContext) {
 	b := ne.bounds
-	ctx.fill_rect(b, ne_shade(ctx.theme.bg, -8))
+	ctx.fill_rect(b, ctx.theme.eff_ne_bg())
 	if !ne.show_grid {
 		return
 	}
-	line := ctx.theme.border
-	minor := line.with_alpha(35)
-	major := line.with_alpha(90)
+	minor := ctx.theme.eff_ne_grid()
+	major := ctx.theme.eff_ne_grid_major()
 	step := ne_grid * ne.zoom
 	if step < 8 {
 		ne.draw_grid_lines(ne_grid * 5, major, mut ctx)
@@ -643,8 +715,18 @@ fn (ne &NodeEditor) draw_links(mut ctx RenderContext) {
 		mut c := ne.graph.socket_type(t.outputs[l.from_slot].typ).color
 		hot := l.from_node in ne.selected || l.to_node in ne.selected
 		c = if hot { c.brighten(0.25) } else { c.with_alpha(210) }
-		ctx.draw_polyline(pts, c, if hot { f32(3) } else { f32(2) })
+		width := ctx.theme.eff_ne_link_width() + if hot { f32(1) } else { f32(0) }
+		ctx.draw_polyline(pts, c, width)
 	}
+}
+
+// ne_header_text - цвет заголовка на шапке цвета c: из темы (ne_header_text), иначе светлый или
+// тёмный по яркости шапки (у типов шапки разного цвета, одного цвета текста на все не подобрать).
+fn ne_header_text(ctx &RenderContext, c Color) Color {
+	if ctx.theme.ne_header_text.a > 0 {
+		return ctx.theme.ne_header_text
+	}
+	return ne_text_color(c)
 }
 
 // ne_text_color - светлый или тёмный текст на фоне c (по яркости).
@@ -669,16 +751,17 @@ fn (ne &NodeEditor) draw_node(n &GraphNode, mut ctx RenderContext) {
 	if !r.intersects(ne.bounds) {
 		return
 	}
-	rad := ne_radius * ne.zoom
+	rad := ctx.theme.eff_ne_node_radius() * ne.zoom
+	head := if t.color.a > 0 { t.color } else { ctx.theme.eff_ne_header_bg() }
 	ctx.draw_shadow(r, rad)
-	ctx.fill_rounded_rect(r, ctx.theme.surface, rad)
+	ctx.fill_rounded_rect(r, ctx.theme.eff_ne_node_bg(), rad)
 	// Шапка: скруглена сверху, у развёрнутой ноды низ шапки прямой
 	hr := Rect{r.x, r.y, r.w, ne_header_h * ne.zoom}
-	ctx.fill_rounded_rect(hr, t.color, rad)
+	ctx.fill_rounded_rect(hr, head, rad)
 	if !n.collapsed {
-		ctx.fill_rect(Rect{hr.x, hr.y + hr.h * 0.5, hr.w, hr.h * 0.5}, t.color)
+		ctx.fill_rect(Rect{hr.x, hr.y + hr.h * 0.5, hr.w, hr.h * 0.5}, head)
 	}
-	head_text := ne_text_color(t.color)
+	head_text := ne_header_text(ctx, head)
 	ne.draw_collapse_arrow(n, head_text, mut ctx)
 	fpx := ne.font_px(ctx)
 	if fpx > 0 {
@@ -701,11 +784,11 @@ fn (ne &NodeEditor) draw_node(n &GraphNode, mut ctx RenderContext) {
 	}
 	// Рамка: выделенная - акцентом, активная - светлее
 	if n.id in ne.selected {
-		c := if n.id == ne.active { ctx.theme.accent.brighten(0.3) } else { ctx.theme.accent }
+		c := if n.id == ne.active { ctx.theme.eff_ne_active() } else { ctx.theme.eff_ne_selected() }
 		ctx.draw_rounded_rect(r.expanded(1), c, rad)
 		ctx.draw_rounded_rect(r.expanded(2), c.with_alpha(140), rad)
 	} else {
-		ctx.draw_rounded_rect(r, ctx.theme.border, rad)
+		ctx.draw_rounded_rect(r, ctx.theme.eff_ne_node_border(), rad)
 	}
 }
 
@@ -729,21 +812,23 @@ fn (ne &NodeEditor) draw_rows(n &GraphNode, t NodeTypeDef, fpx int, mut ctx Rend
 		for s in 0 .. t.inputs.len {
 			fr := ne.field_rect(n, s)
 			if fr.w > 0 {
-				ctx.fill_rounded_rect(ne.screen_rect(fr), ne_field_bg(ctx), 3 * ne.zoom)
+				ctx.fill_rounded_rect(ne.screen_rect(fr), ctx.theme.eff_ne_field_bg(), 3 * ne.zoom)
 			}
 		}
 		return
 	}
 	font := ctx.get_font(.regular, fpx)
 	fh := ctx.font_height_of(font)
-	tc := ctx.theme.text_primary
+	tc := ctx.theme.eff_ne_node_text()
 	pad := ne_field_inset * ne.zoom
 	for s, o in t.outputs {
 		ry := ne_row_y(n, s)
 		_, sy := ne.to_screen(0, ry)
-		sx_right, _ := ne.to_screen(n.x + t.width, 0)
-		tw := ctx.measure_text_with_font(o.name, font).x
-		ctx.draw_text_with_font(o.name, sx_right - pad - tw, sy + (ne_row_h * ne.zoom - fh) * 0.5,
+		sx_right, _ := ne.to_screen(n.x + ne.graph.width_of(n), 0)
+		// Узкую ноду (пользователь сузил) подпись не переходит: обрезается многоточием
+		name := bc_truncate_text(ctx, o.name, ne.graph.width_of(n) * ne.zoom - pad * 2, font)
+		tw := ctx.measure_text_with_font(name, font).x
+		ctx.draw_text_with_font(name, sx_right - pad - tw, sy + (ne_row_h * ne.zoom - fh) * 0.5,
 			tc, font)
 	}
 	for s, inp in t.inputs {
@@ -754,7 +839,8 @@ fn (ne &NodeEditor) draw_rows(n &GraphNode, t NodeTypeDef, fpx int, mut ctx Rend
 		}
 		ry := ne_row_y(n, t.outputs.len + s)
 		sx, sy := ne.to_screen(n.x, ry)
-		ctx.draw_text_with_font(inp.name, sx + pad, sy + (ne_row_h * ne.zoom - fh) * 0.5, tc, font)
+		name := bc_truncate_text(ctx, inp.name, ne.graph.width_of(n) * ne.zoom - pad * 2, font)
+		ctx.draw_text_with_font(name, sx + pad, sy + (ne_row_h * ne.zoom - fh) * 0.5, tc, font)
 	}
 }
 
@@ -770,9 +856,10 @@ fn (ne &NodeEditor) draw_field(n &GraphNode, slot int, def NodeSocketDef, r Rect
 	fh := ctx.font_height_of(font)
 	ty := r.y + (r.h - fh) * 0.5
 	pad := 6 * ne.zoom
-	tc := ctx.theme.text_primary
+	tc := ctx.theme.eff_ne_node_text()
 	hot := ne.hover.kind == .field && ne.hover.node == n.id && ne.hover.slot == slot
-	bg := if hot { ne_field_bg(ctx).brighten(0.08) } else { ne_field_bg(ctx) }
+	field_bg := ctx.theme.eff_ne_field_bg()
+	bg := if hot { field_bg.brighten(0.08) } else { field_bg }
 	match f.kind {
 		.number {
 			ctx.fill_rounded_rect(r, bg, rad)
@@ -780,7 +867,7 @@ fn (ne &NodeEditor) draw_field(n &GraphNode, slot int, def NodeSocketDef, r Rect
 			if f.min > -1.0e29 && f.max < 1.0e29 && f.max > f.min {
 				frac := f32((v.number - f.min) / (f.max - f.min))
 				ctx.fill_rounded_rect(Rect{r.x, r.y, r.w * clamp_f32(frac, 0, 1), r.h},
-					ctx.theme.accent.with_alpha(110), rad)
+					ctx.theme.eff_ne_field_fill(), rad)
 			}
 			val := ne_format_number(v.number, f.digits)
 			vw := ctx.measure_text_with_font(val, font).x
@@ -799,7 +886,8 @@ fn (ne &NodeEditor) draw_field(n &GraphNode, slot int, def NodeSocketDef, r Rect
 				ctx.draw_line_thick(br.x + box * 0.42, br.y + box - m, br.x + box - m, br.y + m,
 					2, ctx.theme.accent_text)
 			}
-			ctx.draw_text_with_font(def.name, br.x + box + pad, ty, tc, font)
+			ctx.draw_text_with_font(bc_truncate_text(ctx, def.name, r.w - box - pad, font),
+				br.x + box + pad, ty, tc, font)
 		}
 		.color {
 			name_w := r.w * 0.45
@@ -807,7 +895,7 @@ fn (ne &NodeEditor) draw_field(n &GraphNode, slot int, def NodeSocketDef, r Rect
 				tc, font)
 			sw := Rect{r.x + name_w, r.y, r.w - name_w, r.h}
 			ctx.fill_rounded_rect(sw, v.color, rad)
-			ctx.draw_rounded_rect(sw, ctx.theme.border, rad)
+			ctx.draw_rounded_rect(sw, ctx.theme.eff_ne_node_border(), rad)
 		}
 		.choice {
 			ctx.fill_rounded_rect(r, bg, rad)
@@ -822,19 +910,6 @@ fn (ne &NodeEditor) draw_field(n &GraphNode, slot int, def NodeSocketDef, r Rect
 		}
 		.none {}
 	}
-}
-
-// ne_field_bg - фон поля значения: темнее тела ноды (theme.surface). Цвет
-// поля ввода темы не годится: в тёмных темах он совпадает с телом карточки, и поле не видно.
-fn ne_field_bg(ctx &RenderContext) Color {
-	return ne_shade(ctx.theme.surface, -30)
-}
-
-// ne_shade - цвет светлее (delta > 0) или темнее на delta единиц канала, с зажимом в 0..255.
-// Color.brighten снизу не зажимает: на тёмном цвете отрицательный сдвиг переполнил бы u8.
-fn ne_shade(c Color, delta int) Color {
-	return Color{u8(clamp_int(int(c.r) + delta, 0, 255)), u8(clamp_int(int(c.g) + delta, 0, 255)), u8(clamp_int(int(c.b) +
-		delta, 0, 255)), c.a}
 }
 
 // ne_format_number - число с digits знаками после запятой (0..6).
@@ -862,7 +937,7 @@ fn (ne &NodeEditor) draw_socket(n &GraphNode, out bool, slot int, typ string, mu
 	if target && ne.link_target_ok(ne.hover) {
 		r *= 1.5
 	}
-	outline := Color{20, 20, 20, 220}
+	outline := ctx.theme.eff_ne_socket_outline()
 	match st.shape {
 		.circle {
 			ctx.fill_circle(cx, cy, r + 1, outline)
@@ -981,6 +1056,7 @@ pub fn (mut ne NodeEditor) handle_event(event &GuiEvent, app &App) bool {
 		.mouse_leave {
 			if ne.drag == .none {
 				ne.hover = NodeHit{}
+				ne.update_cursor()
 			}
 			return false
 		}
@@ -1065,6 +1141,15 @@ fn (mut ne NodeEditor) on_mouse_down(event &GuiEvent, app &App) bool {
 			ne.begin_change()
 			ne.drag = .move
 		}
+		.edge {
+			n := ne.graph.node(hit.node) or { return true }
+			ne.select_press(hit.node, false)
+			ne.begin_change()
+			ne.drag = .resize
+			ne.resize_node = hit.node
+			ne.resize_edges = hit.slot
+			ne.resize_start = ne.node_world_rect(n)
+		}
 		.none {
 			ne.drag = .box
 			ne.box_add = event.shift()
@@ -1117,6 +1202,7 @@ fn (mut ne NodeEditor) on_mouse_move(x f32, y f32) bool {
 	match ne.drag {
 		.none {
 			ne.hover = ne.hit_test(x, y)
+			ne.update_cursor()
 			return false
 		}
 		.pan {
@@ -1146,6 +1232,11 @@ fn (mut ne NodeEditor) on_mouse_move(x f32, y f32) bool {
 		.number {
 			if ne.drag_moved {
 				ne.drag_number(x)
+			}
+		}
+		.resize {
+			if ne.drag_moved {
+				ne.drag_resize(x, y)
 			}
 		}
 		.box {}
@@ -1185,9 +1276,16 @@ fn (mut ne NodeEditor) on_mouse_up(event &GuiEvent, app &App) bool {
 				ne.start_text_edit(ne.num_node, ne.num_slot, app)
 			}
 		}
+		.resize {
+			if moved {
+				ne.emit(.node_resized, ne.resize_node, 0, NodeLink{})
+			}
+			ne.commit_change('Resize node')
+		}
 		else {}
 	}
 	ne.hover = ne.hit_test(x, y)
+	ne.update_cursor()
 	return true
 }
 
@@ -1310,11 +1408,83 @@ fn ne_polylines_cross(a []Vec2, b []Vec2) bool {
 // cancel_gesture - оборвать жест (Esc, потеря фокуса, отмена): сдвинутые ноды остаются, где
 // их бросили, - как при отпускании; несостоявшиеся связь/рамка/разрез пропадают.
 fn (mut ne NodeEditor) cancel_gesture() {
-	if ne.drag in [.move, .number] {
-		ne.commit_change(if ne.drag == .move { 'Move nodes' } else { 'Change value' })
+	match ne.drag {
+		.move { ne.commit_change('Move nodes') }
+		.number { ne.commit_change('Change value') }
+		.resize { ne.commit_change('Resize node') }
+		else {}
 	}
 	ne.drag = .none
 	ne.cut_pts = []Vec2{}
+	ne.hover = NodeHit{}
+	ne.update_cursor()
+}
+
+// drag_resize - шаг изменения размера: по каждой тянущейся оси новый размер = начальный ± сдвиг
+// мыши от нажатия (в единицах холста; от точки нажатия, а не от прошлого шага - зажим не копит
+// ошибку). Противоположный край стоит на месте: тянут левый (верхний) край - x (y) сдвигается на
+// столько, на сколько изменился размер уже после зажима, иначе упёршаяся в предел нода поехала бы.
+fn (mut ne NodeEditor) drag_resize(x f32, y f32) {
+	n := ne.graph.node(ne.resize_node) or { return }
+	s := ne.resize_start
+	dx := (x - ne.press_x) / ne.zoom
+	dy := (y - ne.press_y) / ne.zoom
+	mut nx, mut ny := s.x, s.y
+	edges := ne.resize_edges
+	if edges & (ne_edge_left | ne_edge_right) != 0 {
+		left := edges & ne_edge_left != 0
+		want := if left { s.w - dx } else { s.w + dx }
+		// Не меньше 1: ширина <= 0 для set_node_width значит «вернуть ширину типа», а мышь,
+		// сжавшая ноду до упора, должна дать минимальную ширину
+		ne.graph.set_node_width(n.id, max_f32(want, 1))
+		if left {
+			nx = s.x + s.w - ne.graph.width_of(n)
+		}
+	}
+	if edges & (ne_edge_top | ne_edge_bottom) != 0 {
+		top := edges & ne_edge_top != 0
+		want := if top { s.h - dy } else { s.h + dy }
+		// Так же: 0 и меньше - «по содержимому», а сжатая до упора нода и есть по содержимому
+		ne.graph.set_node_height(n.id, max_f32(want, 1))
+		if top {
+			ny = s.y + s.h - ne.graph.height_of(n)
+		}
+	}
+	ne.graph.set_node_pos(n.id, nx, ny)
+	ne.touch()
+}
+
+// resize_cursor - системный курсор для краёв маски edges: «влево-вправо», «вверх-вниз» или
+// диагональ для угла (левый верхний и правый нижний - одна диагональ, два других - другая).
+fn ne_resize_cursor(edges int) int {
+	horiz := edges & (ne_edge_left | ne_edge_right) != 0
+	vert := edges & (ne_edge_top | ne_edge_bottom) != 0
+	if horiz && vert {
+		main_diag := edges in [ne_edge_left | ne_edge_top, ne_edge_right | ne_edge_bottom]
+		return if main_diag { sdl_system_cursor_sizenwse } else { sdl_system_cursor_sizenesw }
+	}
+	return if vert { sdl_system_cursor_sizens } else { sdl_system_cursor_sizewe }
+}
+
+// update_cursor - курсор изменения размера над краем или углом ноды и во время жеста; иначе -
+// курсор, который был до него (как у полос DockArea и Splitter).
+fn (mut ne NodeEditor) update_cursor() {
+	edges := if ne.drag == .resize {
+		ne.resize_edges
+	} else if ne.drag == .none && ne.hover.kind == .edge {
+		ne.hover.slot
+	} else {
+		0
+	}
+	if edges != 0 {
+		if ne.saved_cursor == unsafe { nil } {
+			ne.saved_cursor = current_cursor()
+		}
+		set_cursor(ne_resize_cursor(edges))
+	} else if ne.saved_cursor != unsafe { nil } {
+		restore_cursor_handle(ne.saved_cursor)
+		ne.saved_cursor = unsafe { nil }
+	}
 }
 
 // on_key - сочетания редактора в фокусе. Буквы - по физической клавише в нелатинской
@@ -1375,6 +1545,9 @@ pub fn (mut ne NodeEditor) duplicate_selected() {
 		mut dst := ne.graph.node(nid) or { continue }
 		dst.values = src.values.clone()
 		dst.collapsed = src.collapsed
+		dst.width = src.width
+		dst.height = src.height
+		dst.title = src.title
 		copy_of[id] = nid
 		ne.emit(.node_added, nid, 0, NodeLink{})
 	}

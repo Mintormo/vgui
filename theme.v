@@ -299,6 +299,25 @@ pub mut:
 	plot_label      Color = Color{0, 0, 0, 0}
 	plot_border     Color = Color{0, 0, 0, 0}
 
+	// ── NodeEditor ────────────────────────────────────
+	// a=0 / 0 - запасное значение из общей темы (eff_ne_* ниже). Цвет шапки ноды задаёт её тип
+	// (NodeTypeDef.color); ne_header_bg - для типов без своего цвета (color с альфой 0).
+	ne_bg             Color = Color{0, 0, 0, 0} // холст
+	ne_grid           Color = Color{0, 0, 0, 0} // мелкая сетка
+	ne_grid_major     Color = Color{0, 0, 0, 0} // крупная сетка (каждая пятая линия)
+	ne_node_bg        Color = Color{0, 0, 0, 0} // тело карточки
+	ne_node_border    Color = Color{0, 0, 0, 0} // рамка невыделенной ноды
+	ne_node_text      Color = Color{0, 0, 0, 0} // подписи сокетов и текст полей
+	ne_header_bg      Color = Color{0, 0, 0, 0} // шапка типов без своего цвета
+	ne_header_text    Color = Color{0, 0, 0, 0} // заголовок (a=0 - светлый/тёмный по яркости шапки)
+	ne_selected       Color = Color{0, 0, 0, 0} // рамка выделенной ноды
+	ne_active         Color = Color{0, 0, 0, 0} // рамка активной (последней выбранной) ноды
+	ne_field_bg       Color = Color{0, 0, 0, 0} // фон полей значений
+	ne_field_fill     Color = Color{0, 0, 0, 0} // заполнение числового поля (доля в границах)
+	ne_socket_outline Color = Color{0, 0, 0, 0} // обводка значков сокетов
+	ne_node_radius    f32 // скругление карточки (0 - 5)
+	ne_link_width     f32 // толщина связи (0 - 2; у связей выделенных нод на 1 толще)
+
 	// ── MarkdownView ──────────────────────────────────
 	// a=0 means "use default fallback"
 	md_heading         Color = Color{0, 0, 0, 0}
@@ -1007,6 +1026,85 @@ pub fn (t &Theme) eff_splitter_handle() Color {
 @[inline]
 pub fn (t &Theme) eff_splitter_hover() Color {
 	return if t.splitter_hover.a > 0 { t.splitter_hover } else { t.accent }
+}
+
+// ── NodeEditor ──
+@[inline]
+pub fn (t &Theme) eff_ne_bg() Color {
+	return if t.ne_bg.a > 0 { t.ne_bg } else { theme_shade(t.bg, -8) }
+}
+
+@[inline]
+pub fn (t &Theme) eff_ne_grid() Color {
+	return if t.ne_grid.a > 0 { t.ne_grid } else { t.border.with_alpha(35) }
+}
+
+@[inline]
+pub fn (t &Theme) eff_ne_grid_major() Color {
+	return if t.ne_grid_major.a > 0 { t.ne_grid_major } else { t.border.with_alpha(90) }
+}
+
+@[inline]
+pub fn (t &Theme) eff_ne_node_bg() Color {
+	return if t.ne_node_bg.a > 0 { t.ne_node_bg } else { t.surface }
+}
+
+@[inline]
+pub fn (t &Theme) eff_ne_node_border() Color {
+	return if t.ne_node_border.a > 0 { t.ne_node_border } else { t.border }
+}
+
+@[inline]
+pub fn (t &Theme) eff_ne_node_text() Color {
+	return if t.ne_node_text.a > 0 { t.ne_node_text } else { t.text_primary }
+}
+
+@[inline]
+pub fn (t &Theme) eff_ne_header_bg() Color {
+	return if t.ne_header_bg.a > 0 { t.ne_header_bg } else { Color{90, 90, 100, 255} }
+}
+
+@[inline]
+pub fn (t &Theme) eff_ne_selected() Color {
+	return if t.ne_selected.a > 0 { t.ne_selected } else { t.accent }
+}
+
+@[inline]
+pub fn (t &Theme) eff_ne_active() Color {
+	return if t.ne_active.a > 0 { t.ne_active } else { t.eff_ne_selected().brighten(0.3) }
+}
+
+// eff_ne_field_bg - фон поля значения: по умолчанию темнее тела ноды. Цвет поля ввода темы не
+// годится: в тёмных темах он совпадает с телом карточки, и поле не видно.
+@[inline]
+pub fn (t &Theme) eff_ne_field_bg() Color {
+	return if t.ne_field_bg.a > 0 { t.ne_field_bg } else { theme_shade(t.eff_ne_node_bg(), -30) }
+}
+
+@[inline]
+pub fn (t &Theme) eff_ne_field_fill() Color {
+	return if t.ne_field_fill.a > 0 { t.ne_field_fill } else { t.accent.with_alpha(110) }
+}
+
+@[inline]
+pub fn (t &Theme) eff_ne_socket_outline() Color {
+	return if t.ne_socket_outline.a > 0 { t.ne_socket_outline } else { Color{20, 20, 20, 220} }
+}
+
+@[inline]
+pub fn (t &Theme) eff_ne_node_radius() f32 {
+	return if t.ne_node_radius > 0 { t.ne_node_radius } else { 5 }
+}
+
+@[inline]
+pub fn (t &Theme) eff_ne_link_width() f32 {
+	return if t.ne_link_width > 0 { t.ne_link_width } else { 2 }
+}
+
+// theme_shade - цвет светлее (delta > 0) или темнее на delta единиц канала, с зажимом в 0..255.
+// Color.brighten снизу не зажимает: на тёмном цвете отрицательный сдвиг переполнил бы u8.
+fn theme_shade(c Color, delta int) Color {
+	return Color{u8(clamp_int(int(c.r) + delta, 0, 255)), u8(clamp_int(int(c.g) + delta, 0, 255)), u8(clamp_int(int(c.b) + delta, 0, 255)), c.a}
 }
 
 // ── Focus ring ──

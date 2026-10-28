@@ -13,6 +13,9 @@ module main
 //     разрез связей, правая кнопка по пустому месту - меню добавления с поиском;
 //   - клавиши: Shift+A - меню добавления, Delete/X - удалить, Shift+D - дублировать, H - свернуть,
 //     Home - показать всё, Ctrl+Z / Ctrl+Shift+Z - отмена и повтор (стек команд окна);
+//   - края и углы ноды тянутся мышью, как у окна: ширина и высота (не меньше содержимого);
+//   - Style включает и выключает таблицу стилей CSS для селектора `nodes` (цвета холста, карточек,
+//     сетки, рамок, толщина связей) - вид нод меняется без правки кода редактора;
 //   - Save запоминает граф в JSON, Load возвращает его; строка внизу - последнее событие.
 //
 // Запуск (из корня репозитория):
@@ -70,9 +73,24 @@ fn main() {
 		stack.clear()
 		status.text = 'Loaded: ${g.nodes().len} nodes, ${g.links().len} links'
 	}
+	mut style := &StyleState{}
+	mut style_btn := vgui.button('Style')
+	style_btn.on_click = fn [mut win, mut style, mut status] () {
+		style.on = !style.on
+		if style.on {
+			ss := vgui.parse_stylesheet(node_css, 'nodes.css') or {
+				status.text = err.msg()
+				return
+			}
+			win.set_stylesheet(ss)
+		} else {
+			win.set_stylesheet(unsafe { nil }) // назад к стилям приложения (их нет)
+		}
+	}
 	bar.add(undo_btn)
 	bar.add(redo_btn)
 	bar.add(frame_btn)
+	bar.add(style_btn)
 	bar.add(vgui.create_spacer())
 	bar.add(save_btn)
 	bar.add(load_btn)
@@ -251,6 +269,32 @@ fn build_graph() !&vgui.NodeGraph {
 	g.connect(shiny, 0, mixsurf, 2)!
 	g.connect(mixsurf, 0, out, 0)!
 	return g
+}
+
+// node_css - стиль «чертёж» для редактора нод (PROJECT.md, «NodeEditor», «Вид из темы и CSS»).
+// Цвета шапок задают типы нод в build_graph - они сильнее стиля.
+const node_css = '
+nodes {
+	background: #14284a;
+	grid-color: #24406e;
+	major-grid-color: #36598f;
+	node-background: #1d3560;
+	border-color: #5d7fb8;
+	color: #e6eeff;
+	field-background: #12223f;
+	field-fill-color: #3d78d8;
+	socket-outline-color: #0b1830;
+	border-radius: 2;
+	link-width: 3;
+}
+nodes:selected { border-color: #ffd166; }
+'
+
+// StyleState - включён ли стиль (в куче: кнопка Style его переключает).
+@[heap]
+struct StyleState {
+mut:
+	on bool
 }
 
 // Saved - сохранённый JSON графа (в куче: Save его меняет, Load читает).

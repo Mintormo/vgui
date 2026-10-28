@@ -262,3 +262,106 @@ fn test_node_editor_snapshot() {
 	t.release(260, 200)
 	t.close()
 }
+
+// Ширина ноды мышью: правый край - x стоит; левый край - стоит правый край; зажим по min_width;
+// одна команда отмены на жест; событие node_resized. Боковые края берутся в шапке (y = 50): на
+// высоте строк по краям стоят сокеты, и там тянется связь.
+fn test_node_editor_resize_by_edges() {
+	mut t, mut ne, counter, mut stack := new_node_ui()!
+	assert ne.hit_test(190, 50) == NodeHit{.edge, 1, ne_edge_right}
+	assert ne.hit_test(300, 50) == NodeHit{.edge, 2, ne_edge_left}
+	assert ne.hit_test(190, 75).kind == .socket_out, 'сокет на краю - главнее края'
+	// Правый край value: 150 -> 200
+	t.drag(190, 50, 240, 50)
+	v := ne.graph.node(1) or { panic('v') }
+	assert ne.graph.node_width(1) == 200 && v.x == 40
+	assert counter.count(.node_resized) == 1
+	// Левый край mix (x 300, ширина 150) на 20 влево: x 280, ширина 170, правый край на 450
+	t.drag(300, 50, 280, 50)
+	m := ne.graph.node(2) or { panic('m') }
+	assert m.x == 280 && ne.graph.node_width(2) == 170
+	// Сжать дальше предела: ширина 80 (min_width), правый край всё так же на 450
+	t.drag(280, 50, 600, 50)
+	m3 := ne.graph.node(2) or { panic('m') }
+	assert ne.graph.node_width(2) == 80 && m3.x == 370
+	// Каждый жест - одна команда
+	assert stack.undo()
+	assert ne.graph.node_width(2) == 170
+	n2 := ne.graph.node(2) or { panic('m') }
+	assert n2.x == 280
+	t.close()
+}
+
+// Высота и углы: value (40, 40) 150x52 - низ на 92; mix (300, 40) 150x118. Верх и низ, четыре
+// угла (снаружи угол ловится дальше, чем край), зажим высоты снизу содержимым, у свёрнутой ноды
+// высота не тянется.
+fn test_node_editor_resize_height_and_corners() {
+	mut t, mut ne, _, mut stack := new_node_ui()!
+	assert ne.hit_test(100, 92) == NodeHit{.edge, 1, ne_edge_bottom}
+	assert ne.hit_test(100, 40) == NodeHit{.edge, 1, ne_edge_top}
+	assert ne.hit_test(190, 92).slot == ne_edge_right | ne_edge_bottom
+	assert ne.hit_test(196, 98).slot == ne_edge_right | ne_edge_bottom, 'угол снаружи - с запасом'
+	assert ne.hit_test(100, 98).kind == .none, 'край снаружи - без запаса'
+	assert ne.hit_test(40, 40).slot == ne_edge_left | ne_edge_top
+	assert ne.hit_test(300, 158).slot == ne_edge_left | ne_edge_bottom
+	// Низ value: 52 -> 92, верх стоит
+	t.drag(100, 92, 100, 132)
+	assert ne.graph.node_height(1) == 92
+	assert (ne.graph.node(1) or { panic('v') }).y == 40
+	// Верх mix на 20 вверх: y 20, высота 138, низ на месте
+	t.drag(375, 40, 375, 20)
+	assert ne.graph.node_height(2) == 138
+	assert (ne.graph.node(2) or { panic('m') }).y == 20
+	// Сжать верх ниже содержимого: высота 118 (содержимое), низ всё так же на 158
+	t.drag(375, 20, 375, 300)
+	assert ne.graph.node_height(2) == 118
+	assert (ne.graph.node(2) or { panic('m') }).y == 40
+	assert stack.undo()
+	assert ne.graph.node_height(2) == 138
+	// Правый нижний угол value (190, 132): обе оси сразу
+	t.drag(190, 132, 230, 152)
+	assert ne.graph.node_width(1) == 190 && ne.graph.node_height(1) == 112
+	v := ne.graph.node(1) or { panic('v') }
+	assert v.x == 40 && v.y == 40
+	// Свёрнутая нода: высота - шапка, верх и низ не тянутся
+	ne.graph.set_collapsed(1, true)
+	t.frame()
+	assert ne.graph.node_height(1) == 24
+	assert ne.hit_test(100, 64).kind != .edge
+	// Ширина уже 190: край на 40 + 190. У свёрнутой сокеты - на середине шапки (y 52) и занимают
+	// почти весь край; угол над шапкой тянет только ширину
+	assert ne.hit_test(230, 52).kind == .socket_out
+	assert ne.hit_test(232, 36) == NodeHit{.edge, 1, ne_edge_right}
+	t.close()
+}
+
+// Вид из CSS: `nodes { ... }` красит холст, тело карточки и шапку типа без своего цвета;
+// тип со своим цветом шапки (value) его сохраняет. Без стилей - прежние цвета темы.
+fn test_node_editor_css_colors() {
+	mut t, mut ne, _, _ := new_node_ui()!
+	ne.graph.define_node(NodeTypeDef{
+		id:      'plain'
+		title:   'P'
+		outputs: [node_socket('Out', 'float')]
+	})!
+	ne.graph.add_node('plain', 300, 200)!
+	t.frame()
+	before := t.capture()
+	assert before.px(553, 383) != blue
+	assert before.px(430, 205) == Color{90, 90, 100, 255}, 'шапка без цвета - запасной цвет темы'
+	t.app.set_stylesheet(parse_stylesheet('nodes { background: #0000ff; node-background: #00ff00; header-background: #ff0000; }',
+		't.css')!)
+	t.frame()
+	f := t.capture()
+	assert f.px(553, 383) == blue, 'холст'
+	assert f.px(60, 80) == green, 'тело ноды value'
+	assert f.px(430, 205) == red, 'шапка типа без цвета'
+	assert f.px(150, 45) == before.px(150, 45), 'свой цвет шапки типа сильнее CSS'
+	// Тема после редактора восстановлена
+	assert t.win.ctx.theme.ne_bg.a == 0
+	t.close()
+}
+
+const blue = Color{0, 0, 255, 255}
+const green = Color{0, 255, 0, 255}
+const red = Color{255, 0, 0, 255}

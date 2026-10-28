@@ -88,16 +88,21 @@ pub fn node_socket(name string, typ string, field NodeField) NodeSocketDef {
 }
 
 // NodeTypeDef - тип ноды: id (ключ в сохранённом графе), заголовок, категория (группа в меню
-// добавления), цвет шапки, ширина карточки (в единицах холста), входы и выходы.
+// добавления), цвет шапки (альфа 0 - цвет шапки из темы, Theme.ne_header_bg / CSS
+// `nodes { header-background }`), ширина карточки по умолчанию (в единицах холста), входы и выходы.
+// min_width/max_width - пределы ширины, которую пользователь задаёт, перетаскивая край ноды
+// (max_width = 0 - без верхнего предела).
 pub struct NodeTypeDef {
 pub mut:
-	id       string
-	title    string
-	category string
-	color    Color = Color{90, 90, 100, 255}
-	width    f32   = 150
-	inputs   []NodeSocketDef
-	outputs  []NodeSocketDef
+	id        string
+	title     string
+	category  string
+	color     Color = Color{0, 0, 0, 0} // явная альфа 0: у Color по умолчанию a = 255
+	width     f32   = 150
+	min_width f32   = 80
+	max_width f32
+	inputs    []NodeSocketDef
+	outputs   []NodeSocketDef
 }
 
 // NodeValue - значение поля одного входа ноды (используется поле по виду NodeField).
@@ -110,7 +115,7 @@ pub mut:
 }
 
 // GraphNode - нода графа: устойчивый id, тип, позиция левого верхнего угла на холсте,
-// свёрнута ли, значения полей входов (по одному на вход типа).
+// свёрнута ли, значения полей входов (по одному на вход типа), свои ширина и высота.
 @[heap]
 pub struct GraphNode {
 pub mut:
@@ -124,6 +129,11 @@ pub mut:
 	// ссылка на свой объект по ключу). Оба сохраняются в JSON.
 	title string
 	data  string
+	// width - своя ширина ноды (пользователь потянул край; 0 - ширина типа). Читать - node_width.
+	width f32
+	// height - своя высота (0 - по содержимому). Меньше содержимого (шапка и строки сокетов) не
+	// бывает: лишнее место - пустое поле внизу карточки. Читать - node_height.
+	height f32
 }
 
 // NodeLink - связь: выход from_slot ноды from_node -> вход to_slot ноды to_node.
@@ -315,6 +325,78 @@ pub fn (mut g NodeGraph) set_collapsed(id int, collapsed bool) bool {
 	mut n := g.node(id) or { return false }
 	n.collapsed = collapsed
 	return true
+}
+
+// node_width - ширина ноды на холсте: своя (если задана), иначе ширина типа.
+pub fn (g &NodeGraph) node_width(id int) f32 {
+	n := g.node(id) or { return 0 }
+	return g.width_of(n)
+}
+
+// width_of - ширина ноды по её записи (без поиска по id; для отрисовки и попадания).
+fn (g &NodeGraph) width_of(n &GraphNode) f32 {
+	if n.width > 0 {
+		return n.width
+	}
+	t := g.types[n.type_id] or { return 150 }
+	return t.width
+}
+
+// node_height - высота ноды на холсте: у свёрнутой - шапка, иначе своя (если задана), но не
+// меньше содержимого.
+pub fn (g &NodeGraph) node_height(id int) f32 {
+	n := g.node(id) or { return 0 }
+	return g.height_of(n)
+}
+
+// height_of - высота ноды по её записи (для отрисовки и попадания).
+fn (g &NodeGraph) height_of(n &GraphNode) f32 {
+	if n.collapsed {
+		return ne_header_h
+	}
+	return max_f32(n.height, g.content_height(n))
+}
+
+// content_height - наименьшая высота развёрнутой ноды: шапка, строка на каждый выход и вход и
+// поле снизу. Константы геометрии (ne_header_h, ne_row_h, ne_pad_bottom) - в node_editor.v:
+// высоту модели и вида считает одна формула.
+fn (g &NodeGraph) content_height(n &GraphNode) f32 {
+	t := g.types[n.type_id] or { return ne_header_h }
+	return ne_header_h + f32(t.outputs.len + t.inputs.len) * ne_row_h + ne_pad_bottom
+}
+
+// set_node_height - высота ноды (0 и меньше - по содержимому). Меньше содержимого не
+// становится: зажимается снизу. Как и у ширины, верхний край не двигается. false - ноды нет.
+pub fn (mut g NodeGraph) set_node_height(id int, h f32) bool {
+	widget_changed()
+	mut n := g.node(id) or { return false }
+	n.height = if h <= 0 { f32(0) } else { max_f32(h, g.content_height(n)) }
+	return true
+}
+
+// set_node_width - ширина ноды (0 - вернуть ширину типа). Значение зажимается в
+// min_width..max_width типа. Левый верхний угол не двигается - тянуть левый край (сдвигая и x)
+// - забота вида. Возвращает false, если ноды нет.
+pub fn (mut g NodeGraph) set_node_width(id int, w f32) bool {
+	widget_changed()
+	mut n := g.node(id) or { return false }
+	if w <= 0 {
+		n.width = 0
+		return true
+	}
+	t := g.types[n.type_id] or { return false }
+	n.width = node_clamp_width(t, w)
+	return true
+}
+
+// node_clamp_width - ширина в пределах типа (нижний предел не меньше 20: ноду не сжать в линию).
+fn node_clamp_width(t NodeTypeDef, w f32) f32 {
+	lo := max_f32(t.min_width, 20)
+	mut r := max_f32(w, lo)
+	if t.max_width > 0 {
+		r = min_f32(r, max_f32(t.max_width, lo))
+	}
+	return r
 }
 
 // set_node_title - свой заголовок ноды ('' - вернуть заголовок типа).
@@ -658,10 +740,12 @@ fn (mut g NodeGraph) restore(s NodeGraphState) {
 //   {"version":1,
 //    "nodes":[{"id":1,"type":"add","x":10,"y":20,"collapsed":false,
 //              "values":[{"number":0.5,"flag":false,"color":[200,200,200,255],"choice":0}],
-//              "title":"","data":""}],
+//              "title":"","data":"","width":0,"height":0}],
 //    "links":[{"id":1,"from":1,"out":0,"to":2,"in":1}]}
 // Типы не сохраняются: их описывает приложение кодом. title и data появились позже: в старых
-// сохранениях их нет, и они читаются пустыми.
+// сохранениях их нет, и они читаются пустыми. width и height (свои размеры, 0 - по типу и
+// содержимому) - тоже позже.
+// Новые поля добавляются так, чтобы старые сохранения читались, - версия остаётся 1.
 
 struct NodeValueJson {
 	number f64
@@ -679,6 +763,8 @@ struct GraphNodeJson {
 	values    []NodeValueJson
 	title     string
 	data      string
+	width     f32
+	height    f32
 }
 
 struct NodeLinkJson {
@@ -710,6 +796,8 @@ pub fn (g &NodeGraph) to_json() string {
 			collapsed: n.collapsed
 			title:     n.title
 			data:      n.data
+			width:     n.width
+			height:    n.height
 			values:    n.values.map(NodeValueJson{
 				number: it.number
 				flag:   it.flag
@@ -770,6 +858,13 @@ pub fn (mut g NodeGraph) load_json(text string) ! {
 			values:    values
 			title:     jn.title
 			data:      jn.data
+			width:     if jn.width > 0 { node_clamp_width(t, jn.width) } else { 0 }
+		}
+		// Высота зажимается снизу содержимым, как в set_node_height (content_height нужна запись
+		// ноды - она уже в списке)
+		if jn.height > 0 {
+			mut added := g.nodes.last()
+			added.height = max_f32(jn.height, g.content_height(added))
 		}
 		max_node = if jn.id > max_node { jn.id } else { max_node }
 	}
