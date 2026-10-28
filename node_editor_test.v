@@ -658,3 +658,47 @@ fn test_node_editor_grow_inputs() {
 	assert (ne.graph.node(j) or { panic('j') }).extra_inputs.len == 0
 	t.close()
 }
+
+// BodyCalls - какие ноды рисовала функция тела (в куче: замыкание V захватывает копию).
+@[heap]
+struct BodyCalls {
+mut:
+	nodes []int
+	rects []Rect
+}
+
+// Своё содержимое ноды: место body_height входит в высоту; функция типа рисует в области под
+// строками, обрезанная по ней (заливка «на весь экран» за область не выходит); растянутая нода
+// растит область.
+fn test_node_editor_body_painter() {
+	mut t, mut ne, _, _ := new_node_ui()!
+	ne.graph.define_node(NodeTypeDef{
+		id:          'preview'
+		title:       'Preview'
+		outputs:     [node_socket('Out', 'float')]
+		body_height: 60
+	})!
+	p := ne.graph.add_node('preview', 40, 200)!
+	// Шапка 24 + строка 22 + область 60 + поле 6
+	assert ne.graph.node_height(p) == 112
+	mut calls := &BodyCalls{}
+	painter := fn [mut calls] (mut ctx RenderContext, node int, r Rect) {
+		calls.nodes << node
+		calls.rects << r
+		ctx.fill_rect(Rect{0, 0, 2000, 2000}, red) // нарочно мимо области: отсечение спасёт
+	}
+	ne.set_body_painter('preview', painter)
+	t.frame()
+	assert calls.nodes.last() == p
+	r := calls.rects.last()
+	assert r.x == 50 && r.y == 248 && r.w == 130 && r.h == 58
+	f := t.capture()
+	assert f.px(100, 270) == red, 'область нарисована'
+	assert f.px(100, 230) != red, 'строка сокета - нет'
+	assert f.px(300, 270) != red, 'за карточкой - нет'
+	// Ноду растянули - область выросла
+	ne.graph.set_node_height(p, 200)
+	t.frame()
+	assert calls.rects.last().h == 146
+	t.close()
+}

@@ -107,6 +107,9 @@ pub mut:
 	// (нода «Объединить» с растущим числом входов; node_sockets.v). typ = '' - строки нет.
 	// В имени {n} заменяется номером входа.
 	grow_input NodeSocketDef
+	// body_height - место под своё содержимое (превью, график) ниже строк сокетов, в единицах
+	// холста; рисует его приложение (NodeEditor.set_body_painter, node_body.v). 0 - места нет.
+	body_height f32
 }
 
 // NodeValue - значение поля одного входа ноды (используется поле по виду NodeField).
@@ -392,7 +395,8 @@ fn (g &NodeGraph) content_height(n &GraphNode) f32 {
 	if n.type_id !in g.types {
 		return ne_header_h
 	}
-	return ne_header_h + f32(g.row_count(n)) * ne_row_h + ne_pad_bottom
+	t := g.types[n.type_id] or { NodeTypeDef{} }
+	return ne_header_h + f32(g.row_count(n)) * ne_row_h + t.body_height + ne_pad_bottom
 }
 
 // set_node_height - высота ноды (0 и меньше - по содержимому). Меньше содержимого не

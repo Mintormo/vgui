@@ -20,6 +20,7 @@ module main
 //   - reroute-точки: двойной щелчок по проводу ставит точку; центр точки тащит её, кольцо вокруг
 //     тянет новую связь;
 //   - Sum (Converter): строка «+» добавляет вход, «×» у своего входа удаляет его;
+//   - Swatch (Color): своё содержимое ноды - образец цвета рисует приложение (set_body_painter);
 //   - двойной щелчок по шапке или F2 - переименовать ноду;
 //   - клавиши: Shift+A - меню добавления, Delete/X - удалить, Shift+D - дублировать, H - свернуть,
 //     Home - показать всё, Ctrl+C / Ctrl+X / Ctrl+V - буфер обмена (JSON графа: можно вставить и в
@@ -45,6 +46,16 @@ fn main() {
 	ne.set_undo_stack(stack)
 	win.set_undo_stack(stack)
 	ne.frame_all() // вид подгонится под граф в первой раскладке
+	// Тело ноды Swatch: образец цвета из её поля (подключённый вход - цвет не известен без
+	// вычисления графа, тогда серый образец с рамкой)
+	swatch := fn [mut g] (mut ctx vgui.RenderContext, node int, r vgui.Rect) {
+		v := g.value(node, 0) or { return }
+		connected := if _ := g.link_into(node, 0) { true } else { false }
+		c := if connected { vgui.Color{90, 90, 90, 255} } else { v.color }
+		ctx.fill_rounded_rect(r, c, 4)
+		ctx.draw_rounded_rect(r, vgui.Color{20, 20, 20, 255}, 4)
+	}
+	ne.set_body_painter('swatch', swatch)
 
 	mut status := vgui.label('Shift+A or right click on empty space - add a node')
 	ne.on_event = fn [mut status, mut g] (e vgui.NodeEvent) {
@@ -219,6 +230,19 @@ fn build_graph() !&vgui.NodeGraph {
 			vgui.node_socket('Value', 'float', kind: .number, number: 0.5),
 		]
 		outputs:  [vgui.node_socket('Value', 'float')]
+	})!
+	// Swatch - своё содержимое ноды: в области body_height приложение рисует образец цвета
+	// (функция рисования вешается на тип в main, set_body_painter)
+	g.define_node(vgui.NodeTypeDef{
+		id:          'swatch'
+		title:       'Swatch'
+		category:    'Color'
+		color:       color
+		inputs:      [vgui.node_socket('Color', 'color',
+			kind:  .color
+			color: vgui.Color{230, 120, 60, 255}
+		)]
+		body_height: 60
 	})!
 	// Sum - входы добавляет пользователь строкой «+» (шаблон grow_input, {n} - номер входа)
 	g.define_node(vgui.NodeTypeDef{

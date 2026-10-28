@@ -173,6 +173,8 @@ pub mut:
 	zoom   f32 = 1
 	// Колбэк правок пользователя
 	on_event fn (NodeEvent) = unsafe { nil }
+	// body_painters - рисование своего содержимого нод по типу (node_body.v, set_body_painter)
+	body_painters map[string]NodeBodyPainter
 	// socket_tooltip - своя подсказка сокета (например, вычисленное значение): нода, слот,
 	// выход ли; '' - подсказка по умолчанию (имя, тип, значение поля или откуда подключён)
 	socket_tooltip fn (node int, slot int, out bool) string = unsafe { nil }
@@ -1049,6 +1051,7 @@ fn (ne &NodeEditor) draw_node(n &GraphNode, mut ctx RenderContext) {
 	if !n.collapsed {
 		ne.draw_rows(n, t, fpx, mut ctx)
 		ne.draw_socket_buttons(n, mut ctx)
+		ne.draw_body(n, mut ctx)
 	}
 	// Сокеты
 	for s in 0 .. t.outputs.len {
