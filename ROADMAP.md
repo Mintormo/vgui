@@ -283,10 +283,9 @@ Qt/GTK/WPF интегрированы с UIA (Windows), AT-SPI (Linux), NSAccess
       (план выноса SDL из виджетов за `RenderContext` — [`docs/backend_abstraction.md`](docs/backend_abstraction.md), 27.10.2026;
       этапы 0–5 и 7 сделаны 27.10.2026: виджеты SDL не зовут, это проверяет `backend_lint_test.v`)
 - [ ] **Windows** — V-часть собирается кросс-компиляцией на Linux (09.10.2026,
-      MinGW + SDL3 из MSYS2; так собирается vraw), пути в файловом диалоге
-      поправлены, язык — из `SDL_GetPreferredLocales`. Осталось: запуск на
-      Windows, `vgui.dll` для Python (SDL3-DLL рядом и
-      `os.add_dll_directory`). Разбор —
+      MinGW + SDL3 из MSYS2) и работает под Wine; на ней выпускается Windows-сборка
+      vraw. Осталось: запуск на настоящей Windows, `vgui.dll` для Python (SDL3-DLL
+      рядом и `os.add_dll_directory`), `check_capi.py` под Windows. Разбор —
       [`docs/windows_port.md`](docs/windows_port.md)
 
 ---
