@@ -1,5 +1,7 @@
 module vgui
 
+import math
+
 // Файл node_editor.v: NodeEditor - редактор графа из нод (как в редакторах шейдеров, процедурной
 // графики, визуального программирования). Модель графа - NodeGraph (node_graph.v); здесь только
 // вид и ввод.
@@ -147,8 +149,11 @@ pub mut:
 	show_grid   bool       = true
 	// auto_insert - одиночную ноду без связей, отпущенную на провод, вставлять в его разрыв
 	auto_insert bool = true
-	min_zoom    f32  = 0.2
-	max_zoom    f32  = 3
+	// snap_to_grid - перемещение и изменение размера по шагу сетки (ne_grid); Ctrl во время
+	// жеста временно переключает привязку (включает выключенную и наоборот)
+	snap_to_grid bool
+	min_zoom     f32 = 0.2
+	max_zoom     f32 = 3
 	// Вид: точка холста в левом верхнем углу и масштаб
 	view_x f32
 	view_y f32
@@ -173,10 +178,13 @@ mut:
 	link_from_out bool
 	link_detached int
 	cut_pts       []Vec2
+	// Вставка в связь: связь под перетаскиваемой нодой (0 - нет), подсвечивается
+	insert_link int
+	// Перемещение: позиции выделенных нод в начале жеста (сдвиг считается от них, а не шагами -
+	// привязка к сетке не копит ошибку)
+	move_start map[int]Vec2
 	// Изменение размера: нода, какие края тянут (маска ne_edge_*), прямоугольник ноды в начале
 	// жеста (единицы холста); курсор до того, как над краем поставили «стрелку» (nil - не меняли)
-	// Вставка в связь: связь под перетаскиваемой нодой (0 - нет), подсвечивается
-	insert_link  int
 	resize_node  int
 	resize_edges int
 	resize_start Rect
@@ -1181,7 +1189,7 @@ pub fn (mut ne NodeEditor) handle_event(event &GuiEvent, app &App) bool {
 			return ne.on_mouse_down(event, app)
 		}
 		.mouse_move {
-			return ne.on_mouse_move(event.mouse_x, event.mouse_y)
+			return ne.on_mouse_move(event.mouse_x, event.mouse_y, event.ctrl())
 		}
 		.mouse_up {
 			return ne.on_mouse_up(event, app)
@@ -1307,6 +1315,12 @@ fn (mut ne NodeEditor) on_mouse_down(event &GuiEvent, app &App) bool {
 			ne.select_press(hit.node, event.shift())
 			ne.begin_change()
 			ne.drag = .move
+			ne.move_start = map[int]Vec2{}
+			for n in ne.graph.nodes {
+				if n.id in ne.selected {
+					ne.move_start[n.id] = Vec2{n.x, n.y}
+				}
+			}
 		}
 		.edge {
 			n := ne.graph.node(hit.node) or { return true }
@@ -1357,7 +1371,8 @@ fn (mut ne NodeEditor) start_link(node int, slot int, from_out bool, detached in
 	ne.link_detached = detached
 }
 
-fn (mut ne NodeEditor) on_mouse_move(x f32, y f32) bool {
+// on_mouse_move - шаг жеста. ctrl - зажат Ctrl (переключает привязку к сетке на время жеста).
+fn (mut ne NodeEditor) on_mouse_move(x f32, y f32, ctrl bool) bool {
 	dx := x - ne.last_x
 	dy := y - ne.last_y
 	if ne.drag != .none && !ne.drag_moved {
@@ -1378,13 +1393,7 @@ fn (mut ne NodeEditor) on_mouse_move(x f32, y f32) bool {
 		}
 		.move {
 			if ne.drag_moved {
-				for mut n in ne.graph.nodes {
-					if n.id in ne.selected {
-						n.x += dx / ne.zoom
-						n.y += dy / ne.zoom
-					}
-				}
-				ne.touch()
+				ne.drag_move(x, y, ne.snap_to_grid != ctrl)
 				ne.insert_link = ne.find_insert_link(x, y)
 			}
 		}
@@ -1404,7 +1413,7 @@ fn (mut ne NodeEditor) on_mouse_move(x f32, y f32) bool {
 		}
 		.resize {
 			if ne.drag_moved {
-				ne.drag_resize(x, y)
+				ne.drag_resize(x, y, ne.snap_to_grid != ctrl)
 			}
 		}
 		.box {}
@@ -1633,7 +1642,9 @@ fn (mut ne NodeEditor) cancel_gesture() {
 // мыши от нажатия (в единицах холста; от точки нажатия, а не от прошлого шага - зажим не копит
 // ошибку). Противоположный край стоит на месте: тянут левый (верхний) край - x (y) сдвигается на
 // столько, на сколько изменился размер уже после зажима, иначе упёршаяся в предел нода поехала бы.
-fn (mut ne NodeEditor) drag_resize(x f32, y f32) {
+// snap - тянущийся край встаёт на линию сетки (сама линия края, а не размер: так край ноды
+// совпадает с сеткой и с краями соседних нод, выровненных по ней).
+fn (mut ne NodeEditor) drag_resize(x f32, y f32, snap bool) {
 	n := ne.graph.node(ne.resize_node) or { return }
 	s := ne.resize_start
 	dx := (x - ne.press_x) / ne.zoom
@@ -1642,7 +1653,9 @@ fn (mut ne NodeEditor) drag_resize(x f32, y f32) {
 	edges := ne.resize_edges
 	if edges & (ne_edge_left | ne_edge_right) != 0 {
 		left := edges & ne_edge_left != 0
-		want := if left { s.w - dx } else { s.w + dx }
+		// Новая координата тянущегося края, по желанию - на сетке; из неё - ширина
+		edge := ne_snap(if left { s.x + dx } else { s.x + s.w + dx }, snap)
+		want := if left { s.x + s.w - edge } else { edge - s.x }
 		// Не меньше 1: ширина <= 0 для set_node_width значит «вернуть ширину типа», а мышь,
 		// сжавшая ноду до упора, должна дать минимальную ширину
 		ne.graph.set_node_width(n.id, max_f32(want, 1))
@@ -1652,7 +1665,8 @@ fn (mut ne NodeEditor) drag_resize(x f32, y f32) {
 	}
 	if edges & (ne_edge_top | ne_edge_bottom) != 0 {
 		top := edges & ne_edge_top != 0
-		want := if top { s.h - dy } else { s.h + dy }
+		edge := ne_snap(if top { s.y + dy } else { s.y + s.h + dy }, snap)
+		want := if top { s.y + s.h - edge } else { edge - s.y }
 		// Так же: 0 и меньше - «по содержимому», а сжатая до упора нода и есть по содержимому
 		ne.graph.set_node_height(n.id, max_f32(want, 1))
 		if top {
@@ -1661,6 +1675,36 @@ fn (mut ne NodeEditor) drag_resize(x f32, y f32) {
 	}
 	ne.graph.set_node_pos(n.id, nx, ny)
 	ne.touch()
+}
+
+// drag_move - шаг перемещения выделенных нод: сдвиг мыши от точки нажатия (в единицах холста)
+// прибавляется к позициям начала жеста. snap - на сетку встаёт активная нода (за которую тянут),
+// остальные выделенные сдвигаются на столько же: группа не «рассыпается» по разным клеткам.
+fn (mut ne NodeEditor) drag_move(x f32, y f32, snap bool) {
+	dx := (x - ne.press_x) / ne.zoom
+	dy := (y - ne.press_y) / ne.zoom
+	mut ox, mut oy := dx, dy
+	if snap {
+		if a := ne.move_start[ne.active] {
+			ox = ne_snap(a.x + dx, true) - a.x
+			oy = ne_snap(a.y + dy, true) - a.y
+		}
+	}
+	for mut n in ne.graph.nodes {
+		if p := ne.move_start[n.id] {
+			n.x = p.x + ox
+			n.y = p.y + oy
+		}
+	}
+	ne.touch()
+}
+
+// ne_snap - координата холста на ближайшей линии мелкой сетки (on = false - как есть).
+fn ne_snap(v f32, on bool) f32 {
+	if !on {
+		return v
+	}
+	return f32(math.round(v / ne_grid)) * ne_grid
 }
 
 // resize_cursor - системный курсор для краёв маски edges: «влево-вправо», «вверх-вниз» или
@@ -2366,12 +2410,12 @@ fn (mut ne NodeEditor) add_from_menu(i int) {
 	ne.emit(.node_added, id, 0, NodeLink{})
 	if slot >= 0 {
 		// Связь может не пройти вето приложения или проверку цикла - нода тогда остаётся без неё
-		res := if menu.link_from_out {
-			ne.graph.connect(menu.link_node, menu.link_slot, id, slot)
+		from_node, from_slot, to_node, to_slot := if menu.link_from_out {
+			menu.link_node, menu.link_slot, id, slot
 		} else {
-			ne.graph.connect(id, slot, menu.link_node, menu.link_slot)
+			id, slot, menu.link_node, menu.link_slot
 		}
-		if r := res {
+		if r := ne.graph.connect(from_node, from_slot, to_node, to_slot) {
 			if r.replaced.id != 0 {
 				ne.emit(.link_removed, 0, 0, r.replaced)
 			}

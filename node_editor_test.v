@@ -498,3 +498,28 @@ fn test_node_editor_insert_into_link() {
 	assert (ne.graph.link_into(2, 1) or { panic('l') }).from_node == 1
 	t.close()
 }
+
+// Привязка к сетке (шаг 20): на сетку встаёт нода, за которую тянут; Ctrl переключает привязку
+// на время жеста; при изменении размера на линию сетки встаёт тянущийся край.
+fn test_node_editor_snap_to_grid() {
+	mut t, mut ne, _, _ := new_node_ui()!
+	// Выключена: как есть
+	t.drag(100, 50, 133, 67)
+	v := ne.graph.node(1) or { panic('v') }
+	assert v.x == 73 && v.y == 57
+	// С Ctrl - привязка включается на этот жест: (73 + 9, 57 + 9) -> (80, 60)
+	sim_drag(mut t.app, t.win, 140, 70, 149, 79, 4, .left, sdl_kmod_ctrl)
+	assert v.x == 80 && v.y == 60
+	// Включена: группа сдвигается вместе - на сетку встаёт активная, mix едет на столько же
+	ne.snap_to_grid = true
+	t.key(sdl_k_a, sdl_kmod_ctrl)
+	t.drag(150, 70, 157, 73) // активная - value (под курсором): (87, 63) -> (80, 60)
+	assert v.x == 80 && v.y == 60
+	m := ne.graph.node(2) or { panic('m') }
+	assert m.x == 300 && m.y == 40, 'сдвиг 0 - группа на месте'
+	// Правый край mix (450) тянут до 463 - встаёт на 460: ширина 160
+	t.click(500, 350)
+	t.drag(450, 50, 463, 50)
+	assert ne.graph.node_width(2) == 160
+	t.close()
+}
