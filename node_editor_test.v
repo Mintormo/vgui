@@ -523,3 +523,29 @@ fn test_node_editor_snap_to_grid() {
 	assert ne.graph.node_width(2) == 160
 	t.close()
 }
+
+// Подсказки сокетов (TipAtPoint): имя и тип, у входа - значение поля или откуда подключён,
+// у выхода - число связей; не над сокетом - ''. Окно берёт их тем же обходом (hit_at), свой
+// текст приложения - socket_tooltip.
+fn test_node_editor_socket_tooltips() {
+	mut t, mut ne, _, _ := new_node_ui()!
+	assert ne.tooltip_at(300, 97) == 'Factor (float) = 0.500'
+	assert ne.tooltip_at(300, 141) == 'Clamp (float) = false'
+	assert ne.tooltip_at(190, 75) == 'Value (float)'
+	assert ne.tooltip_at(100, 300) == ''
+	ne.graph.connect(1, 0, 2, 1)!
+	ne.graph.set_node_title(1, 'Src')
+	assert ne.tooltip_at(300, 119) == 'Color (color)\n<- Src: Value'
+	assert ne.tooltip_at(190, 75) == 'Value (float)\n-> 1'
+	t.frame()
+	assert t.win.hit_at(300, 119).text == 'Color (color)\n<- Src: Value'
+	// Над пустым холстом - общая подсказка виджета
+	ne.tooltip = 'canvas'
+	assert t.win.hit_at(100, 300).text == 'canvas'
+	ne.socket_tooltip = fn (node int, slot int, out bool) string {
+		return if out { 'computed: 42' } else { '' }
+	}
+	assert ne.tooltip_at(190, 75) == 'computed: 42'
+	assert ne.tooltip_at(300, 97) == 'Factor (float) = 0.500', "'' - подсказка по умолчанию"
+	t.close()
+}

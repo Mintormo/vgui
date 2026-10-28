@@ -938,6 +938,14 @@ pub fn widget_at(w &Widget, x f32, y f32) ?&Widget {
 // tooltip: сам hit или его предок на пути от корня. Так подсказку можно
 // повесить и на весь ряд (HBox с подписью и ползунком), а не только на
 // лист. owner == nil — подсказки нет, text — её текст.
+// TipAtPoint - виджет, чья подсказка зависит от точки внутри него (сокет ноды, точка графика):
+// tooltip_at(x, y) - текст для точки экрана или '' (тогда - обычное поле tooltip). Владелец
+// подсказки остаётся тот же виджет, поэтому при переходе между точками текст меняется на месте,
+// а уход в точку без подсказки её прячет (tooltip_manager.v, tip_set_owner).
+pub interface TipAtPoint {
+	tooltip_at(x f32, y f32) string
+}
+
 pub struct TipHit {
 pub mut:
 	hit   &Widget = unsafe { nil }
@@ -972,7 +980,7 @@ fn widget_at_impl(w &Widget, x f32, y f32, depth int, mut tip TipHit) ?&Widget {
 	// своя «рамка» контейнера поверх детей (полоса прокрутки, зона
 	// разделителя) - точка его, в детей не спускаемся (event_route.v)
 	if widget_hits_self(w, x, y) {
-		take_tip(mut tip, w)
+		take_tip(mut tip, w, x, y)
 		return unsafe { w }
 	}
 	if depth < widget_tree_max_depth {
@@ -994,7 +1002,7 @@ fn widget_at_impl(w &Widget, x f32, y f32, depth int, mut tip TipHit) ?&Widget {
 				continue
 			}
 			if found := widget_at_impl(c, x, y, depth + 1, mut tip) {
-				take_tip(mut tip, w)
+				take_tip(mut tip, w, x, y)
 				return found
 			}
 		}
@@ -1004,7 +1012,7 @@ fn widget_at_impl(w &Widget, x f32, y f32, depth int, mut tip TipHit) ?&Widget {
 	if hit_passes_through(w, x, y) {
 		return none
 	}
-	take_tip(mut tip, w)
+	take_tip(mut tip, w, x, y)
 	return unsafe { w }
 }
 
@@ -1061,11 +1069,18 @@ fn widget_path_impl(w &Widget, x f32, y f32, depth int, mut path []&Widget) bool
 }
 
 // take_tip делает w владельцем подсказки, если её ещё нет, а у w есть текст.
-fn take_tip(mut tip TipHit, w &Widget) {
+fn take_tip(mut tip TipHit, w &Widget, x f32, y f32) {
 	if unsafe { tip.owner != nil } {
 		return
 	}
-	text := widget_tooltip(w)
+	// Подсказка по точке (TipAtPoint) - раньше общей: пустая строка - в этой точке своей нет
+	mut text := ''
+	if w is TipAtPoint {
+		text = w.tooltip_at(x, y)
+	}
+	if text.len == 0 {
+		text = widget_tooltip(w)
+	}
 	if text.len > 0 {
 		tip.owner = unsafe { w }
 		tip.text = text

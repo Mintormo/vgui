@@ -160,6 +160,9 @@ pub mut:
 	zoom   f32 = 1
 	// Колбэк правок пользователя
 	on_event fn (NodeEvent) = unsafe { nil }
+	// socket_tooltip - своя подсказка сокета (например, вычисленное значение): нода, слот,
+	// выход ли; '' - подсказка по умолчанию (имя, тип, значение поля или откуда подключён)
+	socket_tooltip fn (node int, slot int, out bool) string = unsafe { nil }
 mut:
 	selected map[int]bool
 	active   int // последняя выбранная нода (0 - нет)
@@ -568,6 +571,58 @@ fn ne_segments_cross(p1 Vec2, p2 Vec2, p3 Vec2, p4 Vec2) bool {
 
 fn ne_cross(a Vec2, b Vec2, p Vec2) f32 {
 	return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)
+}
+
+// ─── Подсказки сокетов ─────────────────────────────────
+
+// tooltip_at - подсказка для точки экрана (TipAtPoint, widget_tree.v): над сокетом - его имя и
+// тип; у входа - ещё значение поля или откуда он подключён. Приложение может подменить текст
+// колбэком socket_tooltip. Не над сокетом - '' (общая подсказка виджета, поле tooltip).
+pub fn (ne &NodeEditor) tooltip_at(x f32, y f32) string {
+	h := ne.hit_test(x, y)
+	if h.kind !in [.socket_in, .socket_out] {
+		return ''
+	}
+	out := h.kind == .socket_out
+	if !isnil(ne.socket_tooltip) {
+		custom := ne.socket_tooltip(h.node, h.slot, out)
+		if custom != '' {
+			return custom
+		}
+	}
+	n := ne.graph.node(h.node) or { return '' }
+	t := ne.type_of(n)
+	def := if out { t.outputs[h.slot] } else { t.inputs[h.slot] }
+	mut text := '${def.name} (${def.typ})'
+	if out {
+		count := ne.graph.links_from(h.node, h.slot).len
+		if count > 0 {
+			text += '\n-> ${count}'
+		}
+		return text
+	}
+	if l := ne.graph.link_into(h.node, h.slot) {
+		if a := ne.graph.node(l.from_node) {
+			from := ne.type_of(a).outputs[l.from_slot].name
+			text += '\n<- ${ne.graph.node_title(a.id)}: ${from}'
+		}
+		return text
+	}
+	v := n.values[h.slot]
+	match def.field.kind {
+		.number { text += ' = ${ne_format_number(v.number, def.field.digits)}' }
+		.toggle { text += ' = ${v.flag}' }
+		.color { text += ' = #${v.color.r:02x}${v.color.g:02x}${v.color.b:02x}' }
+		.choice {
+			text += if v.choice >= 0 && v.choice < def.field.choices.len {
+				' = ${def.field.choices[v.choice]}'
+			} else {
+				''
+			}
+		}
+		.none {}
+	}
+	return text
 }
 
 // ─── Вставка ноды в связь ──────────────────────────────
