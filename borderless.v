@@ -212,23 +212,6 @@ fn borderless_point_in_drag_rect(w &Window, lx f32, ly f32) bool {
 	return false
 }
 
-// Returns true if (lx, ly) in logical coords falls within any titlebar row.
-fn borderless_point_in_titlebar(w &Window, lx f32, ly f32) bool {
-	if w.hittest_data == unsafe { nil } {
-		return false
-	}
-	bd := unsafe { &BorderlessData(w.hittest_data) }
-	s := w.ctx.ui_scale
-	px := lx * s
-	py := ly * s
-	for r in bd.titlebar_rects {
-		if px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h {
-			return true
-		}
-	}
-	return false
-}
-
 // Called on left mouse_down in titlebar drag zone — begins manual drag.
 // Запоминает глобальную позицию мыши и позицию окна; у развёрнутого окна
 // перетаскивание не начинается.
@@ -330,19 +313,6 @@ fn borderless_check_dbl_click(w &Window) bool {
 		return true
 	}
 	return false
-}
-
-// borderless_force_arrow возвращает обычный курсор, если сейчас показан курсор
-// ресайза (например, когда мышь ушла с окна или на оверлей).
-fn borderless_force_arrow(w &Window) {
-	if w.hittest_data == unsafe { nil } {
-		return
-	}
-	mut bd := unsafe { &BorderlessData(w.hittest_data) }
-	if bd.last_zone != sdl_hittest_normal {
-		bd.last_zone = sdl_hittest_normal
-		set_cursor(sdl_system_cursor_arrow)
-	}
 }
 
 // enable_borderless_resize включает ресайз за края окна шириной border

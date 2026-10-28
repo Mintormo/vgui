@@ -2,7 +2,7 @@ module vgui
 
 // Темы macOS (современные и старые): номера C API 11..14 отдают именно их,
 // основные цвета непрозрачные, текст контрастен фону.
-fn lum(c Color) int {
+fn brightness_255(c Color) int {
 	return (int(c.r) * 54 + int(c.g) * 183 + int(c.b) * 19) >> 8
 }
 
@@ -12,10 +12,10 @@ fn test_macos_themes_contrast() {
 			th.input_bg] {
 			assert c.a == 255
 		}
-		d := lum(th.bg) - lum(th.text_primary)
+		d := brightness_255(th.bg) - brightness_255(th.text_primary)
 		assert d > 150 || d < -150, 'текст неконтрастен фону'
 		// Текст на акцентной кнопке читается
-		da := lum(th.accent) - lum(th.accent_text)
+		da := brightness_255(th.accent) - brightness_255(th.accent_text)
 		assert da > 60 || da < -60
 	}
 }

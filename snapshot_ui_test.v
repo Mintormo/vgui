@@ -81,7 +81,7 @@ fn snap_ui_theme(mut t TestUi, s UiSnap, theme_name string) ! {
 }
 
 // center — центр виджета #id из разметки.
-fn center(t &TestUi, ui &Ui, id string) (f32, f32) {
+fn widget_center_by_id(t &TestUi, ui &Ui, id string) (f32, f32) {
 	w := ui.widget(id) or { panic('в сцене нет #${id}') }
 	return t.center_of(w)
 }
@@ -106,7 +106,7 @@ fn test_snapshot_hover_button() {
 		name: 'state_hover'
 		vui:  states_vui
 		act:  fn (mut t TestUi, ui &Ui) {
-			x, y := center(t, ui, 'hover')
+			x, y := widget_center_by_id(t, ui, 'hover')
 			t.move(x, y)
 		}
 	)!
@@ -125,7 +125,7 @@ vbox pad=12 gap=10
 '
 		act:  fn (mut t TestUi, ui &Ui) {
 			t.win.tip_clock_ms = 1000
-			x, y := center(t, ui, 'lbl')
+			x, y := widget_center_by_id(t, ui, 'lbl')
 			t.move(x, y)
 			t.frame()
 			t.win.tip_clock_ms += 1000
@@ -142,7 +142,7 @@ fn test_snapshot_hover_toggle_under_input() {
 		name: 'state_hover_toggle'
 		vui:  states_vui
 		act:  fn (mut t TestUi, ui &Ui) {
-			x, y := center(t, ui, 'toggle')
+			x, y := widget_center_by_id(t, ui, 'toggle')
 			t.move(x, y)
 		}
 	)!
@@ -153,7 +153,7 @@ fn test_snapshot_pressed_button() {
 		name: 'state_pressed'
 		vui:  states_vui
 		act:  fn (mut t TestUi, ui &Ui) {
-			x, y := center(t, ui, 'accent')
+			x, y := widget_center_by_id(t, ui, 'accent')
 			t.move(x, y)
 			t.press(x, y) // без отпускания: кнопка остаётся нажатой
 		}
@@ -169,7 +169,7 @@ fn test_snapshot_keyboard_focus() {
 		name: 'state_focus'
 		vui:  states_vui
 		act:  fn (mut t TestUi, ui &Ui) {
-			x, y := center(t, ui, 'field')
+			x, y := widget_center_by_id(t, ui, 'field')
 			t.click(x, y)
 			t.move(1, 1)
 			t.key(9, 0) // Tab
@@ -219,7 +219,7 @@ vbox pad=12 gap=8
 '
 		h:    200
 		act:  fn (mut t TestUi, ui &Ui) {
-			x, y := center(t, ui, 'city')
+			x, y := widget_center_by_id(t, ui, 'city')
 			t.click(x, y)
 		}
 	)!
@@ -295,7 +295,7 @@ hbox
       button "Сохранить" #save
 '
 		act:  fn (mut t TestUi, ui &Ui) {
-			x, y := center(t, ui, 'save')
+			x, y := widget_center_by_id(t, ui, 'save')
 			t.move(x, y)
 		}
 	)!

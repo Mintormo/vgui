@@ -244,7 +244,6 @@ const pg_row_height = f32(26)
 const pg_indent = f32(16)
 const pg_arrow_size = f32(10)
 const pg_pad_h = f32(6)
-const pg_btn_size = f32(20)
 const pg_sb_w = f32(12)
 
 // PropertyGrid — двухколоночный редактор свойств (имя | значение) с иерархией групп,

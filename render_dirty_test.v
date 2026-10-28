@@ -51,7 +51,7 @@ fn (mut m MockWidget) draw(mut ctx RenderContext) {
 	}
 }
 
-fn (mut m MockWidget) handle_event(event &GuiEvent, app &App) bool {
+fn (mut m MockWidget) handle_event(_ &GuiEvent, _ &App) bool {
 	return false
 }
 
@@ -71,7 +71,7 @@ fn (mut m TooltipMockWidget) draw(mut ctx RenderContext) {
 	ctx.pending_tooltips << m.tip
 }
 
-fn (mut m TooltipMockWidget) handle_event(event &GuiEvent, app &App) bool {
+fn (mut m TooltipMockWidget) handle_event(_ &GuiEvent, _ &App) bool {
 	return false
 }
 
@@ -540,7 +540,7 @@ fn (mut m MarkOnlyWidget) draw(mut ctx RenderContext) {
 	ctx.mark_anim_rect('mark_only', m.mark_rect)
 }
 
-fn (mut m MarkOnlyWidget) handle_event(event &GuiEvent, app &App) bool {
+fn (mut m MarkOnlyWidget) handle_event(_ &GuiEvent, _ &App) bool {
 	return false
 }
 

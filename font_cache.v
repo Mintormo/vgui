@@ -174,18 +174,24 @@ fn close_font_set(mut fs FontSet) {
 
 // Cache accessors. `__global` variables are not visible from _test.v files,
 // so font_cache tests inspect and seed the cache through these.
+// @[markused] - их зовут только тесты; без атрибута обычная сборка выдаёт
+// notice «unused function».
+@[markused]
 fn font_cache_len() int {
 	return g_font_cache.len
 }
 
+@[markused]
 fn font_cache_entry(key string) voidptr {
 	return g_font_cache[key] or { unsafe { nil } }
 }
 
+@[markused]
 fn font_cache_put(key string, fs voidptr) {
 	g_font_cache[key] = fs
 }
 
+@[markused]
 fn font_cache_drop(key string) {
 	g_font_cache.delete(key)
 }

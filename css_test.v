@@ -121,7 +121,7 @@ fn test_rules_sorted_by_specificity_then_order() {
 	assert got == ['button', '.c', 'button.c', '.c.d', '#a']
 }
 
-fn node(kind int, id string, classes []string) CssNode {
+fn css_node(kind int, id string, classes []string) CssNode {
 	return CssNode{
 		kind: kind
 		tags: CssTags{
@@ -138,8 +138,8 @@ fn sel_of(text string) CssSelector {
 
 fn test_selector_matching() {
 	// окно: vbox.sidebar > panel > hbox > button#ok.big
-	stack := [node(kind_vbox, '', ['sidebar']), node(kind_panel, '', []), node(kind_hbox, '', []),
-		node(kind_button, 'ok', ['big', 'x'])]
+	stack := [css_node(kind_vbox, '', ['sidebar']), css_node(kind_panel, '', []),
+		css_node(kind_hbox, '', []), css_node(kind_button, 'ok', ['big', 'x'])]
 	assert css_selector_matches(sel_of('button'), stack)
 	assert css_selector_matches(sel_of('*'), stack)
 	assert css_selector_matches(sel_of('#ok'), stack)
@@ -155,8 +155,8 @@ fn test_selector_matching() {
 	// состояние на сопоставление не влияет: это выбор поля темы
 	assert css_selector_matches(sel_of('.sidebar button:hover'), stack)
 	// с возвратом: первый найденный hbox не годится, годится следующий выше
-	deep := [node(kind_vbox, '', ['a']), node(kind_hbox, '', []), node(kind_vbox, '', []),
-		node(kind_hbox, '', []), node(kind_button, '', [])]
+	deep := [css_node(kind_vbox, '', ['a']), css_node(kind_hbox, '', []), css_node(kind_vbox, '', []),
+		css_node(kind_hbox, '', []), css_node(kind_button, '', [])]
 	assert css_selector_matches(sel_of('.a > hbox button'), deep)
 }
 

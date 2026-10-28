@@ -18,7 +18,7 @@ pub mut:
 	h      f32 // естественная высота (measure)
 }
 
-fn (p &FitProbe) measure(ctx &RenderContext) SizeHint {
+fn (p &FitProbe) measure(_ &RenderContext) SizeHint {
 	return SizeHint{
 		w:        10
 		h:        p.h
@@ -36,9 +36,9 @@ fn (mut p FitProbe) set_bounds(r Rect) {
 	p.bounds = r
 }
 
-fn (mut p FitProbe) draw(mut ctx RenderContext) {}
+fn (mut p FitProbe) draw(mut _ RenderContext) {}
 
-fn (mut p FitProbe) handle_event(event &GuiEvent, app &App) bool {
+fn (mut p FitProbe) handle_event(event &GuiEvent, _ &App) bool {
 	if event.typ == .mouse_down && p.bounds.contains(event.mouse_x, event.mouse_y) {
 		p.clicks++
 		return true

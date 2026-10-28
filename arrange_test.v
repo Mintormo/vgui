@@ -34,7 +34,7 @@ pub mut:
 	want_h f32
 }
 
-fn (p &ProbeWidget) measure(ctx &RenderContext) SizeHint {
+fn (p &ProbeWidget) measure(_ &RenderContext) SizeHint {
 	if p.want_h <= 0 {
 		return SizeHint{
 			h_policy: .expanding
@@ -58,11 +58,11 @@ fn (mut p ProbeWidget) set_bounds(r Rect) {
 	p.bounds = r
 }
 
-fn (mut p ProbeWidget) draw(mut ctx RenderContext) {
+fn (mut p ProbeWidget) draw(mut _ RenderContext) {
 	p.draws++
 }
 
-fn (mut p ProbeWidget) handle_event(event &GuiEvent, app &App) bool {
+fn (mut p ProbeWidget) handle_event(_ &GuiEvent, _ &App) bool {
 	p.seen = p.bounds
 	return false
 }

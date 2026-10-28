@@ -225,7 +225,6 @@ const md_image_caption_line_h = f32(20) // height of one caption line
 const md_sb_w = f32(12)
 const md_table_cell_pad_h = f32(8)
 const md_table_cell_pad_v = f32(5)
-const md_table_row_gap = f32(0)
 const md_checkbox_size = f32(13)
 
 // MarkdownView. Состояние:

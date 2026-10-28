@@ -46,7 +46,7 @@ fn (mut p ItemIconProbe) draw(mut ctx RenderContext) {
 	ctx.draw_item_icon(p.image, Rect{60, 10, 16, 16}, 16, Color{0, 0, 0, 255})
 }
 
-fn (mut p ItemIconProbe) handle_event(event &GuiEvent, app &App) bool {
+fn (mut p ItemIconProbe) handle_event(_ &GuiEvent, _ &App) bool {
 	return false
 }
 
