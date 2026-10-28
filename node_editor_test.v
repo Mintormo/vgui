@@ -433,3 +433,36 @@ fn test_node_editor_rename() {
 	assert ne.graph.node_title(1) == 'Source'
 	t.close()
 }
+
+// Связь, отпущенная в пустоте, открывает меню только с подходящими типами; выбранная нода встаёт
+// сокетом под точку отпускания и подключается - одна команда отмены. Со входа - нужен выход.
+fn test_node_editor_link_to_empty_opens_menu() {
+	mut t, mut ne, counter, mut stack := new_node_ui()!
+	// value.Value (float) -> пусто: вход float есть только у mix (out - surface)
+	t.drag(190, 75, 250, 300)
+	assert ne.menu.open
+	assert ne.menu.items == ['mix']
+	t.key(sdl_k_return, 0)
+	assert !ne.menu.open
+	assert ne.graph.nodes().len == 3
+	added := ne.graph.nodes().last()
+	// Вход Factor (строка 1 после выхода) - под точкой: y = 300 - 24 - 22 - 11
+	assert added.type_id == 'mix' && added.x == 250 && added.y == 243
+	l := ne.graph.link_into(added.id, 0) or { panic('нет связи') }
+	assert l.from_node == 1
+	assert counter.count(.link_added) == 1
+	assert stack.undo()
+	assert ne.graph.nodes().len == 2 && ne.graph.links().len == 0
+	// Со свободного входа mix.Clamp (float) -> пусто: выход float только у value
+	t.drag(300, 141, 100, 300)
+	assert ne.menu.items == ['value']
+	t.key(sdl_k_return, 0)
+	v := ne.graph.nodes().last()
+	assert v.type_id == 'value' && v.x == -50 && v.y == 265
+	assert (ne.graph.link_into(2, 2) or { panic('нет связи') }).from_node == v.id
+	// Отцеплённая связь, брошенная мимо, по-прежнему удаляется, меню нет
+	t.drag(300, 141, 100, 350)
+	assert !ne.menu.open
+	assert ne.graph.links().len == 0
+	t.close()
+}

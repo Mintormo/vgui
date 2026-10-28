@@ -121,6 +121,11 @@ mut:
 	items   []string // id типов, прошедших фильтр
 	hover   int
 	scroll  int
+	// Меню открыто связью, отпущенной в пустоте (link_node != 0): в списке - только типы с
+	// подходящим сокетом, новая нода сразу подключается к этой связи
+	link_node     int
+	link_slot     int
+	link_from_out bool // связь тянули с выхода: у новой ноды нужен вход
 }
 
 // NodeEditor - виджет редактора графа. graph - модель (её можно менять и кодом); undo_stack -
@@ -1289,7 +1294,7 @@ fn (mut ne NodeEditor) on_mouse_up(event &GuiEvent, app &App) bool {
 			ne.finish_box(x, y, moved)
 		}
 		.link {
-			ne.finish_link(x, y)
+			ne.finish_link(x, y, app)
 		}
 		.cut {
 			ne.finish_cut()
@@ -1359,11 +1364,47 @@ fn (ne &NodeEditor) link_target_ok(h NodeHit) bool {
 	return true
 }
 
+// menu_link_slot - первый сокет типа t, к которому подключается связь меню (вход, если связь
+// тянули с выхода, иначе выход); -1 - такого нет. Только проверка типов: вето приложения и
+// циклы проверит connect, когда нода уже будет создана.
+fn (ne &NodeEditor) menu_link_slot(t NodeTypeDef) int {
+	n := ne.graph.node(ne.menu.link_node) or { return -1 }
+	nt := ne.type_of(n)
+	if ne.menu.link_from_out {
+		if ne.menu.link_slot >= nt.outputs.len {
+			return -1
+		}
+		from := nt.outputs[ne.menu.link_slot].typ
+		for i, inp in t.inputs {
+			if ne.graph.types_compatible(from, inp.typ) {
+				return i
+			}
+		}
+		return -1
+	}
+	if ne.menu.link_slot >= nt.inputs.len {
+		return -1
+	}
+	to := nt.inputs[ne.menu.link_slot].typ
+	for i, o in t.outputs {
+		if ne.graph.types_compatible(o.typ, to) {
+			return i
+		}
+	}
+	return -1
+}
+
 // finish_link - отпускание тянущейся связи: на подходящий сокет - связь (замена на занятом
-// входе); мимо - отцеплённая связь удаляется. Всё - одна команда отмены.
-fn (mut ne NodeEditor) finish_link(x f32, y f32) {
+// входе); мимо - отцеплённая связь удаляется. Всё - одна команда отмены. Новая (не
+// отцеплённая) связь, отпущенная на пустом холсте, открывает меню добавления с подходящими
+// типами: выбранная нода подключится к ней (add_from_menu).
+fn (mut ne NodeEditor) finish_link(x f32, y f32, app &App) {
 	h := ne.hit_test(x, y)
 	ok := ne.link_target_ok(h)
+	if !ok && ne.link_detached == 0 && h.kind == .none && ne.bounds.contains(x, y) {
+		ne.open_menu(x, y, ne.link_node, ne.link_slot, ne.link_from_out, app)
+		return
+	}
 	detached := ne.graph.link_by_id(ne.link_detached) or { NodeLink{} }
 	// Вернули отцеплённую связь на её же вход - ничего не изменилось
 	if detached.id != 0 && ok && h.node == detached.to_node && h.slot == detached.to_slot {
@@ -1910,6 +1951,12 @@ fn ne_active_window(app &App) ?&Window {
 // Меню живёт в слоте оверлея окна (PROJECT.md, «Оверлеи попапов»): получает события раньше
 // виджетов, поэтому ввод в поле поиска и стрелки обрабатывает само.
 pub fn (mut ne NodeEditor) open_add_menu(x f32, y f32, app &App) {
+	ne.open_menu(x, y, 0, 0, false, app)
+}
+
+// open_menu - меню добавления в точке экрана (x, y); link_node != 0 - меню для связи, отпущенной в
+// пустоте (с выхода, если link_from_out, иначе со входа link_slot ноды link_node).
+fn (mut ne NodeEditor) open_menu(x f32, y f32, link_node int, link_slot int, link_from_out bool, app &App) {
 	ctx_ptr := app.get_active_ctx()
 	if isnil(ctx_ptr) || ne.graph.type_order.len == 0 {
 		return
@@ -1918,11 +1965,14 @@ pub fn (mut ne NodeEditor) open_add_menu(x f32, y f32, app &App) {
 	ne.menu_ctx = ctx
 	wx, wy := ne.to_world(x, y)
 	ne.menu = NodeAddMenu{
-		open:    true
-		x:       x
-		y:       y
-		world_x: wx
-		world_y: wy
+		open:          true
+		x:             x
+		y:             y
+		world_x:       wx
+		world_y:       wy
+		link_node:     link_node
+		link_slot:     link_slot
+		link_from_out: link_from_out
 	}
 	if isnil(ne.menu_ti) {
 		mut ti := text_input(tr('Search...'))
@@ -1981,6 +2031,9 @@ fn (mut ne NodeEditor) filter_menu() {
 			t := ne.graph.types[id] or { continue }
 			if t.category != cat {
 				continue
+			}
+			if ne.menu.link_node != 0 && ne.menu_link_slot(t) < 0 {
+				continue // к связи из меню этот тип не подключить
 			}
 			if query == '' || t.title.to_lower().contains(query) || cat.to_lower().contains(query) {
 				items << id
@@ -2153,13 +2206,36 @@ fn (mut ne NodeEditor) add_from_menu(i int) {
 	}
 	type_id := ne.menu.items[i]
 	t := ne.graph.types[type_id] or { return }
-	wx := ne.menu.world_x - t.width * 0.5
-	wy := ne.menu.world_y - ne_header_h * 0.5
+	menu := ne.menu
+	slot := if menu.link_node != 0 { ne.menu_link_slot(t) } else { -1 }
+	mut wx := menu.world_x - t.width * 0.5
+	mut wy := menu.world_y - ne_header_h * 0.5
+	if slot >= 0 {
+		// Сокет новой ноды - под точкой, где отпустили связь: вход - на левом краю, выход - на
+		// правом; по высоте - середина его строки (выходы - верхние строки, входы - под ними)
+		row := if menu.link_from_out { t.outputs.len + slot } else { slot }
+		wx = if menu.link_from_out { menu.world_x } else { menu.world_x - t.width }
+		wy = menu.world_y - ne_header_h - f32(row) * ne_row_h - ne_row_h * 0.5
+	}
 	ne.close_add_menu()
 	ne.begin_change()
 	id := ne.graph.add_node(type_id, wx, wy) or { return }
 	ne.touch()
 	ne.emit(.node_added, id, 0, NodeLink{})
+	if slot >= 0 {
+		// Связь может не пройти вето приложения или проверку цикла - нода тогда остаётся без неё
+		res := if menu.link_from_out {
+			ne.graph.connect(menu.link_node, menu.link_slot, id, slot)
+		} else {
+			ne.graph.connect(id, slot, menu.link_node, menu.link_slot)
+		}
+		if r := res {
+			if r.replaced.id != 0 {
+				ne.emit(.link_removed, 0, 0, r.replaced)
+			}
+			ne.emit(.link_added, 0, 0, r.link)
+		}
+	}
 	ne.selected = {
 		id: true
 	}
