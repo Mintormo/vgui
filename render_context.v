@@ -58,6 +58,12 @@ pub mut:
 // regions — в dirty.v. Все координаты виджетов — логические (до dpi_scale*ui_scale).
 pub struct RenderContext {
 pub mut:
+	// window - окно, которому принадлежит контекст (ставит create_window); app - приложение, в которое
+	// окно добавлено (add_window / add_dialog; до этого nil). Нужны виджетам, которые сами заводят
+	// окна (плавающие панели DockArea, dock_float.v): указателя на родителя у виджета нет, а
+	// контекст в arrange()/draw() виджет получает всегда.
+	window &Window = unsafe { nil }
+	app    &App    = unsafe { nil }
 	// renderer — SDL_Renderer*; его жизнь контролируется поколениями (is_renderer_alive_gen), текстуры освобождать только при живом рендерере
 	renderer      voidptr
 	theme         Theme

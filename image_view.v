@@ -196,7 +196,9 @@ fn (mut iv ImageView) ensure_texture_loaded(ctx &RenderContext) {
 	if iv.path.len == 0 {
 		return
 	}
-	if iv.texture.is_valid() && iv.tex_path == iv.path {
+	// belongs_to, а не is_valid: виджет мог переехать в другое окно (плавающая панель DockArea,
+	// dock_float.v) - текстурой чужого рендерера рисовать нельзя, её нужно загрузить заново
+	if iv.texture.belongs_to(ctx) && iv.tex_path == iv.path {
 		return
 	}
 	// Старая текстура: destroy() сам проверит, жив ли её рендерер (иначе SDL уже

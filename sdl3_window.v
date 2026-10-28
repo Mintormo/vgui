@@ -222,6 +222,9 @@ pub mut:
 	mouse_y      f32
 	on_close     fn (mut vgui.Window) = unsafe { nil }
 	on_drop_file fn (path string)     = unsafe { nil }
+	// tool_owner - служебное окно (плавающая панель DockArea): не держит приложение открытым и
+	// закрывается вместе с окном-владельцем (App.update_running). nil - обычное окно.
+	tool_owner &Window = unsafe { nil }
 	on_drop_text fn (text string)     = unsafe { nil }
 	hotkeys      HotkeyManager
 	// Фильтры событий окна (add_event_filter): видят каждое событие раньше
@@ -707,6 +710,16 @@ pub fn (mut w Window) fit_to_content(max_w int, max_h int) {
 // (раньше - всегда основного: окно на втором мониторе прыгало на первый).
 pub fn (mut w Window) set_position(x int, y int) {
 	C.SDL_SetWindowPosition(w.sdl_window, x, y)
+}
+
+// position - позиция окна на экране в пикселях (как set_position). На Wayland окно своей позиции
+// не знает - там всегда (0, 0).
+pub fn (w &Window) position() (int, int) {
+	mut x, mut y := 0, 0
+	if w.sdl_window != unsafe { nil } {
+		C.SDL_GetWindowPosition(w.sdl_window, &x, &y)
+	}
+	return x, y
 }
 
 pub fn (mut w Window) center() {

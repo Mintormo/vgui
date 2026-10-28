@@ -151,6 +151,8 @@ pub mut:
 	bar_size f32       = 4            // толщина полосы между частями разбиения
 	min_pane f32       = 60           // меньше этого часть разбиения полосой не сжать
 	tab_pad  f32       = 10           // поле слева и справа внутри вкладки
+	// allow_float - вкладку можно вытащить в отдельное окно (за пределы окна или двойным щелчком)
+	allow_float bool = true
 	// Колбэки
 	on_layout_change fn ()                = unsafe { nil }
 	on_panel_close   fn (&DockPanel) bool = unsafe { nil }
@@ -178,6 +180,17 @@ mut:
 	drag_offset f32
 	// Курсор до входа на полосу (как у Splitter): nil - свой курсор не ставили
 	saved_cursor voidptr
+	// Плавающие панели (dock_float.v). floats - окна главной области; float_owner - у области
+	// плавающего окна: главная область (nil - это главная). app и own_win - приложение и окно
+	// области, их приносит контекст в arrange() (RenderContext.app/window).
+	floats      []&DockFloat
+	float_owner &DockArea = unsafe { nil }
+	app         &App      = unsafe { nil }
+	own_win     &Window   = unsafe { nil }
+	// Перенос в другое окно: область под курсором в чужом окне (nil - нет) и предпросмотр,
+	// который рисует сама та область (ext_drop - его ставит переносящая область)
+	ext_target &DockArea = unsafe { nil }
+	ext_drop   DockDrop
 }
 
 // dock_area создаёт пустую область. Панели - add_panel / dock.
@@ -209,7 +222,7 @@ pub fn (mut da DockArea) add_panel(p &DockPanel) {
 pub fn (mut da DockArea) dock(p &DockPanel, side DockSide, at DockAt) {
 	widget_changed()
 	da.register(p)
-	da.detach_panel(p)
+	da.take_panel(p) // снять с прежнего места - в этой области, главной или плавающем окне
 	da.reset_pointer_state()
 	if isnil(da.root) {
 		da.root = &DockNode{
@@ -241,6 +254,11 @@ pub fn (mut da DockArea) dock(p &DockPanel, side DockSide, at DockAt) {
 // её помнит - show_panel вернёт её примерно на то же место.
 pub fn (mut da DockArea) close_panel(p &DockPanel) {
 	widget_changed()
+	if da.is_floating(p) {
+		// Место в области запомнено, когда панель уплыла (float_panel): show_panel вернёт её туда
+		da.take_from_float(p)
+		return
+	}
 	da.remember_place(p)
 	da.detach_panel(p)
 	da.reset_pointer_state()
@@ -255,6 +273,9 @@ pub fn (mut da DockArea) show_panel(p &DockPanel) {
 		g.active = dock_panel_index(g.panels, p)
 		return
 	}
+	if da.show_floating(p) {
+		return // плавающая: вкладка активна, окно поднято (dock_float.v)
+	}
 	if near := da.open_panel_by_id(p.restore_near) {
 		da.dock(p, p.restore_side, target: near, size: p.restore_size)
 	} else {
@@ -262,13 +283,20 @@ pub fn (mut da DockArea) show_panel(p &DockPanel) {
 	}
 }
 
-// is_open - панель сейчас в дереве (видна вкладкой).
+// is_open - панель сейчас открыта: вкладкой в области или в плавающем окне.
 pub fn (da &DockArea) is_open(p &DockPanel) bool {
-	return da.group_of(p) != none
+	return da.group_of(p) != none || da.is_floating(p)
 }
 
 // is_active - панель открыта и её вкладка активна в своей группе (её содержимое видно).
 pub fn (da &DockArea) is_active(p &DockPanel) bool {
+	// Главная область спрашивает плавающее окно; область окна - только своё дерево (иначе она
+	// нашла бы через главную саму себя и ушла в бесконечную рекурсию)
+	if isnil(da.float_owner) {
+		if f := da.float_of(p) {
+			return f.area.is_active(p)
+		}
+	}
 	g := da.group_of(p) or { return false }
 	return g.active == dock_panel_index(g.panels, p)
 }
@@ -295,11 +323,14 @@ pub fn (da &DockArea) all_panels() []&DockPanel {
 // Пример: h0.250([*files outline],v0.700([*editor],[*console]))
 // Пустая область - пустая строка.
 pub fn (da &DockArea) save_layout() string {
-	if isnil(da.root) {
-		return ''
-	}
 	mut sb := []string{}
-	dock_save_node(da.root, mut sb)
+	if !isnil(da.root) {
+		dock_save_node(da.root, mut sb)
+	}
+	// Плавающие окна - хвостом `+F(x,y,w,h)раскладка` (dock_float.v; только у главной области)
+	if isnil(da.float_owner) {
+		sb << da.save_floats()
+	}
 	return sb.join('')
 }
 
@@ -309,23 +340,26 @@ pub fn (da &DockArea) save_layout() string {
 // раскладка при этом не меняется.
 pub fn (mut da DockArea) load_layout(s string) ! {
 	widget_changed()
-	text := s.trim_space()
-	if text == '' {
-		da.root = unsafe { nil }
-		da.reset_pointer_state()
-		return
+	// Хвост плавающих окон (`+F(...)`, dock_float.v) отделяется до разбора: ошибка в нём или в
+	// главной части - error до каких-либо изменений
+	text, specs := dock_split_float_specs(s.trim_space())!
+	mut root := unsafe { &DockNode(nil) }
+	if text != '' {
+		mut parser := DockLayoutParser{
+			src:  text
+			area: unsafe { &da }
+		}
+		root = parser.parse_node()!
+		parser.skip_spaces()
+		if parser.pos < parser.src.len {
+			return error('dock layout: unexpected `${parser.src[parser.pos..]}` at ${parser.pos}')
+		}
 	}
-	mut parser := DockLayoutParser{
-		src:  text
-		area: unsafe { &da }
-	}
-	root := parser.parse_node()!
-	parser.skip_spaces()
-	if parser.pos < parser.src.len {
-		return error('dock layout: unexpected `${parser.src[parser.pos..]}` at ${parser.pos}')
-	}
-	da.root = dock_prune(root)
+	da.root = if isnil(root) { root } else { dock_prune(root) }
 	da.reset_pointer_state()
+	if isnil(da.float_owner) {
+		da.load_floats(specs)
+	}
 }
 
 // save_layout_file записывает раскладку (строку save_layout) в файл path; недостающие папки
@@ -580,6 +614,9 @@ fn (da &DockArea) fire_change() {
 // arrange раскладывает дерево в bounds области и выдаёт bounds содержимому активных панелей групп
 // (только им: неактивные вкладки не рисуются, их bounds устаревают - см. hit_children).
 pub fn (mut da DockArea) arrange(mut ctx RenderContext) {
+	// Окно и приложение области (для плавающих окон, dock_float.v) - раньше раннего выхода:
+	// пустой области тоже нужно знать, куда вернуть панели
+	da.learn_context(ctx)
 	if !da.visible {
 		return
 	}
@@ -750,11 +787,21 @@ fn dock_tab_at(g &DockNode, x f32, y f32) int {
 // Сброс, который ничего не изменил бы (панель - единственная в своей группе и её же делим или
 // кладём в неё), даёт .none: предпросмотр не рисуется, отпускание ничего не делает.
 fn (da &DockArea) compute_drop(p &DockPanel, x f32, y f32) DockDrop {
-	if isnil(da.root) || !da.bounds.contains(x, y) {
+	if !da.bounds.contains(x, y) {
 		return DockDrop{}
 	}
-	src := da.group_of(p) or { return DockDrop{} }
-	alone := src.panels.len == 1
+	// Пустая область (все панели уплыли в плавающие окна или закрыты) - вся она место сброса:
+	// панель станет первой группой
+	if isnil(da.root) || (da.root.kind == .group && da.root.panels.len == 0) {
+		return DockDrop{
+			kind:    .tab
+			preview: da.bounds
+		}
+	}
+	// Панель из другой области (перенос из другого окна, dock_float.v) здесь не открыта: группы-
+	// источника нет, и любой сброс что-то меняет
+	src := da.group_of(p) or { unsafe { &DockNode(nil) } }
+	alone := !isnil(src) && src.panels.len == 1
 	g := da.group_at(x, y)
 	// 1. полоса вкладок
 	if !isnil(g) && g.strip.contains(x, y) {
@@ -874,6 +921,12 @@ fn dock_side_part(r Rect, side DockSide, frac f32) Rect {
 // apply_drop переносит панель p на место d. Перед вставкой панель снимается со старого места -
 // группа-цель при этом не схлопнется: такие сбросы compute_drop отдаёт как .none.
 fn (mut da DockArea) apply_drop(p &DockPanel, d DockDrop) {
+	if d.kind == .tab && isnil(d.group) {
+		// Сброс в пустую область (compute_drop): панель - первой группой
+		da.dock(p, .center)
+		da.fire_change()
+		return
+	}
 	match d.kind {
 		.none {
 			return
@@ -909,7 +962,11 @@ fn (mut da DockArea) apply_drop(p &DockPanel, d DockDrop) {
 // draw: группы (полоса вкладок, содержимое активной панели), затем полосы разбиений и поверх всего
 // - предпросмотр сброса и «призрак» переносимой вкладки у курсора.
 pub fn (mut da DockArea) draw(mut ctx RenderContext) {
-	if !da.visible || isnil(da.root) {
+	if !da.visible {
+		return
+	}
+	if isnil(da.root) {
+		da.draw_ext_drop(mut ctx) // в пустую область тоже можно бросить панель из другого окна
 		return
 	}
 	if !ctx.is_in_clip(da.bounds) {
@@ -923,6 +980,7 @@ pub fn (mut da DockArea) draw(mut ctx RenderContext) {
 	if da.tab_dragging && en {
 		da.draw_drag(mut ctx)
 	}
+	da.draw_ext_drop(mut ctx)
 }
 
 // draw_group - полоса вкладок группы, линия под ней и содержимое активной панели в его клипе.
@@ -1060,7 +1118,13 @@ pub fn (mut da DockArea) handle_event(event &GuiEvent, app &App) bool {
 		da.reset_pointer_state()
 		return false
 	}
+	if isnil(da.app) {
+		da.app = unsafe { app }
+	}
 	match event.typ {
+		.mouse_dbl_click {
+			return da.on_dbl_click(event.mouse_x, event.mouse_y)
+		}
 		.mouse_leave {
 			// курсор ушёл с области (event_route.v); идущий жест ведёт захват - не сбрасываем
 			if isnil(da.resize_node) && da.press_tab < 0 {
@@ -1108,6 +1172,12 @@ fn (mut da DockArea) on_mouse_move(x f32, y f32) bool {
 			da.drag_y = y
 			p := da.press_group.panels[da.press_tab]
 			da.drop = da.compute_drop(p, x, y)
+			// Вне своей области - цель может быть в другом окне (главном или плавающем)
+			if da.bounds.contains(x, y) {
+				da.set_ext_target(unsafe { nil }, DockDrop{})
+			} else {
+				da.track_ext_target(p, x, y)
+			}
 		}
 		return true
 	}
@@ -1194,6 +1264,13 @@ fn (mut da DockArea) on_mouse_up(x f32, y f32) bool {
 		}
 	} else if da.tab_dragging {
 		drop := da.compute_drop(p, x, y)
+		// Вне своей области: в другую область (другое окно) или в новое плавающее окно
+		// (dock_float.v); финиш жеста там же
+		if !da.bounds.contains(x, y) {
+			da.release_outside(p, x, y)
+			return true
+		}
+		da.set_ext_target(unsafe { nil }, DockDrop{})
 		da.reset_pointer_state()
 		da.apply_drop(p, drop)
 		return true

@@ -118,7 +118,8 @@ fn (mut ib ImageBackground) ensure_texture_loaded(ctx &RenderContext) {
 		return
 	}
 	// A loaded texture for the current source — nothing to do.
-	if ib.texture.is_valid() && ib.tex_path == ib.path && ib.tex_path != '\x00reload' {
+	// belongs_to, а не is_valid: виджет мог переехать в окно с другим рендерером (dock_float.v)
+	if ib.texture.belongs_to(ctx) && ib.tex_path == ib.path && ib.tex_path != '\x00reload' {
 		return
 	}
 	ib.texture.destroy()

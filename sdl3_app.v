@@ -163,6 +163,10 @@ fn (mut app App) drain_posted() bool {
 // не задан, set_theme не вызывался) получает тему приложения.
 pub fn (mut app App) add_window(w &Window) {
 	mut win := unsafe { w }
+	// Окно на своём месте - контекст узнаёт окно и приложение (RenderContext.window/app; в
+	// create_window адрес не сохраняется: create_dialog копирует окно по значению)
+	win.ctx.window = win
+	win.ctx.app = app
 	if !win.theme_explicit {
 		win.apply_theme(app.config.theme)
 	}
@@ -176,6 +180,8 @@ pub fn (mut app App) add_window(w &Window) {
 // получает тему приложения.
 pub fn (mut app App) add_dialog(d &Dialog) {
 	mut dlg := unsafe { d }
+	dlg.win.ctx.window = &dlg.win // окно - поле диалога в куче: адрес стабилен
+	dlg.win.ctx.app = app
 	if !dlg.win.theme_explicit {
 		dlg.win.apply_theme(app.config.theme)
 	}
@@ -334,11 +340,19 @@ pub fn (mut app App) pump_events() bool {
 // With a tray, the app stays alive even when all windows are hidden
 // (hide-to-tray). Quitting is then explicit, via app.quit().
 pub fn (mut app App) update_running() {
+	// Служебные окна (плавающие панели, tool_owner) закрываются вместе с окном-владельцем
+	for mut w in app.windows {
+		if !isnil(w.tool_owner) && w.open && !w.tool_owner.open {
+			w.close()
+		}
+	}
 	if app.keep_alive {
 		return
 	}
+	// Приложение держат только обычные окна: плавающая панель, оставшаяся после закрытия
+	// главного окна, не должна держать процесс
 	for w in app.windows {
-		if w.open {
+		if w.open && isnil(w.tool_owner) {
 			return
 		}
 	}
