@@ -400,3 +400,36 @@ fn test_node_editor_clipboard() {
 	assert stack.count() == before
 	t.close()
 }
+
+// Переименование: двойной щелчок по шапке и F2 - поле поверх заголовка; Enter - свой заголовок
+// (одна команда отмены, событие node_renamed, нода не сдвинулась); заголовок типа или пусто -
+// свой заголовок снимается; Esc - отмена.
+fn test_node_editor_rename() {
+	mut t, mut ne, counter, mut stack := new_node_ui()!
+	before := stack.count()
+	t.dbl_click(100, 50)
+	assert ne.editing && ne.edit_title
+	assert stack.count() == before, 'двойной щелчок не сдвинул ноду'
+	t.key(sdl_k_a, sdl_kmod_ctrl)
+	t.type_text('Source')
+	t.key(sdl_k_return, 0)
+	assert !ne.editing
+	assert ne.graph.node_title(1) == 'Source'
+	assert counter.count(.node_renamed) == 1
+	assert stack.count() == before + 1
+	// F2 по активной ноде, Esc - без изменений
+	t.key(sdl_k_f2, 0)
+	assert ne.editing && ne.edit_title && ne.edit_node == 1
+	t.type_text('zzz')
+	t.key(sdl_k_escape, 0)
+	assert ne.graph.node_title(1) == 'Source'
+	// Ввести заголовок типа - свой снимается
+	t.key(sdl_k_f2, 0)
+	t.key(sdl_k_a, sdl_kmod_ctrl)
+	t.type_text('Value')
+	t.key(sdl_k_return, 0)
+	assert (ne.graph.node(1) or { panic('n') }).title == ''
+	assert stack.undo()
+	assert ne.graph.node_title(1) == 'Source'
+	t.close()
+}

@@ -66,7 +66,8 @@ pub enum NodeEventKind {
 	collapsed
 	selection_changed
 	graph_restored // отмена/повтор вернули граф к снимку
-	node_resized   // пользователь изменил ширину ноды, потянув край
+	node_resized   // пользователь изменил размер ноды, потянув край или угол
+	node_renamed   // пользователь задал ноде свой заголовок (F2 / двойной щелчок по шапке)
 }
 
 // NodeEvent - событие редактора: вид, нода и слот (вход), связь (для link_*).
@@ -176,10 +177,11 @@ mut:
 	num_slot  int
 	num_start f64
 	// Ввод числа с клавиатуры
-	editing   bool
-	edit_ti   &TextInput = unsafe { nil }
-	edit_node int
-	edit_slot int
+	editing    bool
+	edit_ti    &TextInput = unsafe { nil }
+	edit_node  int
+	edit_slot  int
+	edit_title bool // поле правит заголовок ноды (F2), а не число входа edit_slot
 	// Меню добавления ноды и его поле поиска
 	menu        NodeAddMenu
 	menu_ti     &TextInput     = unsafe { nil }
@@ -654,7 +656,7 @@ pub fn (mut ne NodeEditor) draw(mut ctx RenderContext) {
 	if ne.editing && !isnil(ne.edit_ti) {
 		if n := ne.graph.node(ne.edit_node) {
 			mut ti := ne.edit_ti
-			r := ne.screen_rect(ne.field_rect(n, ne.edit_slot))
+			r := ne.screen_rect(ne.edit_rect(n))
 			ti.bounds = Rect{r.x, r.y, max_f32(r.w, 60), max_f32(r.h, ctx.control_h() * 0.8)}
 			ti.draw(mut ctx)
 		}
@@ -764,7 +766,8 @@ fn (ne &NodeEditor) draw_node(n &GraphNode, mut ctx RenderContext) {
 	head_text := ne_header_text(ctx, head)
 	ne.draw_collapse_arrow(n, head_text, mut ctx)
 	fpx := ne.font_px(ctx)
-	if fpx > 0 {
+	renaming := ne.editing && ne.edit_title && ne.edit_node == n.id // поверх - поле ввода
+	if fpx > 0 && !renaming {
 		font := ctx.get_font(.bold, fpx)
 		fh := ctx.font_height_of(font)
 		tx := hr.x + 22 * ne.zoom
@@ -847,7 +850,7 @@ fn (ne &NodeEditor) draw_rows(n &GraphNode, t NodeTypeDef, fpx int, mut ctx Rend
 // draw_field - поле значения входа: число (подпись слева, значение справа), флажок, цвет
 // (образец), выбор (текст варианта и стрелка).
 fn (ne &NodeEditor) draw_field(n &GraphNode, slot int, def NodeSocketDef, r Rect, font voidptr, mut ctx RenderContext) {
-	if ne.editing && ne.edit_node == n.id && ne.edit_slot == slot {
+	if ne.editing && !ne.edit_title && ne.edit_node == n.id && ne.edit_slot == slot {
 		return // поверх - поле ввода
 	}
 	v := n.values[slot]
@@ -1042,6 +1045,9 @@ pub fn (mut ne NodeEditor) handle_event(event &GuiEvent, app &App) bool {
 		.mouse_up {
 			return ne.on_mouse_up(event, app)
 		}
+		.mouse_dbl_click {
+			return ne.on_dbl_click(event, app)
+		}
 		.mouse_wheel {
 			ctx := app.get_active_ctx()
 			mx := if isnil(ctx) { event.mouse_x } else { ctx.mouse_x }
@@ -1079,6 +1085,26 @@ fn (mut ne NodeEditor) focus_self(app &App) {
 	mut ctx := unsafe { &RenderContext(ctx_ptr) }
 	ctx.focus.focus_node_editor(&ne, ne.focus_group)
 	ne.focused = true
+}
+
+// on_dbl_click - двойной щелчок по шапке - переименовать ноду. Приходит добавкой сразу после
+// mouse_down второго щелчка (PROJECT.md, «Двойной клик»): тот уже начал перемещение ноды -
+// жест закрывается без правки (команды отмены не будет), и открывается поле заголовка.
+// Треугольник сворачивания не трогается: второй щелчок по нему уже снова свернул/развернул.
+fn (mut ne NodeEditor) on_dbl_click(event &GuiEvent, app &App) bool {
+	if event.mouse_btn != .left || ne.editing {
+		return false
+	}
+	hit := ne.hit_test(event.mouse_x, event.mouse_y)
+	if hit.kind != .header {
+		return false
+	}
+	if ne.drag == .move {
+		ne.drag = .none
+		ne.commit_change('Move nodes')
+	}
+	ne.rename_node(hit.node, app)
+	return true
 }
 
 fn (mut ne NodeEditor) on_mouse_down(event &GuiEvent, app &App) bool {
@@ -1503,6 +1529,10 @@ fn (mut ne NodeEditor) on_key(event &GuiEvent, app &App) bool {
 		ne.frame_all()
 		return true
 	}
+	if k == sdl_k_f2 && ne.active != 0 && ne.active in ne.selected {
+		ne.rename_node(ne.active, app)
+		return true
+	}
 	if event.ctrl() && ctrl_letter(event, `a`, 4) {
 		ne.selected = map[int]bool{}
 		for n in ne.graph.nodes {
@@ -1718,20 +1748,45 @@ fn (mut ne NodeEditor) drag_number(x f32) {
 fn (mut ne NodeEditor) start_text_edit(node int, slot int, app &App) {
 	n := ne.graph.node(node) or { return }
 	t := ne.type_of(n)
+	ne.open_edit(node, ne_format_number(n.values[slot].number, t.inputs[slot].field.digits), app)
+	ne.edit_slot = slot
+	ne.edit_title = false
+}
+
+// rename_node - ввод своего заголовка ноды поверх шапки (F2 по активной ноде, двойной щелчок по
+// шапке): Enter или щелчок мимо - применить, Esc - отменить. Пустой текст или заголовок типа -
+// вернуть заголовок типа (set_node_title(id, '')).
+pub fn (mut ne NodeEditor) rename_node(id int, app &App) {
+	_ := ne.graph.node(id) or { return }
+	ne.open_edit(id, ne.graph.node_title(id), app)
+	ne.edit_title = true
+}
+
+// edit_rect - где на холсте стоит поле ввода: поверх поля числа или поверх заголовка в шапке
+// (правее треугольника сворачивания).
+fn (ne &NodeEditor) edit_rect(n &GraphNode) Rect {
+	if ne.edit_title {
+		return Rect{n.x + 20, n.y + 2, ne.graph.width_of(n) - 24, ne_header_h - 4}
+	}
+	return ne.field_rect(n, ne.edit_slot)
+}
+
+// open_edit - показать внутреннее поле ввода с текстом text (выделен целиком) для ноды node и
+// отдать ему фокус. Общий шаг ввода числа и заголовка.
+fn (mut ne NodeEditor) open_edit(node int, text string, app &App) {
 	if isnil(ne.edit_ti) {
 		mut ti := text_input('')
 		ti.pad = 3
 		ne.edit_ti = ti
 	}
 	mut ti := ne.edit_ti
-	ti.set_text(ne_format_number(n.values[slot].number, t.inputs[slot].field.digits))
+	ti.set_text(text)
 	ti.sel_a = 0
 	ti.sel_b = ti.buf.len
 	ti.cur = ti.buf.len
 	ti.focus_group = ne.focus_group
 	ne.editing = true
 	ne.edit_node = node
-	ne.edit_slot = slot
 	ctx_ptr := app.get_active_ctx()
 	if !isnil(ctx_ptr) {
 		mut ctx := unsafe { &RenderContext(ctx_ptr) }
@@ -1740,9 +1795,14 @@ fn (mut ne NodeEditor) start_text_edit(node int, slot int, app &App) {
 	ti.focused = true
 }
 
-// commit_text_edit - применить введённое число (нечисловой текст - правки нет).
+// commit_text_edit - применить введённое: заголовок (commit_rename) или число (нечисловой текст -
+// правки нет).
 fn (mut ne NodeEditor) commit_text_edit() {
 	if !ne.editing {
+		return
+	}
+	if ne.edit_title {
+		ne.commit_rename()
 		return
 	}
 	text := ne.edit_ti.get_text().trim_space().replace(',', '.')
@@ -1753,6 +1813,26 @@ fn (mut ne NodeEditor) commit_text_edit() {
 	}
 	v := ne.graph.value(node, slot) or { return }
 	ne.set_field(node, slot, NodeValue{ ...v, number: text.f64() }, 'Change value')
+}
+
+// commit_rename - свой заголовок ноды из поля ввода. Совпал с заголовком типа или пуст - свой
+// заголовок снимается (иначе переименование «в то же самое» навсегда отвязало бы ноду от
+// заголовка типа). Не изменился - команды отмены и события нет.
+fn (mut ne NodeEditor) commit_rename() {
+	text := ne.edit_ti.get_text().trim_space()
+	id := ne.edit_node
+	ne.cancel_text_edit()
+	n := ne.graph.node(id) or { return }
+	t := ne.type_of(n)
+	title := if text == t.title { '' } else { text }
+	if title == n.title {
+		return
+	}
+	ne.begin_change()
+	ne.graph.set_node_title(id, title)
+	ne.touch()
+	ne.emit(.node_renamed, id, 0, NodeLink{})
+	ne.commit_change('Rename node')
 }
 
 fn (mut ne NodeEditor) cancel_text_edit() {
