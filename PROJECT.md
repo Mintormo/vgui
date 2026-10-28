@@ -1266,6 +1266,21 @@ collapsed, values, title, data, width, height), `value`/`set_value`, `links()`, 
 как у полос DockArea). Клавиши (фокус - `FocusKind.node_editor`):
 Delete/X, Shift+D, Ctrl+A, H, Home, Shift+A, Esc, Ctrl+C/X/V - буквы через `ctrl_letter` (раскладка).
 
+**Фреймы** (`node_frame.v`: модель и вид в одном файле). `NodeFrame{id, title, x, y, w, h, color}` в
+графе (`add_frame`, `remove_frame`, `set_frame_rect`, `move_frame`, `set_frame_title`,
+`set_frame_color`, `frame_nodes`), своя нумерация id, в JSON (`frames`; в старых сохранениях нет -
+пусто) и в снимках отмены. **Принадлежность нод фрейму не хранится**: «внутри» - нода, чья карточка
+целиком в рамке (`frame_nodes`); нечего поддерживать при перемещении, удалении и вставке нод, и
+пользователь видит ровно то, что поедет. Ноды для перемещения запоминаются **в момент нажатия** на
+шапку - фрейм, наехавший по дороге на чужие ноды, их не захватывает. Рисуются под связями и нодами,
+попадание по ним - после всех нод (`frame_hit`): край/угол (`edge_mask` - та же функция, что у нод),
+шапка; **пустое место внутри фрейма - холст** (рамка выделения, меню). Выбор фрейма
+(`selected_frame`) и выбор нод взаимоисключающие. Ctrl+J - обвести выделенные ноды, F2 / двойной
+щелчок по шапке - переименовать (то же поле `edit_ti`, `edit_frame`), Delete - удалить фрейм.
+События `frame_added/removed/changed` (в `NodeEvent.node` - id фрейма). Цвет - свой (рисуется с его
+альфой) или `ne_frame_bg` темы / CSS `frame-background`, заголовок - `ne_frame_text` / `frame-color`.
+В буфер обмена фреймы не попадают (копируются ноды).
+
 **Подсказки сокетов** - `tooltip_at` (интерфейс `TipAtPoint`, «Подсказки»): имя и тип; у входа -
 значение поля или `<- нода: выход`, у выхода - число связей. Своё (например, вычисленное значение) -
 колбэк `socket_tooltip(node, slot, out)`, '' - текст по умолчанию.
@@ -1321,16 +1336,18 @@ x, y)`). В системный буфер кладётся **JSON того же 
 
 **События** - один колбэк `on_event(NodeEvent{kind, node, slot, link})`: node_added/removed,
 nodes_moved, link_added/removed (замена связи - removed + added), value_changed, collapsed,
-selection_changed, graph_restored, node_resized, node_renamed (новые виды - только в конец enum).
+selection_changed, graph_restored, node_resized, node_renamed, frame_added/removed/changed (новые
+виды - только в конец enum).
 
 **Вид из темы и CSS** («Стили CSS»). Все цвета редактора - поля темы `ne_*` с запасными значениями
 `eff_ne_*()` (`theme.v`; a = 0 / 0 - «не задано»): `ne_bg`, `ne_grid`, `ne_grid_major`, `ne_node_bg`,
 `ne_node_border`, `ne_node_text`, `ne_header_bg`, `ne_header_text`, `ne_selected`, `ne_active`,
-`ne_field_bg`, `ne_field_fill`, `ne_socket_outline`, числа `ne_node_radius`, `ne_link_width`. В CSS -
+`ne_field_bg`, `ne_field_fill`, `ne_socket_outline`, `ne_frame_bg`, `ne_frame_text`, числа `ne_node_radius`, `ne_link_width`. В CSS -
 селектор `nodes` (с `#id`, классами и предками, как у любого виджета): `background`, `grid-color`,
 `major-grid-color`, `node-background`, `border-color`, `:selected` `border-color`,
 `active-border-color`, `color`, `header-background`, `header-color`, `field-background`,
-`field-fill-color`, `socket-outline-color`, `border-radius`, `link-width`. **Цвет шапки - у типа**
+`field-fill-color`, `socket-outline-color`, `frame-background`, `frame-color`, `border-radius`,
+`link-width`. **Цвет шапки - у типа**
 (`NodeTypeDef.color`, смысл ноды - решение приложения) и сильнее темы; `ne_header_bg` - для типов без
 своего цвета. Поэтому `NodeTypeDef.color` по умолчанию `Color{0, 0, 0, 0}` **явно**: у `Color` альфа по
 умолчанию 255, и пустой литерал дал бы чёрную шапку. Цвета сокетов - у типов сокетов

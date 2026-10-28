@@ -549,3 +549,53 @@ fn test_node_editor_socket_tooltips() {
 	assert ne.tooltip_at(300, 97) == 'Factor (float) = 0.500', "'' - подсказка по умолчанию"
 	t.close()
 }
+
+// Фреймы в редакторе: Ctrl+J обводит выделенные ноды; шапка тянет фрейм с нодами внутри (одна
+// команда); край меняет размер; пустое место внутри - холст (рамка выделения); двойной щелчок по
+// шапке - переименовать; Delete удаляет фрейм, ноды остаются.
+fn test_node_editor_frames() {
+	mut t, mut ne, counter, mut stack := new_node_ui()!
+	t.click(500, 350)
+	t.key(sdl_k_a, sdl_kmod_ctrl)
+	t.key(`j`, sdl_kmod_ctrl)
+	assert counter.count(.frame_added) == 1
+	frames := ne.graph.frames()
+	assert frames.len == 1
+	f := frames[0]
+	// Ноды 40..450 x 40..158, отступ 20, шапка 26: (20, -6) 450 x 184
+	assert f.x == 20 && f.y == -6 && f.w == 450 && f.h == 184
+	assert ne.selected_frame == f.id && ne.selected_nodes().len == 0
+	assert ne.hit_test(250, 5).kind == .frame_header
+	assert ne.hit_test(250, 150).kind == .none, 'внутри фрейма - холст'
+	// Тянуть за шапку: фрейм и обе ноды на (+20, +20)
+	t.drag(250, 5, 270, 25)
+	assert f.x == 40 && f.y == 14
+	assert (ne.graph.node(1) or { panic('1') }).x == 60
+	assert (ne.graph.node(2) or { panic('2') }).y == 60
+	assert counter.count(.frame_changed) == 1
+	assert stack.undo()
+	g1 := ne.graph.frame(f.id) or { panic('f') }
+	assert g1.x == 20 && (ne.graph.node(1) or { panic('1') }).x == 40
+	// Правый край (470) - на 30 правее
+	t.drag(470, 100, 500, 100)
+	assert (ne.graph.frame(f.id) or { panic('f') }).w == 480
+	// Рамка выделения изнутри фрейма выделяет ноды
+	t.drag(250, 150, 30, 30)
+	assert ne.selected_nodes() == [1]
+	assert ne.selected_frame == 0
+	// Переименование двойным щелчком по шапке
+	t.dbl_click(250, 5)
+	assert ne.editing && ne.edit_frame
+	t.key(sdl_k_a, sdl_kmod_ctrl)
+	t.type_text('Group')
+	t.key(sdl_k_return, 0)
+	assert (ne.graph.frame(f.id) or { panic('f') }).title == 'Group'
+	// Delete по выбранному фрейму - ноды остаются
+	t.click(250, 5)
+	t.key(sdl_k_delete, 0)
+	assert ne.graph.frames().len == 0 && ne.graph.nodes().len == 2
+	assert counter.count(.frame_removed) == 1
+	assert stack.undo()
+	assert ne.graph.frames().len == 1
+	t.close()
+}

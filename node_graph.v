@@ -160,8 +160,10 @@ mut:
 	type_order   []string
 	nodes        []&GraphNode
 	links        []NodeLink
+	frames       []&NodeFrame // рамки-группы (node_frame.v), в порядке отрисовки
 	next_node    int = 1
 	next_link    int = 1
+	next_frame   int = 1
 }
 
 // node_graph - пустой граф без типов.
@@ -430,6 +432,7 @@ pub fn (mut g NodeGraph) clear() {
 	widget_changed()
 	g.nodes = []&GraphNode{}
 	g.links = []NodeLink{}
+	g.frames = []&NodeFrame{}
 }
 
 // ─── Значения ──────────────────────────────────────────
@@ -694,13 +697,15 @@ pub fn (g &NodeGraph) eval_order(targets ...int) ![]int {
 
 // NodeGraphState - копия содержимого графа (ноды, связи, счётчики id) для отмены.
 struct NodeGraphState {
-	nodes     []GraphNode
-	links     []NodeLink
-	next_node int
-	next_link int
+	nodes      []GraphNode
+	links      []NodeLink
+	frames     []NodeFrame
+	next_node  int
+	next_link  int
+	next_frame int
 }
 
-// snapshot - глубокая копия нод и связей (типы не копируются: они не меняются правками).
+// snapshot - глубокая копия нод, связей и фреймов (типы не копируются: они не меняются правками).
 fn (g &NodeGraph) snapshot() NodeGraphState {
 	mut nodes := []GraphNode{cap: g.nodes.len}
 	for n in g.nodes {
@@ -709,10 +714,12 @@ fn (g &NodeGraph) snapshot() NodeGraphState {
 		nodes << c
 	}
 	return NodeGraphState{
-		nodes:     nodes
-		links:     g.links.clone()
-		next_node: g.next_node
-		next_link: g.next_link
+		nodes:      nodes
+		links:      g.links.clone()
+		frames:     g.frames.map(*it)
+		next_node:  g.next_node
+		next_link:  g.next_link
+		next_frame: g.next_frame
 	}
 }
 
@@ -730,8 +737,13 @@ fn (mut g NodeGraph) restore(s NodeGraphState) {
 	}
 	g.nodes = nodes
 	g.links = s.links.clone()
+	// Фреймы - тоже заново (снимок не делит с графом ни одной записи)
+	g.frames = s.frames.map(&NodeFrame{
+		...it
+	})
 	g.next_node = s.next_node
 	g.next_link = s.next_link
+	g.next_frame = s.next_frame
 }
 
 // ─── JSON ──────────────────────────────────────────────
@@ -781,6 +793,7 @@ mut:
 	version int
 	nodes   []GraphNodeJson
 	links   []NodeLinkJson
+	frames  []NodeFrameJson // появились позже: в старых сохранениях их нет - пусто
 }
 
 // to_json - граф строкой JSON.
@@ -793,6 +806,9 @@ pub fn (g &NodeGraph) to_json() string {
 	}
 	for l in g.links {
 		doc.links << link_to_json(l)
+	}
+	for fr in g.frames {
+		doc.frames << frame_to_json(fr)
 	}
 	return json2.encode(doc)
 }
@@ -992,6 +1008,7 @@ pub fn (mut g NodeGraph) load_json(text string) ! {
 	}
 	g.can_connect = saved_veto
 	g.next_link = max_link + 1
+	g.load_frames_json(doc.frames)
 	if g.nodes.len == 0 && doc.nodes.len > 0 {
 		// Ни одной известной ноды - вероятно, не тот граф: вернуть прежнее
 		g.restore(before)

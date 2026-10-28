@@ -349,3 +349,33 @@ fn test_node_graph_copy_paste() {
 	}
 	assert g.nodes().len == count
 }
+
+// Фреймы: внутри - ноды целиком в рамке; move_frame двигает их вместе с фреймом; JSON и
+// снимки отмены хранят фреймы; старое сохранение без frames - без фреймов.
+fn test_node_graph_frames() {
+	mut g := sample_graph()
+	a := g.add_node('value', 10, 40)! // 150 x 52
+	b := g.add_node('value', 300, 40)!
+	f := g.add_frame('Inputs', 0, 0, 200, 120)
+	assert g.frame_nodes(f) == [a], 'b вне рамки'
+	assert g.move_frame(f, 5, 7)
+	fr := g.frame(f) or { panic('f') }
+	assert fr.x == 5 && fr.y == 7
+	na := g.node(a) or { panic('a') }
+	nb := g.node(b) or { panic('b') }
+	assert na.x == 15 && na.y == 47 && nb.x == 300
+	g.set_frame_color(f, Color{200, 100, 50, 80})
+	snap := g.snapshot()
+	g.remove_frame(f)
+	assert g.frames().len == 0
+	g.restore(snap)
+	assert (g.frame(f) or { panic('f') }).title == 'Inputs'
+	mut h := sample_graph()
+	h.load_json(g.to_json())!
+	hf := h.frame(f) or { panic('json') }
+	assert hf.w == 200 && hf.color == Color{200, 100, 50, 80}
+	assert h.add_frame('x', 0, 0, 1, 1) > f, 'новые id - после загруженных'
+	assert (h.frame(f + 1) or { panic('min') }).w == ne_frame_min_w
+	h.load_json('{"version":1,"nodes":[{"id":1,"type":"mix","x":0,"y":0,"collapsed":false,"values":[]}],"links":[]}')!
+	assert h.frames().len == 0
+}

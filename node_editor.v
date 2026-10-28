@@ -70,6 +70,9 @@ pub enum NodeEventKind {
 	graph_restored // отмена/повтор вернули граф к снимку
 	node_resized   // пользователь изменил размер ноды, потянув край или угол
 	node_renamed   // пользователь задал ноде свой заголовок (F2 / двойной щелчок по шапке)
+	frame_added    // фрейм создан (Ctrl+J); NodeEvent.node - id фрейма
+	frame_removed  // фрейм удалён (ноды внутри остаются)
+	frame_changed  // фрейм перемещён, изменён размер или заголовок
 }
 
 // NodeEvent - событие редактора: вид, нода и слот (вход), связь (для link_*).
@@ -91,6 +94,10 @@ enum NodeHitKind {
 	header
 	body
 	edge // край или угол ноды (NodeHit.slot - маска ne_edge_*): тянуть - менять размер
+	// Фреймы (node_frame.v; NodeHit.node - id фрейма). Пустое место внутри фрейма - .none
+	// (как холст: рамка выделения, меню добавления)
+	frame_header // шапка фрейма: тянуть - двигать с нодами внутри
+	frame_edge   // край или угол фрейма (slot - маска ne_edge_*)
 }
 
 struct NodeHit {
@@ -109,6 +116,8 @@ enum NodeDrag {
 	cut
 	number
 	resize
+	move_frame
+	resize_frame
 }
 
 // NodeAddMenu - состояние меню добавления ноды: где открыто (экран), куда ставить ноду (холст),
@@ -183,6 +192,11 @@ mut:
 	cut_pts       []Vec2
 	// Вставка в связь: связь под перетаскиваемой нодой (0 - нет), подсвечивается
 	insert_link int
+	// Выбранный фрейм (0 - нет): выбор фрейма и выбор нод взаимоисключающие
+	selected_frame int
+	// Жест фрейма: id и прямоугольник в начале (перемещение - ещё move_start нод внутри)
+	frame_drag  int
+	frame_start Rect
 	// Перемещение: позиции выделенных нод в начале жеста (сдвиг считается от них, а не шагами -
 	// привязка к сетке не копит ошибку)
 	move_start map[int]Vec2
@@ -202,6 +216,7 @@ mut:
 	edit_node  int
 	edit_slot  int
 	edit_title bool // поле правит заголовок ноды (F2), а не число входа edit_slot
+	edit_frame bool // поле правит заголовок фрейма edit_node (это id фрейма)
 	// Меню добавления ноды и его поле поиска
 	menu        NodeAddMenu
 	menu_ti     &TextInput     = unsafe { nil }
@@ -286,14 +301,16 @@ pub fn (mut ne NodeEditor) frame_all() {
 		return
 	}
 	ne.frame_pending = false
-	if ne.graph.nodes.len == 0 {
+	if ne.graph.nodes.len == 0 && ne.graph.frames.len == 0 {
 		ne.view_x, ne.view_y, ne.zoom = 0, 0, 1
 		return
 	}
+	// Рамка вокруг всех нод и фреймов
+	mut rects := ne.graph.nodes.map(ne.node_world_rect(it))
+	rects << ne.graph.frames.map(it.rect())
 	mut x0, mut y0 := f32(1.0e9), f32(1.0e9)
 	mut x1, mut y1 := f32(-1.0e9), f32(-1.0e9)
-	for n in ne.graph.nodes {
-		r := ne.node_world_rect(n)
+	for r in rects {
 		x0 = min_f32(x0, r.x)
 		y0 = min_f32(y0, r.y)
 		x1 = max_f32(x1, r.x + r.w)
@@ -444,7 +461,7 @@ fn (ne &NodeEditor) hit_test(sx f32, sy f32) NodeHit {
 	for i := ne.graph.nodes.len - 1; i >= 0; i-- {
 		n := ne.graph.nodes[i]
 		r := ne.node_world_rect(n)
-		edges := ne.edge_mask(n, r, wx, wy)
+		edges := ne.edge_mask(r, n.collapsed, wx, wy)
 		if edges != 0 {
 			return NodeHit{.edge, n.id, edges}
 		}
@@ -465,7 +482,8 @@ fn (ne &NodeEditor) hit_test(sx f32, sy f32) NodeHit {
 		}
 		return NodeHit{.body, n.id, 0}
 	}
-	return NodeHit{}
+	// Фреймы - под нодами: попадание по ним - после всех нод (frame_hit, node_frame.v)
+	return ne.frame_hit(wx, wy)
 }
 
 // edge_mask - какие края ноды под точкой холста (wx, wy): маска ne_edge_*, 0 - не край.
@@ -473,7 +491,7 @@ fn (ne &NodeEditor) hit_test(sx f32, sy f32) NodeHit {
 // ne_corner_hit_px (как у окна: в угол легче попасть). У свёрнутой ноды высота не меняется:
 // верх и низ не ловятся, а угол тянет только ширину - на боковых краях свёрнутой ноды почти всю
 // высоту шапки занимают сокеты, и без углов ширину было бы не ухватить.
-fn (ne &NodeEditor) edge_mask(n &GraphNode, r Rect, wx f32, wy f32) int {
+fn (ne &NodeEditor) edge_mask(r Rect, width_only bool, wx f32, wy f32) int {
 	tol := ne_edge_hit_px / ne.zoom
 	ctol := ne_corner_hit_px / ne.zoom
 	// Расстояния до краёв: положительные - снаружи карточки, отрицательные - внутри
@@ -499,7 +517,7 @@ fn (ne &NodeEditor) edge_mask(n &GraphNode, r Rect, wx f32, wy f32) int {
 		0
 	}
 	if corner_x != 0 && corner_y != 0 {
-		return if n.collapsed { corner_x } else { corner_x | corner_y }
+		return if width_only { corner_x } else { corner_x | corner_y }
 	}
 	inside_y := wy >= r.y && wy <= r.y + r.h
 	inside_x := wx >= r.x && wx <= r.x + r.w
@@ -509,7 +527,7 @@ fn (ne &NodeEditor) edge_mask(n &GraphNode, r Rect, wx f32, wy f32) int {
 	if inside_y && near_r {
 		return ne_edge_right
 	}
-	if n.collapsed {
+	if width_only {
 		return 0
 	}
 	if inside_x && near_t {
@@ -813,6 +831,9 @@ fn (mut ne NodeEditor) restore_state(s NodeGraphState) {
 	if ne.active !in kept {
 		ne.active = 0
 	}
+	if ne.graph.frame(ne.selected_frame) == none {
+		ne.selected_frame = 0
+	}
 	ne.emit(.graph_restored, 0, 0, NodeLink{})
 }
 
@@ -847,12 +868,20 @@ pub fn (mut ne NodeEditor) draw(mut ctx RenderContext) {
 
 	ctx.push_clip(ne.bounds)
 	ne.draw_background(mut ctx)
+	ne.draw_frames(mut ctx)
 	ne.draw_links(mut ctx)
 	for n in ne.graph.nodes {
 		ne.draw_node(n, mut ctx)
 	}
 	ne.draw_gesture(mut ctx)
-	if ne.editing && !isnil(ne.edit_ti) {
+	if ne.editing && !isnil(ne.edit_ti) && ne.edit_frame {
+		if fr := ne.graph.frame(ne.edit_node) {
+			mut ti := ne.edit_ti
+			r := ne.screen_rect(ne_frame_title_rect(fr))
+			ti.bounds = Rect{r.x, r.y, max_f32(r.w, 60), max_f32(r.h, ctx.control_h() * 0.8)}
+			ti.draw(mut ctx)
+		}
+	} else if ne.editing && !isnil(ne.edit_ti) {
 		if n := ne.graph.node(ne.edit_node) {
 			mut ti := ne.edit_ti
 			r := ne.screen_rect(ne.edit_rect(n))
@@ -970,7 +999,7 @@ fn (ne &NodeEditor) draw_node(n &GraphNode, mut ctx RenderContext) {
 	head_text := ne_header_text(ctx, head)
 	ne.draw_collapse_arrow(n, head_text, mut ctx)
 	fpx := ne.font_px(ctx)
-	renaming := ne.editing && ne.edit_title && ne.edit_node == n.id // поверх - поле ввода
+	renaming := ne.editing && ne.edit_title && !ne.edit_frame && ne.edit_node == n.id // поверх - поле ввода
 	if fpx > 0 && !renaming {
 		font := ctx.get_font(.bold, fpx)
 		fh := ctx.font_height_of(font)
@@ -1054,7 +1083,7 @@ fn (ne &NodeEditor) draw_rows(n &GraphNode, t NodeTypeDef, fpx int, mut ctx Rend
 // draw_field - поле значения входа: число (подпись слева, значение справа), флажок, цвет
 // (образец), выбор (текст варианта и стрелка).
 fn (ne &NodeEditor) draw_field(n &GraphNode, slot int, def NodeSocketDef, r Rect, font voidptr, mut ctx RenderContext) {
-	if ne.editing && !ne.edit_title && ne.edit_node == n.id && ne.edit_slot == slot {
+	if ne.editing && !ne.edit_title && !ne.edit_frame && ne.edit_node == n.id && ne.edit_slot == slot {
 		return // поверх - поле ввода
 	}
 	v := n.values[slot]
@@ -1300,6 +1329,14 @@ fn (mut ne NodeEditor) on_dbl_click(event &GuiEvent, app &App) bool {
 		return false
 	}
 	hit := ne.hit_test(event.mouse_x, event.mouse_y)
+	if hit.kind == .frame_header {
+		if ne.drag == .move_frame {
+			ne.drag = .none
+			ne.commit_change('Move frame')
+		}
+		ne.rename_frame(hit.node, app)
+		return true
+	}
 	if hit.kind != .header {
 		return false
 	}
@@ -1386,7 +1423,11 @@ fn (mut ne NodeEditor) on_mouse_down(event &GuiEvent, app &App) bool {
 			ne.resize_edges = hit.slot
 			ne.resize_start = ne.node_world_rect(n)
 		}
+		.frame_header, .frame_edge {
+			ne.press_frame(hit)
+		}
 		.none {
+			ne.select_frame(0)
 			ne.drag = .box
 			ne.box_add = event.shift()
 		}
@@ -1398,6 +1439,7 @@ fn (mut ne NodeEditor) on_mouse_down(event &GuiEvent, app &App) bool {
 // оставить выделение, если нода уже в нём (тащат группу), иначе выделить только её. Нода
 // поднимается наверх.
 fn (mut ne NodeEditor) select_press(id int, shift bool) {
+	ne.selected_frame = 0 // выбор нод и выбор фрейма взаимоисключающие
 	if shift {
 		if id in ne.selected && ne.active == id {
 			ne.selected.delete(id)
@@ -1471,6 +1513,11 @@ fn (mut ne NodeEditor) on_mouse_move(x f32, y f32, ctrl bool) bool {
 				ne.drag_resize(x, y, ne.snap_to_grid != ctrl)
 			}
 		}
+		.move_frame, .resize_frame {
+			if ne.drag_moved {
+				ne.drag_frame(x, y, ne.snap_to_grid != ctrl)
+			}
+		}
 		.box {}
 	}
 	return true
@@ -1517,6 +1564,12 @@ fn (mut ne NodeEditor) on_mouse_up(event &GuiEvent, app &App) bool {
 				ne.emit(.node_resized, ne.resize_node, 0, NodeLink{})
 			}
 			ne.commit_change('Resize node')
+		}
+		.move_frame, .resize_frame {
+			if moved {
+				ne.emit(.frame_changed, ne.frame_drag, 0, NodeLink{})
+			}
+			ne.commit_change(if drag == .move_frame { 'Move frame' } else { 'Resize frame' })
 		}
 		else {}
 	}
@@ -1685,6 +1738,8 @@ fn (mut ne NodeEditor) cancel_gesture() {
 		.move { ne.commit_change('Move nodes') }
 		.number { ne.commit_change('Change value') }
 		.resize { ne.commit_change('Resize node') }
+		.move_frame { ne.commit_change('Move frame') }
+		.resize_frame { ne.commit_change('Resize frame') }
 		else {}
 	}
 	ne.drag = .none
@@ -1777,9 +1832,9 @@ fn ne_resize_cursor(edges int) int {
 // update_cursor - курсор изменения размера над краем или углом ноды и во время жеста; иначе -
 // курсор, который был до него (как у полос DockArea и Splitter).
 fn (mut ne NodeEditor) update_cursor() {
-	edges := if ne.drag == .resize {
+	edges := if ne.drag in [.resize, .resize_frame] {
 		ne.resize_edges
-	} else if ne.drag == .none && ne.hover.kind == .edge {
+	} else if ne.drag == .none && ne.hover.kind in [.edge, .frame_edge] {
 		ne.hover.slot
 	} else {
 		0
@@ -1804,11 +1859,24 @@ fn (mut ne NodeEditor) on_key(event &GuiEvent, app &App) bool {
 		return true
 	}
 	if k == sdl_k_delete || (!event.ctrl() && !event.shift() && ctrl_letter(event, `x`, 27)) {
-		ne.delete_selected()
+		if ne.selected_frame != 0 {
+			ne.delete_frame(ne.selected_frame)
+		} else {
+			ne.delete_selected()
+		}
+		return true
+	}
+	// Ctrl+J - обвести выделенные ноды фреймом (как в Blender)
+	if event.ctrl() && !event.shift() && ctrl_letter(event, `j`, 13) {
+		ne.frame_selected()
 		return true
 	}
 	if k == sdl_k_home {
 		ne.frame_all()
+		return true
+	}
+	if k == sdl_k_f2 && ne.selected_frame != 0 {
+		ne.rename_frame(ne.selected_frame, app)
 		return true
 	}
 	if k == sdl_k_f2 && ne.active != 0 && ne.active in ne.selected {
@@ -2033,6 +2101,7 @@ fn (mut ne NodeEditor) start_text_edit(node int, slot int, app &App) {
 	ne.open_edit(node, ne_format_number(n.values[slot].number, t.inputs[slot].field.digits), app)
 	ne.edit_slot = slot
 	ne.edit_title = false
+	ne.edit_frame = false
 }
 
 // rename_node - ввод своего заголовка ноды поверх шапки (F2 по активной ноде, двойной щелчок по
@@ -2042,6 +2111,7 @@ pub fn (mut ne NodeEditor) rename_node(id int, app &App) {
 	_ := ne.graph.node(id) or { return }
 	ne.open_edit(id, ne.graph.node_title(id), app)
 	ne.edit_title = true
+	ne.edit_frame = false
 }
 
 // edit_rect - где на холсте стоит поле ввода: поверх поля числа или поверх заголовка в шапке
@@ -2081,6 +2151,10 @@ fn (mut ne NodeEditor) open_edit(node int, text string, app &App) {
 // правки нет).
 fn (mut ne NodeEditor) commit_text_edit() {
 	if !ne.editing {
+		return
+	}
+	if ne.edit_frame {
+		ne.commit_frame_rename()
 		return
 	}
 	if ne.edit_title {

@@ -353,6 +353,8 @@ const css_prop_table = {
 	'nodes:/field-background':           ['ne_field_bg']
 	'nodes:/field-fill-color':           ['ne_field_fill']
 	'nodes:/socket-outline-color':       ['ne_socket_outline']
+	'nodes:/frame-background':           ['ne_frame_bg']
+	'nodes:/frame-color':                ['ne_frame_text']
 	'nodes:/border-radius':              ['ne_node_radius']
 	'nodes:/link-width':                 ['ne_link_width']
 	'markdown:/heading-color':           ['md_heading']

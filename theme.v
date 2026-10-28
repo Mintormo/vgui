@@ -315,6 +315,8 @@ pub mut:
 	ne_field_bg       Color = Color{0, 0, 0, 0} // фон полей значений
 	ne_field_fill     Color = Color{0, 0, 0, 0} // заполнение числового поля (доля в границах)
 	ne_socket_outline Color = Color{0, 0, 0, 0} // обводка значков сокетов
+	ne_frame_bg       Color = Color{0, 0, 0, 0} // фрейм без своего цвета (рисуется с альфой)
+	ne_frame_text     Color = Color{0, 0, 0, 0} // заголовок фрейма
 	ne_node_radius    f32 // скругление карточки (0 - 5)
 	ne_link_width     f32 // толщина связи (0 - 2; у связей выделенных нод на 1 толще)
 
@@ -1089,6 +1091,18 @@ pub fn (t &Theme) eff_ne_field_fill() Color {
 @[inline]
 pub fn (t &Theme) eff_ne_socket_outline() Color {
 	return if t.ne_socket_outline.a > 0 { t.ne_socket_outline } else { Color{20, 20, 20, 220} }
+}
+
+// eff_ne_frame_bg - заливка фрейма: полупрозрачная (за ним видны сетка и связи), по умолчанию -
+// цвет рамок темы.
+@[inline]
+pub fn (t &Theme) eff_ne_frame_bg() Color {
+	return if t.ne_frame_bg.a > 0 { t.ne_frame_bg } else { t.border.with_alpha(60) }
+}
+
+@[inline]
+pub fn (t &Theme) eff_ne_frame_text() Color {
+	return if t.ne_frame_text.a > 0 { t.ne_frame_text } else { t.text_secondary }
 }
 
 @[inline]
