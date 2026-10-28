@@ -702,3 +702,50 @@ fn test_node_editor_body_painter() {
 	assert calls.rects.last().h == 146
 	t.close()
 }
+
+// Группы в редакторе: Ctrl+G сворачивает выделенное (одна команда); Tab входит в группу и
+// выходит; правка внутри отменяется в своём графе, даже когда редактор уже снаружи; отмена
+// группировки, пока редактор внутри, выводит его на корень; Ctrl+Alt+G разворачивает.
+fn test_node_editor_groups() {
+	mut t, mut ne, counter, mut stack := new_node_ui()!
+	root := ne.graph
+	ne.graph.connect(1, 0, 2, 0)!
+	t.click(500, 350)
+	t.key(sdl_k_a, sdl_kmod_ctrl)
+	t.key(`g`, sdl_kmod_ctrl)
+	assert counter.count(.grouped) == 1
+	assert ne.graph.nodes().len == 1
+	gid := ne.active
+	assert ne.graph.is_group(gid)
+	// Внутрь
+	t.key(sdl_k_tab, 0)
+	assert ne.graph != root && ne.group_path.len == 1
+	assert ne.group_path_text() == 'Root > Group'
+	assert ne.graph.nodes().len == 4 // value, mix, Group Input, Group Output
+	// Правка внутри: сдвинуть ноду value (id 1 внутри) кодом через жест-эквивалент команды
+	inner := ne.graph
+	ne.begin_change()
+	ne.graph.set_node_pos(1, 500, 500)
+	ne.touch()
+	ne.commit_change('Move nodes')
+	// Наружу; отмена правки внутри идёт во внутренний граф
+	t.key(sdl_k_tab, 0)
+	assert ne.graph == root && ne.selected_nodes() == [gid]
+	assert stack.undo()
+	assert (inner.node(1) or { panic('1') }).x == 40
+	assert ne.graph == root
+	// Снова внутрь и отменить группировку - редактор выходит на корень
+	ne.select_node(gid, false)
+	t.key(sdl_k_tab, 0)
+	assert ne.group_path.len == 1
+	assert stack.undo()
+	assert ne.group_path.len == 0 && ne.graph == root
+	assert root.nodes().len == 2
+	// Повтор группировки и разгруппировка
+	assert stack.redo()
+	ne.select_node(gid, false)
+	t.key(`g`, sdl_kmod_ctrl | sdl_kmod_alt)
+	assert counter.count(.ungrouped) == 1
+	assert root.nodes().len == 2 && root.links().len == 1
+	t.close()
+}

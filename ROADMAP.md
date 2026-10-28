@@ -241,6 +241,8 @@ Qt/GTK/WPF интегрированы с UIA (Windows), AT-SPI (Linux), NSAccess
 - [x] **NodeEditor: удобство** (28.10.2026) — переименование (F2), связь в пустоту → меню
       подходящих нод, вставка ноды в связь, привязка к сетке, подсказки сокетов (`TipAtPoint`)
 - [x] **NodeEditor: фреймы и reroute-точки** (28.10.2026) — `node_frame.v`, `node_reroute.v`
+- [x] **NodeEditor: свои сокеты, содержимое ноды, группы** (28.10.2026) — `node_sockets.v`,
+      `node_body.v`, `node_group.v` (Ctrl+G / Tab / Ctrl+Alt+G)
 - [ ] **NodeEditor: C-ABI и Python**
 - [x] **Drag&drop между виджетами и окнами** (27.10.2026) — `dnd.v`: поле
       `dnd` у всех виджетов (источник/цель, данные `kind` + `text`), перенос

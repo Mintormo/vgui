@@ -448,3 +448,51 @@ fn test_node_graph_extra_sockets() {
 	assert h.def_of(hm).inputs[3].field.kind == .number
 	assert h.links().len == 3
 }
+
+// Группы: связи через границу становятся сокетами группы (один вход на внешний выход), внутри -
+// Group Input / Output; разгруппировка возвращает ту же топологию с новыми id; внутренний граф
+// живёт в JSON строкой и при загрузке клонируется.
+fn test_node_graph_group_ungroup() {
+	mut g := sample_graph()
+	v := g.add_node('value', 0, 0)!
+	a := g.add_node('mix', 200, 0)!
+	b := g.add_node('mix', 400, 0)!
+	o := g.add_node('mix', 600, 0)!
+	g.connect(v, 0, a, 0)! // в группу
+	g.connect(v, 0, b, 0)! // тот же внешний выход - тот же вход группы
+	g.connect(a, 0, b, 1)! // внутри
+	g.connect(b, 0, o, 1)! // из группы
+	gid := g.group_nodes([a, b], 'Pair')!
+	assert g.nodes().len == 3 // v, o, группа
+	gn := g.node(gid) or { panic('g') }
+	assert gn.title == 'Pair' && g.is_group(gid)
+	assert gn.extra_inputs.len == 1 && gn.extra_outputs.len == 1
+	assert gn.extra_inputs[0].typ == 'float' && gn.extra_outputs[0].typ == 'color'
+	assert (g.link_into(gid, 0) or { panic('in') }).from_node == v
+	assert (g.link_into(o, 1) or { panic('out') }).from_node == gid
+	inner := g.group_graph(gid) or { panic('inner') }
+	gin, gout := inner.group_io()
+	assert gin != 0 && gout != 0
+	assert inner.links_from(gin, 0).len == 2
+	assert (inner.link_into(gout, 0) or { panic('gout') }).from_node == b
+	assert (inner.link_into(b, 1) or { panic('ab') }).from_node == a
+	// JSON: группа с внутренним графом
+	mut h := sample_graph()
+	h.load_json(g.to_json())!
+	hi := h.group_graph(gid) or { panic('json') }
+	assert hi.nodes().len == 4 && hi.links().len == 4
+	// Разгруппировка: те же связи, новые id, внутренний граф не тронут
+	added := g.ungroup(gid)!
+	assert added.len == 2 && g.nodes().len == 4
+	assert !g.is_group(gid)
+	na, nb := added[0], added[1]
+	assert (g.link_into(na, 0) or { panic('va') }).from_node == v
+	assert (g.link_into(nb, 0) or { panic('vb') }).from_node == v
+	assert (g.link_into(nb, 1) or { panic('ab') }).from_node == na
+	assert (g.link_into(o, 1) or { panic('bo') }).from_node == nb
+	assert inner.nodes().len == 4, 'внутренний граф цел - его держит отмена'
+	// Group Input / Output не группируются
+	if _ := inner.group_nodes([gin, gout], 'x') {
+		assert false
+	}
+}

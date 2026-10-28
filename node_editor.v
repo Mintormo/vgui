@@ -74,6 +74,10 @@ pub enum NodeEventKind {
 	frame_removed   // фрейм удалён (ноды внутри остаются)
 	frame_changed   // фрейм перемещён, изменён размер или заголовок
 	sockets_changed // у ноды добавлен или удалён свой вход (NodeEvent.slot - его номер)
+	grouped         // выделенные ноды свёрнуты в группу (Ctrl+G); NodeEvent.node - группа
+	ungrouped       // группа развёрнута (Ctrl+Alt+G); NodeEvent.node - id бывшей группы
+	group_entered   // вошли в группу (Tab): редактор показывает её внутренний граф
+	group_exited    // вышли из группы на уровень выше
 }
 
 // NodeEvent - событие редактора: вид, нода и слот (вход), связь (для link_*).
@@ -83,6 +87,9 @@ pub:
 	node int
 	slot int
 	link NodeLink
+	// graph - граф, в котором случилась правка: корневой или внутренний граф группы, в которую
+	// вошли (node_group.v). id нод и связей события - id этого графа.
+	graph &NodeGraph = unsafe { nil }
 }
 
 // NodeHitKind - что под курсором (hit_test).
@@ -173,6 +180,9 @@ pub mut:
 	zoom   f32 = 1
 	// Колбэк правок пользователя
 	on_event fn (NodeEvent) = unsafe { nil }
+	// group_path - путь от корня до показанной группы (node_group.v): графы уровней выше, через
+	// какую ноду-группу вошли и каким был вид. Пусто - показан корневой граф
+	group_path []NodeGroupLevel
 	// body_painters - рисование своего содержимого нод по типу (node_body.v, set_body_painter)
 	body_painters map[string]NodeBodyPainter
 	// socket_tooltip - своя подсказка сокета (например, вычисленное значение): нода, слот,
@@ -341,6 +351,9 @@ pub fn (mut ne NodeEditor) delete_selected() {
 	widget_changed()
 	ne.begin_change()
 	for id in ids {
+		if ne.graph.is_group_io(id) {
+			continue // Group Input / Output держат сокеты группы - не удаляются
+		}
 		for l in ne.graph.remove_node(id) {
 			ne.emit(.link_removed, 0, 0, l)
 		}
@@ -836,12 +849,15 @@ fn (mut ne NodeEditor) commit_change(text string) {
 	}
 	before := ne.pending
 	after := ne.graph.snapshot()
+	// Команда помнит свой граф: правка внутри группы отменяется в её внутреннем графе, даже если
+	// редактор уже показывает другой (node_group.v)
+	target := ne.graph
 	// Замыкания - через локальные переменные (обход vlang/v#28795, PROJECT.md, «Компилятор V»)
-	undo := fn [mut ne, before] () {
-		ne.restore_state(before)
+	undo := fn [mut ne, before, target] () {
+		ne.restore_state(target, before)
 	}
-	redo := fn [mut ne, after] () {
-		ne.restore_state(after)
+	redo := fn [mut ne, after, target] () {
+		ne.restore_state(target, after)
 	}
 	mut history := ne.undo_stack
 	history.record(UndoCommand{
@@ -853,11 +869,15 @@ fn (mut ne NodeEditor) commit_change(text string) {
 
 // restore_state - граф к снимку (отмена/повтор): жесты и правка обрываются, выделение
 // сохраняется только у нод, которые есть в снимке.
-fn (mut ne NodeEditor) restore_state(s NodeGraphState) {
+fn (mut ne NodeEditor) restore_state(target &NodeGraph, s NodeGraphState) {
 	widget_changed()
 	ne.cancel_gesture()
 	ne.cancel_text_edit()
-	ne.graph.restore(s)
+	mut g := unsafe { target }
+	g.restore(s)
+	// Отмена во внешнем графе могла убрать группу, внутри которой стоит редактор - выйти туда,
+	// где путь ещё цел (node_group.v)
+	ne.validate_path()
 	mut kept := map[int]bool{}
 	for id, _ in ne.selected {
 		if _ := ne.graph.node(id) {
@@ -877,10 +897,11 @@ fn (mut ne NodeEditor) restore_state(s NodeGraphState) {
 fn (ne &NodeEditor) emit(kind NodeEventKind, node int, slot int, link NodeLink) {
 	if ne.on_event != unsafe { nil } {
 		ne.on_event(NodeEvent{
-			kind: kind
-			node: node
-			slot: slot
-			link: link
+			kind:  kind
+			node:  node
+			slot:  slot
+			link:  link
+			graph: ne.graph
 		})
 	}
 }
@@ -911,6 +932,7 @@ pub fn (mut ne NodeEditor) draw(mut ctx RenderContext) {
 		ne.draw_node(n, mut ctx)
 	}
 	ne.draw_gesture(mut ctx)
+	ne.draw_group_path(mut ctx)
 	if ne.editing && !isnil(ne.edit_ti) && ne.edit_frame {
 		if fr := ne.graph.frame(ne.edit_node) {
 			mut ti := ne.edit_ti
@@ -1925,6 +1947,27 @@ fn (mut ne NodeEditor) on_key(event &GuiEvent, app &App) bool {
 		}
 		return true
 	}
+	// Группы (node_group.v): Ctrl+G - сгруппировать, Ctrl+Alt+G - разгруппировать, Tab - войти в
+	// выбранную группу или выйти из текущей (сканкод G = 10)
+	if event.ctrl() && !event.shift() && ctrl_letter(event, `g`, 10) {
+		if event.alt() {
+			ne.ungroup_selected()
+		} else {
+			ne.group_selected()
+		}
+		return true
+	}
+	if k == sdl_k_tab && !event.ctrl() && !event.shift() {
+		if ne.active != 0 && ne.active in ne.selected && ne.graph.is_group(ne.active) {
+			ne.enter_group(ne.active)
+			return true
+		}
+		if ne.group_path.len > 0 {
+			ne.exit_group()
+			return true
+		}
+		return false
+	}
 	// Ctrl+J - обвести выделенные ноды фреймом (как в Blender)
 	if event.ctrl() && !event.shift() && ctrl_letter(event, `j`, 13) {
 		ne.frame_selected()
@@ -1987,7 +2030,7 @@ fn (mut ne NodeEditor) on_key(event &GuiEvent, app &App) bool {
 // (NodeGraph.copy_json): её вставит этот же редактор, другой редактор или другой запуск
 // приложения, а снаружи она читается как текст. Без выделения буфер не трогается.
 pub fn (mut ne NodeEditor) copy_selected(app &App) {
-	ids := ne.selected_nodes()
+	ids := ne.selected_nodes().filter(!ne.graph.is_group_io(it))
 	if ids.len == 0 {
 		return
 	}
@@ -2051,6 +2094,9 @@ pub fn (mut ne NodeEditor) duplicate_selected() {
 	mut copy_of := map[int]int{}
 	for id in ids {
 		src := ne.graph.node(id) or { continue }
+		if ne.graph.is_group_io(id) {
+			continue
+		}
 		nid := ne.graph.add_node(src.type_id, src.x + 20, src.y + 20) or { continue }
 		mut dst := ne.graph.node(nid) or { continue }
 		dst.values = src.values.clone()
@@ -2059,6 +2105,9 @@ pub fn (mut ne NodeEditor) duplicate_selected() {
 		dst.height = src.height
 		dst.extra_inputs = src.extra_inputs.clone()
 		dst.extra_outputs = src.extra_outputs.clone()
+		if !isnil(src.group) {
+			dst.group = src.group.clone_graph() // копия группы - со своим внутренним графом
+		}
 		dst.title = src.title
 		copy_of[id] = nid
 		ne.emit(.node_added, nid, 0, NodeLink{})

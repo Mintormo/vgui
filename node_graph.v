@@ -145,6 +145,9 @@ pub mut:
 	// Полный список сокетов ноды - def_of. Значения своих входов - в values после входов типа.
 	extra_inputs  []NodeSocketDef
 	extra_outputs []NodeSocketDef
+	// group - внутренний граф ноды-группы (node_group.v; у остальных нод nil). Снимки отмены
+	// делят его с живой нодой (правки внутри - свои команды), копии нод - клонируют.
+	group &NodeGraph = unsafe { nil }
 }
 
 // NodeLink - связь: выход from_slot ноды from_node -> вход to_slot ноды to_node.
@@ -190,6 +193,24 @@ pub fn node_graph() &NodeGraph {
 		max_width: ne_reroute_size
 		inputs:    [node_socket('', '*')]
 		outputs:   [node_socket('', '*')]
+	}
+	// Встроенные типы групп (node_group.v): сокеты у них только свои (extra_*), их задаёт
+	// группировка
+	g.types[node_group_type] = NodeTypeDef{
+		id:    node_group_type
+		title: 'Group'
+		color: Color{60, 110, 90, 255}
+		width: 160
+	}
+	g.types[node_group_in_type] = NodeTypeDef{
+		id:    node_group_in_type
+		title: 'Group Input'
+		color: Color{70, 70, 80, 255}
+	}
+	g.types[node_group_out_type] = NodeTypeDef{
+		id:    node_group_out_type
+		title: 'Group Output'
+		color: Color{70, 70, 80, 255}
 	}
 	return g
 }
@@ -827,6 +848,9 @@ mut:
 	// Свои сокеты ноды (node_sockets.v); в старых сохранениях их нет - пусто
 	extra_inputs  []NodeSocketJson
 	extra_outputs []NodeSocketJson
+	// Внутренний граф группы (node_group.v) - строкой JSON того же формата: вложенная структура
+	// сделала бы тип рекурсивным, а декодер x.json2 разворачивает типы при компиляции
+	group string
 }
 
 struct NodeLinkJson {
@@ -875,6 +899,7 @@ fn node_to_json(n &GraphNode) GraphNodeJson {
 		height:        n.height
 		extra_inputs:  n.extra_inputs.map(socket_to_json(it))
 		extra_outputs: n.extra_outputs.map(socket_to_json(it))
+		group:         if isnil(n.group) { '' } else { n.group.to_json() }
 		values:        n.values.map(NodeValueJson{
 			number: it.number
 			flag:   it.flag
@@ -931,6 +956,12 @@ fn (g &NodeGraph) node_from_json(jn GraphNodeJson, id int) ?&GraphNode {
 	}
 	if jn.height > 0 {
 		n.height = max_f32(jn.height, g.content_height(n))
+	}
+	if jn.group != '' {
+		// Внутренний граф группы: типы - общие с этим графом; не читается - группа пустая
+		mut inner := g.new_child()
+		inner.load_json(jn.group) or {}
+		n.group = inner
 	}
 	return n
 }
