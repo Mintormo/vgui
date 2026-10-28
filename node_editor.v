@@ -145,8 +145,10 @@ pub mut:
 	graph       &NodeGraph = unsafe { nil }
 	undo_stack  &UndoStack = unsafe { nil }
 	show_grid   bool       = true
-	min_zoom    f32        = 0.2
-	max_zoom    f32        = 3
+	// auto_insert - одиночную ноду без связей, отпущенную на провод, вставлять в его разрыв
+	auto_insert bool = true
+	min_zoom    f32  = 0.2
+	max_zoom    f32  = 3
 	// Вид: точка холста в левом верхнем углу и масштаб
 	view_x f32
 	view_y f32
@@ -173,6 +175,8 @@ mut:
 	cut_pts       []Vec2
 	// Изменение размера: нода, какие края тянут (маска ne_edge_*), прямоугольник ноды в начале
 	// жеста (единицы холста); курсор до того, как над краем поставили «стрелку» (nil - не меняли)
+	// Вставка в связь: связь под перетаскиваемой нодой (0 - нет), подсвечивается
+	insert_link  int
 	resize_node  int
 	resize_edges int
 	resize_start Rect
@@ -558,6 +562,133 @@ fn ne_cross(a Vec2, b Vec2, p Vec2) f32 {
 	return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)
 }
 
+// ─── Вставка ноды в связь ──────────────────────────────
+
+// find_insert_link - связь, в которую встанет перетаскиваемая нода (0 - нет): тащат ровно одну
+// ноду без связей (auto_insert), её карточка задевает провод, и у ноды есть вход, совместимый с
+// выходом связи, и выход, совместимый с её входом. Из задетых проводов - ближайший к курсору
+// (sx, sy): нода широкая, и задеть она может несколько.
+fn (ne &NodeEditor) find_insert_link(sx f32, sy f32) int {
+	if !ne.auto_insert || ne.selected.len != 1 {
+		return 0
+	}
+	n := ne.graph.node(ne.active) or { return 0 }
+	for l in ne.graph.links {
+		if l.from_node == n.id || l.to_node == n.id {
+			return 0 // нода уже подключена - вставлять некуда
+		}
+	}
+	r := ne.screen_rect(ne.node_world_rect(n))
+	mut best := 0
+	mut best_d := f32(1.0e30)
+	for l in ne.graph.links {
+		in_slot, out_slot := ne.insert_slots(n, l)
+		if in_slot < 0 || out_slot < 0 {
+			continue
+		}
+		pts := ne.link_points(l)
+		if !ne_polyline_hits_rect(pts, r) {
+			continue
+		}
+		d := ne_dist2_to_polyline(pts, sx, sy)
+		if d < best_d {
+			best_d = d
+			best = l.id
+		}
+	}
+	return best
+}
+
+// insert_slots - вход и выход ноды n, через которые она встанет в связь l: первый вход,
+// совместимый с выходом l, и первый выход, совместимый с входом l (-1 - нет).
+fn (ne &NodeEditor) insert_slots(n &GraphNode, l NodeLink) (int, int) {
+	t := ne.type_of(n)
+	a := ne.graph.node(l.from_node) or { return -1, -1 }
+	b := ne.graph.node(l.to_node) or { return -1, -1 }
+	from := ne.type_of(a).outputs[l.from_slot].typ
+	to := ne.type_of(b).inputs[l.to_slot].typ
+	mut in_slot := -1
+	for i, inp in t.inputs {
+		if ne.graph.types_compatible(from, inp.typ) {
+			in_slot = i
+			break
+		}
+	}
+	mut out_slot := -1
+	for i, o in t.outputs {
+		if ne.graph.types_compatible(o.typ, to) {
+			out_slot = i
+			break
+		}
+	}
+	return in_slot, out_slot
+}
+
+// insert_into_link - нода id встаёт в разрыв связи link_id: A -> B становится A -> нода -> B.
+// Идёт внутри команды перемещения (begin_change уже сделан) - одна команда отмены. Если новая
+// связь не прошла вето приложения, граф возвращается к состоянию до вставки (связь A -> B цела).
+fn (mut ne NodeEditor) insert_into_link(id int, link_id int) {
+	l := ne.graph.link_by_id(link_id) or { return }
+	n := ne.graph.node(id) or { return }
+	in_slot, out_slot := ne.insert_slots(n, l)
+	if in_slot < 0 || out_slot < 0 {
+		return
+	}
+	before := ne.graph.snapshot()
+	ne.graph.disconnect(l.id)
+	first := ne.graph.connect(l.from_node, l.from_slot, id, in_slot) or {
+		ne.graph.restore(before)
+		return
+	}
+	second := ne.graph.connect(id, out_slot, l.to_node, l.to_slot) or {
+		ne.graph.restore(before)
+		return
+	}
+	ne.touch()
+	ne.emit(.link_removed, 0, 0, l)
+	ne.emit(.link_added, 0, 0, first.link)
+	ne.emit(.link_added, 0, 0, second.link)
+}
+
+// ne_polyline_hits_rect - задевает ли ломаная прямоугольник: точка внутри или отрезок
+// пересекает сторону.
+fn ne_polyline_hits_rect(pts []Vec2, r Rect) bool {
+	corners := [Vec2{r.x, r.y}, Vec2{r.x + r.w, r.y}, Vec2{r.x + r.w, r.y + r.h}, Vec2{r.x, r.y + r.h}]
+	for i, p in pts {
+		if r.contains(p.x, p.y) {
+			return true
+		}
+		if i == 0 {
+			continue
+		}
+		for k in 0 .. 4 {
+			if ne_segments_cross(pts[i - 1], p, corners[k], corners[(k + 1) % 4]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ne_dist2_to_polyline - квадрат расстояния от точки до ближайшего отрезка ломаной (для
+// сравнения квадрата хватает - корень не нужен).
+fn ne_dist2_to_polyline(pts []Vec2, x f32, y f32) f32 {
+	mut best := f32(1.0e30)
+	for i in 1 .. pts.len {
+		a, b := pts[i - 1], pts[i]
+		dx, dy := b.x - a.x, b.y - a.y
+		len2 := dx * dx + dy * dy
+		k := if len2 > 0 {
+			clamp_f32(((x - a.x) * dx + (y - a.y) * dy) / len2, 0, 1)
+		} else {
+			f32(0)
+		}
+		px, py := a.x + dx * k - x, a.y + dy * k - y
+		best = min_f32(best, px * px + py * py)
+	}
+	return best
+}
+
 // ─── Отмена и события ──────────────────────────────────
 
 // begin_change запоминает граф до правки (только при заданном undo_stack).
@@ -722,7 +853,12 @@ fn (ne &NodeEditor) draw_links(mut ctx RenderContext) {
 		mut c := ne.graph.socket_type(t.outputs[l.from_slot].typ).color
 		hot := l.from_node in ne.selected || l.to_node in ne.selected
 		c = if hot { c.brighten(0.25) } else { c.with_alpha(210) }
-		width := ctx.theme.eff_ne_link_width() + if hot { f32(1) } else { f32(0) }
+		mut width := ctx.theme.eff_ne_link_width() + if hot { f32(1) } else { f32(0) }
+		if l.id == ne.insert_link {
+			// Провод, в который встанет перетаскиваемая нода: ярче и толще
+			c = ctx.theme.eff_ne_selected()
+			width += 2
+		}
 		ctx.draw_polyline(pts, c, width)
 	}
 }
@@ -1249,6 +1385,7 @@ fn (mut ne NodeEditor) on_mouse_move(x f32, y f32) bool {
 					}
 				}
 				ne.touch()
+				ne.insert_link = ne.find_insert_link(x, y)
 			}
 		}
 		.link {
@@ -1287,6 +1424,10 @@ fn (mut ne NodeEditor) on_mouse_up(event &GuiEvent, app &App) bool {
 		.move {
 			if moved {
 				ne.emit(.nodes_moved, ne.active, 0, NodeLink{})
+			}
+			if ne.insert_link != 0 {
+				ne.insert_into_link(ne.active, ne.insert_link)
+				ne.insert_link = 0
 			}
 			ne.commit_change('Move nodes')
 		}
@@ -1475,6 +1616,7 @@ fn ne_polylines_cross(a []Vec2, b []Vec2) bool {
 // cancel_gesture - оборвать жест (Esc, потеря фокуса, отмена): сдвинутые ноды остаются, где
 // их бросили, - как при отпускании; несостоявшиеся связь/рамка/разрез пропадают.
 fn (mut ne NodeEditor) cancel_gesture() {
+	ne.insert_link = 0
 	match ne.drag {
 		.move { ne.commit_change('Move nodes') }
 		.number { ne.commit_change('Change value') }

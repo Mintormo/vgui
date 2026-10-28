@@ -466,3 +466,35 @@ fn test_node_editor_link_to_empty_opens_menu() {
 	assert ne.graph.links().len == 0
 	t.close()
 }
+
+// Вставка в связь: одиночную ноду без связей отпустили на провод value -> mix.Color - она
+// встаёт в разрыв (value -> новая.Factor, новая.Result -> mix.Color); вместе с перемещением -
+// одна команда отмены. С выключенным auto_insert - только перемещение.
+fn test_node_editor_insert_into_link() {
+	mut t, mut ne, counter, mut stack := new_node_ui()!
+	ne.graph.connect(1, 0, 2, 1)!
+	n3 := ne.graph.add_node('mix', 40, 250)!
+	t.frame()
+	t.press(100, 260)
+	t.move(150, 200)
+	t.move(245, 80)
+	assert ne.insert_link != 0, 'провод под нодой подсвечен'
+	t.release(245, 80)
+	assert ne.insert_link == 0
+	links := ne.graph.links()
+	assert links.len == 2
+	a := ne.graph.link_into(n3, 0) or { panic('нет входа') }
+	assert a.from_node == 1
+	b := ne.graph.link_into(2, 1) or { panic('нет выхода') }
+	assert b.from_node == n3 && b.from_slot == 0
+	assert counter.count(.link_removed) == 1 && counter.count(.link_added) == 2
+	assert stack.undo()
+	assert ne.graph.links().len == 1
+	assert (ne.graph.node(n3) or { panic('n3') }).y == 250
+	// Выключено - нода просто переезжает
+	ne.auto_insert = false
+	t.drag(100, 260, 245, 80)
+	assert ne.graph.links().len == 1
+	assert (ne.graph.link_into(2, 1) or { panic('l') }).from_node == 1
+	t.close()
+}
