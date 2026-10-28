@@ -1133,7 +1133,8 @@ C-ABI и Python (с 16.10.2026): `vgui_list_box_set_virtual`/`vgui_table_view_se
 ## Docking: DockArea и DockPanel (kind 54, `dock_area.v`)
 
 С 28.10.2026. Перетаскиваемые панели внутри окна, как в Visual Studio / VS Code / Qt Advanced Docking.
-Плавающих панелей (в отдельном окне ОС) пока нет, в C-ABI и Python область не проброшена.
+Плавающих панелей (в отдельном окне ОС) пока нет. C-ABI - vgui-capi/PROJECT.md, «Docking»; Python -
+vguipy/PROJECT.md, «Docking» (`vguipy.DockArea`, `DockPanel`, `DockSide`).
 
 **Модель.** `DockPanel` - не виджет, а запись области (как `MenuItem` у меню): `id` (ключ в сохранённой
 раскладке; без символов `` [](),*`` и пробела), `title`, `icon ItemIcon`, `content &Widget`, `closable`.
