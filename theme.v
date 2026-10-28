@@ -299,6 +299,11 @@ pub mut:
 	plot_label      Color = Color{0, 0, 0, 0}
 	plot_border     Color = Color{0, 0, 0, 0}
 
+	// ── Rating ────────────────────────────────────────
+	rating_on    Color = Color{0, 0, 0, 0} // звезда оценки (a=0 - золотой)
+	rating_off   Color = Color{0, 0, 0, 0} // пустая звезда (a=0 - border)
+	rating_hover Color = Color{0, 0, 0, 0} // предпросмотр под курсором
+
 	// ── NodeEditor ────────────────────────────────────
 	// a=0 / 0 - запасное значение из общей темы (eff_ne_* ниже). Цвет шапки ноды задаёт её тип
 	// (NodeTypeDef.color); ne_header_bg - для типов без своего цвета (color с альфой 0).
@@ -1028,6 +1033,24 @@ pub fn (t &Theme) eff_splitter_handle() Color {
 @[inline]
 pub fn (t &Theme) eff_splitter_hover() Color {
 	return if t.splitter_hover.a > 0 { t.splitter_hover } else { t.accent }
+}
+
+// ── Rating ──
+// eff_rating_on - звезда оценки: золотой; off - пустая звезда: цвет рамок; hover - предпросмотр
+// под курсором: золотой полупрозрачный.
+@[inline]
+pub fn (t &Theme) eff_rating_on() Color {
+	return if t.rating_on.a > 0 { t.rating_on } else { Color{250, 200, 70, 255} }
+}
+
+@[inline]
+pub fn (t &Theme) eff_rating_off() Color {
+	return if t.rating_off.a > 0 { t.rating_off } else { t.border }
+}
+
+@[inline]
+pub fn (t &Theme) eff_rating_hover() Color {
+	return if t.rating_hover.a > 0 { t.rating_hover } else { t.eff_rating_on().with_alpha(170) }
 }
 
 // ── NodeEditor ──

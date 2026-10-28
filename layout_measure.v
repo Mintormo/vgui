@@ -884,6 +884,57 @@ pub fn (ne &NodeEditor) measure(ctx &RenderContext) SizeHint {
 	return scrollable_hint(240, 160, 640, 420)
 }
 
+// NumberField: высота контрола; ширина - под самый длинный из текстов границ и подписи (или
+// chars символов), полю можно и расти.
+pub fn (nf &NumberField) measure(ctx &RenderContext) SizeHint {
+	if !nf.visible {
+		return SizeHint{}
+	}
+	font := ctx.get_font_immut(.regular, 0)
+	mut tw := f32(0)
+	if nf.chars > 0 {
+		tw = ctx.measure_text_with_font('0'.repeat(nf.chars), font).x
+	} else {
+		lo := if nf.min > -1.0e29 { nf.min } else { nf.value }
+		hi := if nf.max < 1.0e29 { nf.max } else { nf.value }
+		for v in [lo, hi, nf.value] {
+			t := if isnil(nf.format) { nf_format(v, nf.digits) } else { nf.format(v) }
+			tw = max_f32(tw, ctx.measure_text_with_font(t, font).x)
+		}
+	}
+	if nf.label != '' {
+		tw += ctx.measure_text_with_font(nf.label, font).x + 12
+	}
+	h := max_f32(ctx.control_h(), ctx.font_height_of(font) + measure_pad_y * 2)
+	w := tw + 16
+	return SizeHint{
+		w:        w
+		h:        h
+		min_w:    w
+		min_h:    h
+		v_policy: .fixed
+	}
+}
+
+// Rating: звёзды в ряд, высота - не меньше контрола; ширина фиксированная.
+pub fn (r &Rating) measure(ctx &RenderContext) SizeHint {
+	if !r.visible {
+		return SizeHint{}
+	}
+	n := if r.max > 0 { r.max } else { 0 }
+	w := f32(n) * r.star_size + f32(max_int(n - 1, 0)) * r.gap
+	h := max_f32(ctx.control_h(), r.star_size)
+	return SizeHint{
+		w:        w
+		h:        h
+		min_w:    w
+		min_h:    h
+		max_w:    w
+		h_policy: .fixed
+		v_policy: .fixed
+	}
+}
+
 pub fn (c &Calendar) measure(ctx &RenderContext) SizeHint {
 	return scrollable_hint(220, 200, 280, 260)
 }

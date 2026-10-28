@@ -370,6 +370,8 @@ fn test_every_widget_type_has_css_tags() {
 		CssTagged(&Splitter{}),
 		CssTagged(&DockArea{}),
 		CssTagged(&NodeEditor{}),
+		CssTagged(&NumberField{}),
+		CssTagged(&Rating{}),
 		CssTagged(&CodeEditor{}),
 		CssTagged(&MarkdownView{}),
 		CssTagged(&MenuButton{}),

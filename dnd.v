@@ -482,7 +482,8 @@ fn dnd_try_start(mut w Window, ev &GuiEvent, app &App) bool {
 fn dnd_owns_drag(w &Widget, leaf bool) bool {
 	if w is Slider || w is Splitter || w is TextInput || w is TextArea || w is CodeEditor
 		|| w is Canvas || w is CurveEditor || w is ColorPicker || w is ImageView
-		|| w is PlotView || w is TableView || w is MarkdownView || w is NodeEditor {
+		|| w is PlotView || w is TableView || w is MarkdownView || w is NodeEditor
+		|| w is NumberField || w is Rating {
 		return true
 	}
 	if w is ScrollBox {

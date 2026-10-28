@@ -44,6 +44,8 @@ fn tag_cases() []TagCase {
 		TagCase{voidptr(&Splitter{}), kind_splitter, 'Splitter'},
 		TagCase{voidptr(&DockArea{}), kind_dock_area, 'DockArea'},
 		TagCase{voidptr(&NodeEditor{}), kind_node_editor, 'NodeEditor'},
+		TagCase{voidptr(&NumberField{}), kind_number_field, 'NumberField'},
+		TagCase{voidptr(&Rating{}), kind_rating, 'Rating'},
 		TagCase{voidptr(&CodeEditor{}), kind_code_editor, 'CodeEditor'},
 		TagCase{voidptr(&MarkdownView{}), kind_markdown_view, 'MarkdownView'},
 		TagCase{voidptr(&MenuButton{}), kind_menu_button, 'MenuButton'},
@@ -77,7 +79,7 @@ fn tag_cases() []TagCase {
 
 fn test_every_widget_carries_its_tag() {
 	cases := tag_cases()
-	assert cases.len == 55
+	assert cases.len == 57
 	for c in cases {
 		got := widget_type_tag(c.ptr)
 		assert got == c.kind, '${c.name}: тег ${got}, ожидался ${c.kind}'

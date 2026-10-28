@@ -327,6 +327,22 @@ pub fn (mut w DockArea) set_bounds(r Rect) {
 	w.bounds = r
 }
 
+pub fn (w &NumberField) bounds_of() Rect {
+	return w.bounds
+}
+
+pub fn (mut w NumberField) set_bounds(r Rect) {
+	w.bounds = r
+}
+
+pub fn (w &Rating) bounds_of() Rect {
+	return w.bounds
+}
+
+pub fn (mut w Rating) set_bounds(r Rect) {
+	w.bounds = r
+}
+
 pub fn (w &NodeEditor) bounds_of() Rect {
 	return w.bounds
 }

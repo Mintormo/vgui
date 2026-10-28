@@ -73,10 +73,12 @@ const css_kind_by_name = {
 	'shortcut':     kind_shortcut_input
 	'dock':         kind_dock_area
 	'nodes':        kind_node_editor
+	'number':       kind_number_field
+	'rating':       kind_rating
 }
 
 // css_max_kind — наибольший kind_* (размер массивов fields_by_kind).
-const css_max_kind = kind_node_editor
+const css_max_kind = kind_rating
 
 // css_name_by_kind — обратная таблица: kind -> имя типа (пусто - в CSS нет имени).
 const css_name_by_kind = css_build_name_by_kind()
@@ -353,6 +355,13 @@ const css_prop_table = {
 	'nodes:/field-background':           ['ne_field_bg']
 	'nodes:/field-fill-color':           ['ne_field_fill']
 	'nodes:/socket-outline-color':       ['ne_socket_outline']
+	'number:/background':                ['input_bg']
+	'number:/border-color':              ['input_border']
+	'number:focus/border-color':         ['input_focus']
+	'number:/fill-color':                ['accent']
+	'rating:/color':                     ['rating_on']
+	'rating:/off-color':                 ['rating_off']
+	'rating:hover/color':                ['rating_hover']
 	'nodes:/frame-background':           ['ne_frame_bg']
 	'nodes:/frame-color':                ['ne_frame_text']
 	'nodes:/border-radius':              ['ne_node_radius']

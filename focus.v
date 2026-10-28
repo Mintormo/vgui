@@ -33,6 +33,10 @@ pub enum FocusKind {
 	table_view
 	// редактор графа (NodeEditor): клавиши удаления, дублирования, меню добавления
 	node_editor
+	// числовое поле (NumberField): стрелки, Enter - ввод
+	number_field
+	// оценка звёздами (Rating): стрелки и цифры
+	rating
 }
 
 // FocusManager - учёт фокуса одного окна (RenderContext.focus). Виджеты регистрируют себя сами при рисовании
@@ -307,6 +311,22 @@ pub fn (mut fm FocusManager) focus_node_editor(ne &NodeEditor, group int) {
 	fm.focus_ptr(unsafe { voidptr(ne) }, .node_editor, group)
 }
 
+pub fn (mut fm FocusManager) register_number_field(nf &NumberField, group int) {
+	fm.register_ptr(unsafe { voidptr(nf) }, .number_field, group)
+}
+
+pub fn (mut fm FocusManager) focus_number_field(nf &NumberField, group int) {
+	fm.focus_ptr(unsafe { voidptr(nf) }, .number_field, group)
+}
+
+pub fn (mut fm FocusManager) register_rating(r &Rating, group int) {
+	fm.register_ptr(unsafe { voidptr(r) }, .rating, group)
+}
+
+pub fn (mut fm FocusManager) focus_rating(r &Rating, group int) {
+	fm.focus_ptr(unsafe { voidptr(r) }, .rating, group)
+}
+
 // ─── Снять фокус ───
 
 // blur_current снимает фокус с текущего виджета: сбрасывает его focused и зависшие состояния (перетаскивание,
@@ -396,6 +416,14 @@ pub fn (mut fm FocusManager) blur_current() {
 			ne.focused = false
 			ne.cancel_gesture()
 		}
+		.number_field {
+			mut nf := unsafe { &NumberField(e.ptr) }
+			nf.focused = false
+		}
+		.rating {
+			mut r := unsafe { &Rating(e.ptr) }
+			r.focused = false
+		}
 	}
 
 	fm.current = -1
@@ -470,6 +498,14 @@ fn (mut fm FocusManager) focus_index(idx int) {
 		.node_editor {
 			mut ne := unsafe { &NodeEditor(e.ptr) }
 			ne.focused = true
+		}
+		.number_field {
+			mut nf := unsafe { &NumberField(e.ptr) }
+			nf.focused = true
+		}
+		.rating {
+			mut r := unsafe { &Rating(e.ptr) }
+			r.focused = true
 		}
 	}
 }
@@ -602,6 +638,14 @@ fn (fm &FocusManager) is_entry_available(e FocusEntry) bool {
 		.node_editor {
 			ne := unsafe { &NodeEditor(e.ptr) }
 			return ne.visible && ne.enabled
+		}
+		.number_field {
+			nf := unsafe { &NumberField(e.ptr) }
+			return nf.visible && nf.enabled
+		}
+		.rating {
+			r := unsafe { &Rating(e.ptr) }
+			return r.visible && r.enabled && !r.readonly && r.focusable
 		}
 	}
 }

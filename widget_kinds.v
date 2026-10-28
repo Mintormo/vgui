@@ -66,3 +66,5 @@ pub const kind_curve_editor = 52
 pub const kind_shortcut_input = 53
 pub const kind_dock_area = 54
 pub const kind_node_editor = 55
+pub const kind_number_field = 56
+pub const kind_rating = 57

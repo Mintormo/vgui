@@ -520,6 +520,8 @@ fn test_every_widget_type_has_dnd_field() {
 		HasDnd(&Splitter{}),
 		HasDnd(&DockArea{}),
 		HasDnd(&NodeEditor{}),
+		HasDnd(&NumberField{}),
+		HasDnd(&Rating{}),
 		HasDnd(&CodeEditor{}),
 		HasDnd(&MarkdownView{}),
 		HasDnd(&MenuButton{}),

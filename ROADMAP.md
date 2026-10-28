@@ -253,6 +253,8 @@ Qt/GTK/WPF интегрированы с UIA (Windows), AT-SPI (Linux), NSAccess
       между виджетами»
 - [x] **DnD: C-ABI и Python** (27.10.2026) — `vgui_widget_set_drag_*`,
       `vgui_dnd_*`, `vguipy.dnd`
+- [x] **NumberField и Rating** (28.10.2026) — числовое поле с протяжкой (как в Blender) и оценка
+      звёздами; заменили свои решения vraw (`numedit.v`, `fill_star`)
 - [ ] **DnD наружу, в другие приложения** — в SDL 3.5 API нет, нужен нативный
       код под каждую ОС (X11 XDND, Wayland data-device, OLE, NSDraggingSource)
 - [x] **Иконки в списках, меню, деревьях** (13.10.2026) — общий `ItemIcon`
