@@ -38,12 +38,12 @@ fn new_node_ui() !(&TestUi, &NodeEditor, &NeCounter, &UndoStack) {
 	return t, ne, counter, stack
 }
 
-// sample_editor_graph - типы float/color/shader (float -> color разрешено), ноды value, mix, out.
+// sample_editor_graph - типы float/color/surface (float -> color разрешено), ноды value, mix, out.
 fn sample_editor_graph() &NodeGraph {
 	mut g := node_graph()
 	g.define_socket_type('float', Color{150, 160, 175, 255}, .circle)
 	g.define_socket_type('color', Color{232, 170, 60, 255}, .circle)
-	g.define_socket_type('shader', Color{80, 200, 150, 255}, .diamond)
+	g.define_socket_type('surface', Color{80, 200, 150, 255}, .diamond)
 	g.allow_conversion('float', 'color')
 	g.define_node(NodeTypeDef{
 		id:       'value'
@@ -54,7 +54,7 @@ fn sample_editor_graph() &NodeGraph {
 	}) or { panic(err) }
 	g.define_node(NodeTypeDef{
 		id:       'mix'
-		title:    'Mix Color'
+		title:    'Blend'
 		category: 'Color'
 		color:    Color{70, 130, 180, 255}
 		inputs:   [
@@ -66,10 +66,10 @@ fn sample_editor_graph() &NodeGraph {
 	}) or { panic(err) }
 	g.define_node(NodeTypeDef{
 		id:       'out'
-		title:    'Material Output'
+		title:    'Output'
 		category: 'Output'
 		color:    Color{170, 70, 80, 255}
-		inputs:   [node_socket('Surface', 'shader')]
+		inputs:   [node_socket('Surface', 'surface')]
 	}) or { panic(err) }
 	return g
 }
@@ -109,7 +109,7 @@ fn test_node_editor_link_from_input_and_types() {
 	// От свободного входа к выходу: mix.Clamp <- value.Value
 	t.drag(300, 141, 190, 75)
 	assert ne.graph.links().len == 1
-	// color -> shader нельзя: mix.Result -> out.Surface (вход в (40, 64 + 11 = 235))
+	// color -> surface нельзя: mix.Result -> out.Surface (вход в (40, 64 + 11 = 235))
 	t.drag(450, 75, 40, 235)
 	assert ne.graph.links().len == 1
 	_ = o

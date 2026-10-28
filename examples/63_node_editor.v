@@ -3,9 +3,9 @@ module main
 // Пример 63. Редактор графа из нод (NodeEditor, node_editor.v; модель - NodeGraph, node_graph.v).
 //
 // Что показано:
-//   - типы сокетов с цветом и формой значка (float, color, vector - круги, shader - ромб) и
+//   - типы сокетов с цветом и формой значка (float, color, vector - круги, surface - ромб) и
 //     неявное преобразование float -> color;
-//   - типы нод по категориям (Input, Color, Converter, Shader, Output) с полями значений на
+//   - типы нод по категориям (Input, Texture, Color, Converter, Surface, Output) с полями значений на
 //     входах: число, флажок, цвет, выбор из списка;
 //   - начальный граф «материала», собранный кодом;
 //   - мышь: тянуть ноды, связи из сокета в сокет (с подключённого входа связь отцепляется),
@@ -88,20 +88,20 @@ fn main() {
 	app.run()
 }
 
-// build_graph - типы сокетов и нод и начальный граф: Texture Coordinate и Noise -> Mix Color ->
-// Diffuse -> Mix Shader -> Material Output.
+// build_graph - типы сокетов и нод и начальный граф: Coordinates и Noise -> Blend Colors ->
+// Matte -> Mix Surfaces -> Output. Названия нод условные: граф ничего не вычисляет.
 fn build_graph() !&vgui.NodeGraph {
 	mut g := vgui.node_graph()
 	g.define_socket_type('float', vgui.Color{150, 160, 175, 255}, .circle)
 	g.define_socket_type('color', vgui.Color{232, 170, 60, 255}, .circle)
 	g.define_socket_type('vector', vgui.Color{110, 140, 240, 255}, .circle)
-	g.define_socket_type('shader', vgui.Color{80, 200, 150, 255}, .diamond)
+	g.define_socket_type('surface', vgui.Color{80, 200, 150, 255}, .diamond)
 	g.allow_conversion('float', 'color')
 
 	input := vgui.Color{150, 80, 170, 255}
 	color := vgui.Color{70, 130, 180, 255}
 	conv := vgui.Color{90, 110, 130, 255}
-	shader := vgui.Color{50, 140, 120, 255}
+	surface := vgui.Color{50, 140, 120, 255}
 	output := vgui.Color{170, 70, 80, 255}
 
 	g.define_node(vgui.NodeTypeDef{
@@ -125,16 +125,16 @@ fn build_graph() !&vgui.NodeGraph {
 	})!
 	g.define_node(vgui.NodeTypeDef{
 		id:       'texcoord'
-		title:    'Texture Coordinate'
+		title:    'Coordinates'
 		category: 'Input'
 		color:    input
 		width:    170
-		outputs:  [vgui.node_socket('Generated', 'vector'), vgui.node_socket('UV', 'vector'),
-			vgui.node_socket('Object', 'vector')]
+		outputs:  [vgui.node_socket('Position', 'vector'), vgui.node_socket('UV', 'vector'),
+			vgui.node_socket('Normal', 'vector')]
 	})!
 	g.define_node(vgui.NodeTypeDef{
 		id:       'noise'
-		title:    'Noise Texture'
+		title:    'Noise'
 		category: 'Texture'
 		color:    vgui.Color{190, 110, 60, 255}
 		width:    170
@@ -157,11 +157,11 @@ fn build_graph() !&vgui.NodeGraph {
 			),
 			vgui.node_socket('Normalize', 'float', kind: .toggle, flag: true),
 		]
-		outputs:  [vgui.node_socket('Fac', 'float'), vgui.node_socket('Color', 'color')]
+		outputs:  [vgui.node_socket('Factor', 'float'), vgui.node_socket('Color', 'color')]
 	})!
 	g.define_node(vgui.NodeTypeDef{
 		id:       'mix'
-		title:    'Mix Color'
+		title:    'Blend Colors'
 		category: 'Color'
 		color:    color
 		width:    160
@@ -192,47 +192,47 @@ fn build_graph() !&vgui.NodeGraph {
 		outputs:  [vgui.node_socket('Value', 'float')]
 	})!
 	g.define_node(vgui.NodeTypeDef{
-		id:       'diffuse'
-		title:    'Diffuse BSDF'
-		category: 'Shader'
-		color:    shader
+		id:       'matte'
+		title:    'Matte'
+		category: 'Surface'
+		color:    surface
 		inputs:   [
 			vgui.node_socket('Color', 'color', kind: .color, color: vgui.Color{204, 204, 204, 255}),
 			vgui.node_socket('Roughness', 'float', kind: .number, number: 0, min: 0, max: 1),
 		]
-		outputs:  [vgui.node_socket('BSDF', 'shader')]
+		outputs:  [vgui.node_socket('Surface', 'surface')]
 	})!
 	g.define_node(vgui.NodeTypeDef{
-		id:       'glossy'
-		title:    'Glossy BSDF'
-		category: 'Shader'
-		color:    shader
+		id:       'shiny'
+		title:    'Shiny'
+		category: 'Surface'
+		color:    surface
 		inputs:   [
 			vgui.node_socket('Color', 'color', kind: .color, color: vgui.Color{255, 255, 255, 255}),
 			vgui.node_socket('Roughness', 'float', kind: .number, number: 0.2, min: 0, max: 1),
 		]
-		outputs:  [vgui.node_socket('BSDF', 'shader')]
+		outputs:  [vgui.node_socket('Surface', 'surface')]
 	})!
 	g.define_node(vgui.NodeTypeDef{
-		id:       'mixshader'
-		title:    'Mix Shader'
-		category: 'Shader'
-		color:    shader
+		id:       'mixsurf'
+		title:    'Mix Surfaces'
+		category: 'Surface'
+		color:    surface
 		inputs:   [
-			vgui.node_socket('Fac', 'float', kind: .number, number: 0.5, min: 0, max: 1),
-			vgui.node_socket('Shader', 'shader'),
-			vgui.node_socket('Shader', 'shader'),
+			vgui.node_socket('Factor', 'float', kind: .number, number: 0.5, min: 0, max: 1),
+			vgui.node_socket('Surface', 'surface'),
+			vgui.node_socket('Surface', 'surface'),
 		]
-		outputs:  [vgui.node_socket('Shader', 'shader')]
+		outputs:  [vgui.node_socket('Surface', 'surface')]
 	})!
 	g.define_node(vgui.NodeTypeDef{
 		id:       'output'
-		title:    'Material Output'
+		title:    'Output'
 		category: 'Output'
 		color:    output
 		inputs:   [
-			vgui.node_socket('Surface', 'shader'),
-			vgui.node_socket('Displacement', 'vector'),
+			vgui.node_socket('Surface', 'surface'),
+			vgui.node_socket('Offset', 'vector'),
 		]
 	})!
 
@@ -240,16 +240,16 @@ fn build_graph() !&vgui.NodeGraph {
 	tc := g.add_node('texcoord', 20, 60)!
 	noise := g.add_node('noise', 230, 40)!
 	mix := g.add_node('mix', 450, 60)!
-	diffuse := g.add_node('diffuse', 660, 40)!
-	glossy := g.add_node('glossy', 660, 200)!
-	mixsh := g.add_node('mixshader', 860, 100)!
+	matte := g.add_node('matte', 660, 40)!
+	shiny := g.add_node('shiny', 660, 200)!
+	mixsurf := g.add_node('mixsurf', 860, 100)!
 	out := g.add_node('output', 1060, 110)!
 	g.connect(tc, 0, noise, 0)!
 	g.connect(noise, 0, mix, 1)!
-	g.connect(mix, 0, diffuse, 0)!
-	g.connect(diffuse, 0, mixsh, 1)!
-	g.connect(glossy, 0, mixsh, 2)!
-	g.connect(mixsh, 0, out, 0)!
+	g.connect(mix, 0, matte, 0)!
+	g.connect(matte, 0, mixsurf, 1)!
+	g.connect(shiny, 0, mixsurf, 2)!
+	g.connect(mixsurf, 0, out, 0)!
 	return g
 }
 
