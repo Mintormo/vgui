@@ -306,3 +306,46 @@ fn test_node_graph_height() {
 	g.set_node_height(m, 0)
 	assert g.node_height(m) == 118
 }
+
+// copy_json - только выбранные ноды и связи между ними, без data; paste_json - новые id, группа
+// левым верхним углом в точку, связи через connect (с вето), чужой текст - ошибка без правок.
+fn test_node_graph_copy_paste() {
+	mut g := sample_graph()
+	v := g.add_node('value', 10, 20)!
+	m := g.add_node('mix', 210, 50)!
+	o := g.add_node('mix', 400, 50)!
+	g.connect(v, 0, m, 0)!
+	g.connect(m, 0, o, 1)! // ведёт за пределы выбора - не копируется
+	g.set_node_data(m, 'secret')
+	g.set_node_title(m, 'Base')
+	g.set_value(m, 0, NodeValue{ number: 0.9 })
+	text := g.copy_json([v, m])
+	res := g.paste_json(text, 1000, 500)!
+	assert res.nodes.len == 2 && res.links.len == 1
+	assert res.nodes.all(it > o), 'новые id'
+	pv := g.node(res.nodes[0]) or { panic('pv') }
+	pm := g.node(res.nodes[1]) or { panic('pm') }
+	// Взаимное расположение сохранено, угол рамки - в точке вставки
+	assert pv.x == 1000 && pv.y == 500 && pm.x == 1200 && pm.y == 530
+	assert pm.title == 'Base' && pm.data == ''
+	assert (g.value(pm.id, 0) or { panic('v') }).number == 0.9
+	assert res.links[0].from_node == pv.id && res.links[0].to_node == pm.id
+	assert g.links_from(pm.id, 0).len == 0
+	// Вето приложения действует и на вставку
+	g.can_connect = fn (l NodeLink) bool {
+		return false
+	}
+	res2 := g.paste_json(text, 0, 0)!
+	assert res2.nodes.len == 2 && res2.links.len == 0
+	// Не граф - ошибка, граф прежний
+	count := g.nodes().len
+	if _ := g.paste_json('просто текст', 0, 0) {
+		assert false
+	}
+	if _ := g.paste_json('{"version":1,"nodes":[{"id":1,"type":"ghost","x":0,"y":0,"collapsed":false,"values":[]}],"links":[]}',
+		0, 0)
+	{
+		assert false
+	}
+	assert g.nodes().len == count
+}

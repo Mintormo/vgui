@@ -755,6 +755,7 @@ struct NodeValueJson {
 }
 
 struct GraphNodeJson {
+mut:
 	id        int
 	typ       string @[json: 'type']
 	x         f32
@@ -788,34 +789,163 @@ pub fn (g &NodeGraph) to_json() string {
 		version: 1
 	}
 	for n in g.nodes {
-		doc.nodes << GraphNodeJson{
-			id:        n.id
-			typ:       n.type_id
-			x:         n.x
-			y:         n.y
-			collapsed: n.collapsed
-			title:     n.title
-			data:      n.data
-			width:     n.width
-			height:    n.height
-			values:    n.values.map(NodeValueJson{
-				number: it.number
-				flag:   it.flag
-				color:  [int(it.color.r), int(it.color.g), int(it.color.b), int(it.color.a)]
-				choice: it.choice
-			})
+		doc.nodes << node_to_json(n)
+	}
+	for l in g.links {
+		doc.links << link_to_json(l)
+	}
+	return json2.encode(doc)
+}
+
+fn node_to_json(n &GraphNode) GraphNodeJson {
+	return GraphNodeJson{
+		id:        n.id
+		typ:       n.type_id
+		x:         n.x
+		y:         n.y
+		collapsed: n.collapsed
+		title:     n.title
+		data:      n.data
+		width:     n.width
+		height:    n.height
+		values:    n.values.map(NodeValueJson{
+			number: it.number
+			flag:   it.flag
+			color:  [int(it.color.r), int(it.color.g), int(it.color.b), int(it.color.a)]
+			choice: it.choice
+		})
+	}
+}
+
+fn link_to_json(l NodeLink) NodeLinkJson {
+	return NodeLinkJson{
+		id:        l.id
+		from_node: l.from_node
+		from_slot: l.from_slot
+		to_node:   l.to_node
+		to_slot:   l.to_slot
+	}
+}
+
+// node_from_json - нода из записи JSON с id = id (при загрузке - id из записи, при вставке -
+// новый). none - тип ноды не описан. Значения входов, которых в записи нет (тип с тех пор
+// дополнен), - по умолчанию; ширина - в пределах типа, высота - не меньше содержимого.
+fn (g &NodeGraph) node_from_json(jn GraphNodeJson, id int) ?&GraphNode {
+	t := g.types[jn.typ] or { return none }
+	mut values := t.inputs.map(node_default_value(it.field))
+	for i, jv in jn.values {
+		if i >= values.len {
+			break
+		}
+		values[i] = NodeValue{
+			number: jv.number
+			flag:   jv.flag
+			color:  node_json_color(jv.color, values[i].color)
+			choice: jv.choice
+		}
+	}
+	mut n := &GraphNode{
+		id:        id
+		type_id:   jn.typ
+		x:         jn.x
+		y:         jn.y
+		collapsed: jn.collapsed
+		values:    values
+		title:     jn.title
+		data:      jn.data
+		width:     if jn.width > 0 { node_clamp_width(t, jn.width) } else { 0 }
+	}
+	if jn.height > 0 {
+		n.height = max_f32(jn.height, g.content_height(n))
+	}
+	return n
+}
+
+// ─── Буфер обмена: часть графа ─────────────────────────
+
+// copy_json - выбранные ноды ids и связи между ними строкой JSON того же формата, что to_json
+// (её можно и загрузить load_json, и вставить paste_json). Связи с нодами вне выбора не
+// попадают: у вставленной копии им не к чему подключиться. Строка данных приложения (data) не
+// копируется - там может быть ссылка на объект приложения, и две ноды делили бы его (как и в
+// NodeEditor.duplicate_selected). Несуществующие id пропускаются.
+pub fn (g &NodeGraph) copy_json(ids []int) string {
+	mut doc := NodeGraphJson{
+		version: 1
+	}
+	mut chosen := map[int]bool{}
+	for n in g.nodes {
+		if n.id in ids {
+			mut jn := node_to_json(n)
+			jn.data = ''
+			doc.nodes << jn
+			chosen[n.id] = true
 		}
 	}
 	for l in g.links {
-		doc.links << NodeLinkJson{
-			id:        l.id
-			from_node: l.from_node
-			from_slot: l.from_slot
-			to_node:   l.to_node
-			to_slot:   l.to_slot
+		if l.from_node in chosen && l.to_node in chosen {
+			doc.links << link_to_json(l)
 		}
 	}
 	return json2.encode(doc)
+}
+
+// NodePaste - итог paste_json: id вставленных нод (в порядке записи) и проведённые связи.
+pub struct NodePaste {
+pub:
+	nodes []int
+	links []NodeLink
+}
+
+// paste_json добавляет к графу ноды и связи из JSON (copy_json или to_json) с новыми id: левый
+// верхний угол рамки вокруг вставленных нод встаёт в точку холста (at_x, at_y), взаимное
+// расположение сохраняется. Это правка пользователя, а не загрузка: связи проводятся через
+// connect - с вето приложения (can_connect) и проверкой циклов. Ноды неизвестных типов и связи,
+// не прошедшие проверку, пропускаются. Ошибка - текст не JSON графа или в нём ни одной ноды
+// известного типа; граф при этом не меняется.
+pub fn (mut g NodeGraph) paste_json(text string, at_x f32, at_y f32) !NodePaste {
+	doc := json2.decode[NodeGraphJson](text) or { return error('node graph: ${err.msg()}') }
+	if doc.version != 1 {
+		return error('node graph: unsupported version ${doc.version}')
+	}
+	// Сначала - только ноды известных типов: рамка считается по тем, что будут вставлены
+	mut known := []GraphNodeJson{}
+	for jn in doc.nodes {
+		if jn.typ in g.types {
+			known << jn
+		}
+	}
+	if known.len == 0 {
+		return error('node graph: no node of a known type')
+	}
+	widget_changed()
+	mut min_x, mut min_y := known[0].x, known[0].y
+	for jn in known {
+		min_x = min_f32(min_x, jn.x)
+		min_y = min_f32(min_y, jn.y)
+	}
+	// Новые id: старый id из буфера -> id в этом графе
+	mut new_id := map[int]int{}
+	mut added := []int{}
+	for jn in known {
+		mut n := g.node_from_json(jn, g.next_node) or { continue }
+		n.x = jn.x - min_x + at_x
+		n.y = jn.y - min_y + at_y
+		g.nodes << n
+		g.next_node++
+		new_id[jn.id] = n.id
+		added << n.id
+	}
+	mut links := []NodeLink{}
+	for jl in doc.links {
+		from := new_id[jl.from_node] or { continue }
+		to := new_id[jl.to_node] or { continue }
+		res := g.connect(from, jl.from_slot, to, jl.to_slot) or { continue }
+		links << res.link
+	}
+	return NodePaste{
+		nodes: added
+		links: links
+	}
 }
 
 // load_json заменяет ноды и связи графа содержимым JSON (типы должны быть уже описаны).
@@ -833,39 +963,11 @@ pub fn (mut g NodeGraph) load_json(text string) ! {
 	g.links = []NodeLink{}
 	mut max_node := 0
 	for jn in doc.nodes {
-		t := g.types[jn.typ] or { continue }
 		if jn.id <= 0 || g.node_index(jn.id) >= 0 {
 			continue // повторный или битый id
 		}
-		mut values := t.inputs.map(node_default_value(it.field))
-		for i, jv in jn.values {
-			if i >= values.len {
-				break
-			}
-			values[i] = NodeValue{
-				number: jv.number
-				flag:   jv.flag
-				color:  node_json_color(jv.color, values[i].color)
-				choice: jv.choice
-			}
-		}
-		g.nodes << &GraphNode{
-			id:        jn.id
-			type_id:   jn.typ
-			x:         jn.x
-			y:         jn.y
-			collapsed: jn.collapsed
-			values:    values
-			title:     jn.title
-			data:      jn.data
-			width:     if jn.width > 0 { node_clamp_width(t, jn.width) } else { 0 }
-		}
-		// Высота зажимается снизу содержимым, как в set_node_height (content_height нужна запись
-		// ноды - она уже в списке)
-		if jn.height > 0 {
-			mut added := g.nodes.last()
-			added.height = max_f32(jn.height, g.content_height(added))
-		}
+		n := g.node_from_json(jn, jn.id) or { continue } // тип не описан
+		g.nodes << n
 		max_node = if jn.id > max_node { jn.id } else { max_node }
 	}
 	g.next_node = max_node + 1

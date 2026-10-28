@@ -365,3 +365,38 @@ fn test_node_editor_css_colors() {
 const blue = Color{0, 0, 255, 255}
 const green = Color{0, 255, 0, 255}
 const red = Color{255, 0, 0, 255}
+
+// Ctrl+C / Ctrl+V / Ctrl+X через буфер обмена: вставка под курсор с новыми id и выделением,
+// одна команда отмены; вырезание удаляет; обычный текст в буфере ничего не вставляет.
+fn test_node_editor_clipboard() {
+	mut t, mut ne, counter, mut stack := new_node_ui()!
+	ne.graph.connect(1, 0, 2, 0)!
+	t.click(500, 350) // фокус редактору
+	t.key(sdl_k_a, sdl_kmod_ctrl)
+	t.key(sdl_k_c, sdl_kmod_ctrl)
+	assert t.app.get_clipboard().contains('"type":"mix"')
+	t.move(100, 250)
+	t.key(sdl_k_v, sdl_kmod_ctrl)
+	assert ne.graph.nodes().len == 4
+	assert ne.graph.links().len == 2
+	sel := ne.selected_nodes()
+	assert sel.len == 2 && 1 !in sel && 2 !in sel, 'выделены вставленные'
+	pv := ne.graph.node(sel[0]) or { panic('pv') }
+	assert pv.x == 100 && pv.y == 250, 'угол группы под курсором'
+	assert counter.count(.node_added) == 2
+	assert stack.undo()
+	assert ne.graph.nodes().len == 2
+	// Ctrl+X: выделенная value - в буфер и удаляется
+	t.click(100, 50)
+	t.key(sdl_k_x, sdl_kmod_ctrl)
+	assert ne.graph.nodes().len == 1
+	t.key(sdl_k_v, sdl_kmod_ctrl)
+	assert ne.graph.nodes().len == 2
+	// Чужой текст в буфере - ничего не происходит, команды отмены нет
+	t.app.set_clipboard('hello')
+	before := stack.count()
+	t.key(sdl_k_v, sdl_kmod_ctrl)
+	assert ne.graph.nodes().len == 2
+	assert stack.count() == before
+	t.close()
+}

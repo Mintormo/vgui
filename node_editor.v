@@ -1522,11 +1522,82 @@ fn (mut ne NodeEditor) on_key(event &GuiEvent, app &App) bool {
 		ne.duplicate_selected()
 		return true
 	}
+	// Буфер обмена: Ctrl+C / Ctrl+X / Ctrl+V (сканкоды C = 6, X = 27, V = 25)
+	if event.ctrl() && !event.shift() && ctrl_letter(event, `c`, 6) {
+		ne.copy_selected(app)
+		return true
+	}
+	if event.ctrl() && !event.shift() && ctrl_letter(event, `x`, 27) {
+		ne.cut_selected(app)
+		return true
+	}
+	if event.ctrl() && !event.shift() && ctrl_letter(event, `v`, 25) {
+		ne.paste(app)
+		return true
+	}
 	if !event.ctrl() && !event.shift() && ctrl_letter(event, `h`, 11) {
 		ne.toggle_collapse_selected()
 		return true
 	}
 	return false
+}
+
+// ─── Буфер обмена ──────────────────────────────────────
+
+// copy_selected кладёт выделенные ноды и связи между ними в системный буфер обмена строкой JSON
+// (NodeGraph.copy_json): её вставит этот же редактор, другой редактор или другой запуск
+// приложения, а снаружи она читается как текст. Без выделения буфер не трогается.
+pub fn (mut ne NodeEditor) copy_selected(app &App) {
+	ids := ne.selected_nodes()
+	if ids.len == 0 {
+		return
+	}
+	app.set_clipboard(ne.graph.copy_json(ids))
+}
+
+// cut_selected - копировать в буфер и удалить (удаление - одна команда отмены, как Delete).
+pub fn (mut ne NodeEditor) cut_selected(app &App) {
+	if ne.selected.len == 0 {
+		return
+	}
+	ne.copy_selected(app)
+	ne.delete_selected()
+}
+
+// paste вставляет ноды из буфера обмена (NodeGraph.paste_json): левый верхний угол вставленной
+// группы - под курсором, если он над редактором, иначе в середине видимой части. Вставленные
+// ноды выделяются; всё - одна команда отмены. Не граф в буфере (обычный текст) - ничего не
+// происходит: Ctrl+V не должен ни ломать граф, ни ругаться на чужой текст.
+pub fn (mut ne NodeEditor) paste(app &App) {
+	text := app.get_clipboard()
+	if text == '' {
+		return
+	}
+	ctx := app.get_active_ctx()
+	mut sx, mut sy := ne.bounds.x + ne.bounds.w * 0.5, ne.bounds.y + ne.bounds.h * 0.5
+	if !isnil(ctx) && ne.bounds.contains(ctx.mouse_x, ctx.mouse_y) {
+		sx, sy = ctx.mouse_x, ctx.mouse_y
+	}
+	wx, wy := ne.to_world(sx, sy)
+	ne.begin_change()
+	res := ne.graph.paste_json(text, wx, wy) or {
+		ne.commit_change('Paste nodes') // граф не менялся - команды не будет
+		return
+	}
+	for id in res.nodes {
+		ne.emit(.node_added, id, 0, NodeLink{})
+	}
+	for l in res.links {
+		ne.emit(.link_added, 0, 0, l)
+	}
+	ne.selected = map[int]bool{}
+	for id in res.nodes {
+		ne.selected[id] = true
+	}
+	ne.active = if res.nodes.len > 0 { res.nodes.last() } else { 0 }
+	ne.touch()
+	ne.commit_change('Paste nodes')
+	ne.emit(.selection_changed, 0, 0, NodeLink{})
 }
 
 // duplicate_selected - копии выделенных нод (со значениями) и связей между ними, сдвинутые на
