@@ -684,7 +684,8 @@ fn (ne &NodeEditor) draw_node(n &GraphNode, mut ctx RenderContext) {
 		font := ctx.get_font(.bold, fpx)
 		fh := ctx.font_height_of(font)
 		tx := hr.x + 22 * ne.zoom
-		title := bc_truncate_text(ctx, t.title, hr.x + hr.w - tx - 6 * ne.zoom, font)
+		title := bc_truncate_text(ctx, ne.graph.node_title(n.id), hr.x + hr.w - tx - 6 * ne.zoom,
+			font)
 		ctx.draw_text_with_font(title, tx, hr.y + (hr.h - fh) * 0.5, head_text, font)
 	}
 	if !n.collapsed {

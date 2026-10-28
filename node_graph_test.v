@@ -177,3 +177,85 @@ fn test_node_graph_json_skips_bad_parts() {
 	}
 	assert g.nodes().len == 2
 }
+
+fn test_node_graph_links_from() {
+	mut g := sample_graph()
+	v := g.add_node('value', 0, 0)!
+	a := g.add_node('mix', 0, 0)!
+	b := g.add_node('mix', 0, 0)!
+	g.connect(v, 0, a, 0)!
+	g.connect(v, 0, b, 0)!
+	g.connect(a, 0, b, 1)!
+	from_v := g.links_from(v, 0)
+	assert from_v.len == 2
+	assert from_v[0].to_node == a && from_v[1].to_node == b
+	assert g.links_from(a, 0).len == 1
+	assert g.links_from(b, 0).len == 0
+}
+
+fn test_node_graph_eval_order() {
+	mut g := sample_graph()
+	// Порядок в nodes(): mix_b, value, mix_a, out, лишняя value2 - вычисление всё равно
+	// идёт от поставщиков к потребителям
+	b := g.add_node('mix', 0, 0)!
+	v := g.add_node('value', 0, 0)!
+	a := g.add_node('mix', 0, 0)!
+	extra := g.add_node('value', 0, 0)!
+	g.connect(v, 0, a, 0)!
+	g.connect(a, 0, b, 1)!
+	all := g.eval_order()!
+	assert all.len == 4
+	assert all.index(v) < all.index(a) && all.index(a) < all.index(b)
+	// Только то, от чего зависит b: лишняя нода не считается
+	needed := g.eval_order(b)!
+	assert needed == [v, a, b]
+	assert extra !in needed
+	// Цикл (разрешённый) - ошибка
+	g.allow_cycles = true
+	g.connect(b, 0, a, 1)!
+	if _ := g.eval_order() {
+		assert false
+	}
+}
+
+fn test_node_graph_title_and_data() {
+	mut g := sample_graph()
+	m := g.add_node('mix', 0, 0)!
+	assert g.node_title(m) == 'Mix'
+	assert g.set_node_title(m, 'Base color')
+	assert g.set_node_data(m, '{"cache":1}')
+	assert g.node_title(m) == 'Base color'
+	assert g.set_node_pos(m, 5, 6)
+	assert g.set_collapsed(m, true)
+	mut h := sample_graph()
+	h.load_json(g.to_json())!
+	n := h.node(m) or { panic('m') }
+	assert n.title == 'Base color' && n.data == '{"cache":1}'
+	assert n.x == 5 && n.y == 6 && n.collapsed
+	// Старое сохранение без title/data читается с пустыми полями
+	old := '{"version":1,"nodes":[{"id":1,"type":"mix","x":0,"y":0,"collapsed":false,"values":[]}],"links":[]}'
+	h.load_json(old)!
+	assert h.node_title(1) == 'Mix'
+	assert (h.node(1) or { panic('1') }).data == ''
+	assert !h.set_node_title(99, 'x')
+}
+
+// Правка графа кодом просит кадр сама (widget_changed), без invalidate.
+fn test_node_graph_changes_request_redraw() {
+	mut t := new_test_ui(width: 300, height: 200)!
+	defer {
+		t.close()
+	}
+	mut g := sample_graph()
+	mut ne := node_editor(g)
+	t.add(ne)
+	t.settle(20)
+	assert !t.app.needs_animation_now()
+	id := g.add_node('value', 10, 10)!
+	assert t.app.needs_animation_now(), 'add_node попросил кадр'
+	t.frame()
+	g.set_node_pos(id, 50, 50)
+	assert t.app.needs_animation_now(), 'set_node_pos попросил кадр'
+	t.frame()
+	assert !t.app.needs_animation_now()
+}

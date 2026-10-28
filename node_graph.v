@@ -18,6 +18,11 @@ import x.json2
 //   - циклы по умолчанию запрещены (граф шейдеров - DAG); allow_cycles разрешает;
 //   - на вход - одна связь (новая заменяет старую), с выхода - сколько угодно (Blender, Qt Nodes).
 //
+// Перерисовка: каждый изменяющий метод графа первой строкой зовёт widget_changed() (PROJECT.md,
+// «Инвалидация и dirty regions») - правка кодом видна сразу, в том числе из своего цикла. Прямое
+// присваивание полей GraphNode (n.x = ...) этого не делает: для позиции, свёрнутости, заголовка и
+// данных есть сеттеры (set_node_pos, set_collapsed, set_node_title, set_node_data).
+//
 // Значения полей входов (число, флажок, цвет, выбор) хранятся в ноде (GraphNode.values, по одному
 // на вход); у подключённого входа поле не показывается, но значение сохраняется. Снимки для отмены
 // (snapshot / restore) - копия нод и связей: команды UndoStack восстанавливают граф целиком.
@@ -115,6 +120,10 @@ pub mut:
 	y         f32
 	collapsed bool
 	values    []NodeValue
+	// title - свой заголовок этой ноды ('' - заголовок типа); data - строка приложения (параметры,
+	// ссылка на свой объект по ключу). Оба сохраняются в JSON.
+	title string
+	data  string
 }
 
 // NodeLink - связь: выход from_slot ноды from_node -> вход to_slot ноды to_node.
@@ -154,6 +163,7 @@ pub fn node_graph() &NodeGraph {
 
 // define_socket_type - тип сокета name с цветом и формой значка. Повторное описание заменяет.
 pub fn (mut g NodeGraph) define_socket_type(name string, color Color, shape SocketShape) {
+	widget_changed()
 	g.socket_types[name] = SocketTypeDef{
 		name:  name
 		color: color
@@ -163,11 +173,13 @@ pub fn (mut g NodeGraph) define_socket_type(name string, color Color, shape Sock
 
 // allow_conversion - выход типа from можно подключать ко входу типа to (неявное преобразование).
 pub fn (mut g NodeGraph) allow_conversion(from string, to string) {
+	widget_changed()
 	g.conversions['${from}>${to}'] = true
 }
 
 // define_node - тип ноды. Ошибка: пустой или повторный id.
 pub fn (mut g NodeGraph) define_node(t NodeTypeDef) ! {
+	widget_changed()
 	if t.id == '' {
 		return error('node type: empty id')
 	}
@@ -207,6 +219,7 @@ pub fn (g &NodeGraph) socket_type(name string) SocketTypeDef {
 // add_node - новая нода типа type_id в точке (x, y) холста; значения полей - по умолчанию.
 // Возвращает id. Ошибка - неизвестный тип.
 pub fn (mut g NodeGraph) add_node(type_id string, x f32, y f32) !int {
+	widget_changed()
 	t := g.types[type_id] or { return error('unknown node type `${type_id}`') }
 	n := &GraphNode{
 		id:      g.next_node
@@ -232,6 +245,7 @@ fn node_default_value(f NodeField) NodeValue {
 
 // remove_node удаляет ноду и все её связи; возвращает удалённые связи (для событий).
 pub fn (mut g NodeGraph) remove_node(id int) []NodeLink {
+	widget_changed()
 	idx := g.node_index(id)
 	if idx < 0 {
 		return []NodeLink{}
@@ -276,6 +290,7 @@ pub fn (g &NodeGraph) nodes() []&GraphNode {
 // raise_node поднимает ноду наверх (в конец порядка отрисовки) - выбранная нода не прячется
 // под соседними.
 pub fn (mut g NodeGraph) raise_node(id int) {
+	widget_changed()
 	idx := g.node_index(id)
 	if idx < 0 || idx == g.nodes.len - 1 {
 		return
@@ -285,8 +300,52 @@ pub fn (mut g NodeGraph) raise_node(id int) {
 	g.nodes << n
 }
 
+// set_node_pos - переместить ноду (левый верхний угол, единицы холста).
+pub fn (mut g NodeGraph) set_node_pos(id int, x f32, y f32) bool {
+	widget_changed()
+	mut n := g.node(id) or { return false }
+	n.x = x
+	n.y = y
+	return true
+}
+
+// set_collapsed - свернуть или развернуть ноду.
+pub fn (mut g NodeGraph) set_collapsed(id int, collapsed bool) bool {
+	widget_changed()
+	mut n := g.node(id) or { return false }
+	n.collapsed = collapsed
+	return true
+}
+
+// set_node_title - свой заголовок ноды ('' - вернуть заголовок типа).
+pub fn (mut g NodeGraph) set_node_title(id int, title string) bool {
+	widget_changed()
+	mut n := g.node(id) or { return false }
+	n.title = title
+	return true
+}
+
+// set_node_data - строка данных приложения у ноды (граф её не читает, только хранит и сохраняет).
+pub fn (mut g NodeGraph) set_node_data(id int, data string) bool {
+	widget_changed()
+	mut n := g.node(id) or { return false }
+	n.data = data
+	return true
+}
+
+// node_title - заголовок ноды для показа: свой, иначе заголовок типа.
+pub fn (g &NodeGraph) node_title(id int) string {
+	n := g.node(id) or { return '' }
+	if n.title != '' {
+		return n.title
+	}
+	t := g.types[n.type_id] or { return n.type_id }
+	return t.title
+}
+
 // clear - убрать все ноды и связи (типы остаются).
 pub fn (mut g NodeGraph) clear() {
+	widget_changed()
 	g.nodes = []&GraphNode{}
 	g.links = []NodeLink{}
 }
@@ -304,6 +363,7 @@ pub fn (g &NodeGraph) value(node int, slot int) ?NodeValue {
 
 // set_value - новое значение поля входа; число зажимается в границы поля, выбор - в список.
 pub fn (mut g NodeGraph) set_value(node int, slot int, v NodeValue) bool {
+	widget_changed()
 	mut n := g.node(node) or { return false }
 	t := g.types[n.type_id] or { return false }
 	if slot < 0 || slot >= n.values.len || slot >= t.inputs.len {
@@ -346,6 +406,12 @@ pub fn (g &NodeGraph) link_into(node int, slot int) ?NodeLink {
 		}
 	}
 	return none
+}
+
+// links_from - связи, выходящие из выхода slot ноды node (с выхода их может быть сколько угодно),
+// в порядке создания.
+pub fn (g &NodeGraph) links_from(node int, slot int) []NodeLink {
+	return g.links.filter(it.from_node == node && it.from_slot == slot)
 }
 
 // link_by_id - связь по id.
@@ -435,6 +501,7 @@ pub:
 // connect проводит связь (проверка - check_link). Связь на занятый вход заменяет прежнюю.
 // Та же связь, что уже есть, повторно не создаётся (link - она же, replaced пустая).
 pub fn (mut g NodeGraph) connect(from_node int, from_slot int, to_node int, to_slot int) !NodeConnect {
+	widget_changed()
 	g.check_link(from_node, from_slot, to_node, to_slot)!
 	mut replaced := NodeLink{}
 	if old := g.link_into(to_node, to_slot) {
@@ -463,6 +530,7 @@ pub fn (mut g NodeGraph) connect(from_node int, from_slot int, to_node int, to_s
 
 // disconnect удаляет связь по id; false - такой нет.
 pub fn (mut g NodeGraph) disconnect(link_id int) bool {
+	widget_changed()
 	for i, l in g.links {
 		if l.id == link_id {
 			g.links.delete(i)
@@ -470,6 +538,75 @@ pub fn (mut g NodeGraph) disconnect(link_id int) bool {
 		}
 	}
 	return false
+}
+
+// ─── Порядок вычисления ────────────────────────────────
+
+// eval_order - id нод в порядке вычисления: каждая нода идёт после всех, от чьих выходов зависят
+// её входы (топологическая сортировка, алгоритм Кана). Так приложение считает граф: проходит
+// список по порядку, и значения входов к моменту ноды уже готовы.
+//
+// targets - ноды, ради которых считают (например, Material Output): тогда в список входят только
+// они и всё, от чего они зависят, - лишние ветки не считаются (как Blender считает шейдер от
+// выхода). Без targets - весь граф. Среди готовых к вычислению нод порядок - как в nodes()
+// (детерминированно). Ошибка - в графе цикл (возможен только при allow_cycles).
+pub fn (g &NodeGraph) eval_order(targets ...int) ![]int {
+	// Какие ноды считать: все или только предки целей
+	mut wanted := map[int]bool{}
+	if targets.len == 0 {
+		for n in g.nodes {
+			wanted[n.id] = true
+		}
+	} else {
+		mut todo := targets.clone()
+		for todo.len > 0 {
+			cur := todo.pop()
+			if cur in wanted {
+				continue
+			}
+			if _ := g.node(cur) {
+				wanted[cur] = true
+				for l in g.links {
+					if l.to_node == cur {
+						todo << l.from_node
+					}
+				}
+			}
+		}
+	}
+	// Число ещё не посчитанных поставщиков у каждой ноды (связи между нужными нодами)
+	mut waiting := map[int]int{}
+	for id, _ in wanted {
+		waiting[id] = 0
+	}
+	for l in g.links {
+		if l.from_node in wanted && l.to_node in wanted {
+			waiting[l.to_node]++
+		}
+	}
+	mut order := []int{cap: wanted.len}
+	mut done := map[int]bool{}
+	for order.len < wanted.len {
+		// Первая в порядке nodes() нода, у которой все поставщики посчитаны
+		mut next := 0
+		for n in g.nodes {
+			if n.id in wanted && n.id !in done && waiting[n.id] == 0 {
+				next = n.id
+				break
+			}
+		}
+		if next == 0 {
+			return error('node graph: the graph has a cycle')
+		}
+		order << next
+		done[next] = true
+		for l in g.links {
+			if l.from_node == next && l.to_node in wanted {
+				waiting[l.to_node]--
+			}
+		}
+	}
+	return order
 }
 
 // ─── Снимки (отмена) ───────────────────────────────────
@@ -501,6 +638,7 @@ fn (g &NodeGraph) snapshot() NodeGraphState {
 // restore - вернуть граф к снимку. Ноды создаются заново (снимок не должен меняться правками
 // после восстановления - его ещё раз восстановит redo/undo).
 fn (mut g NodeGraph) restore(s NodeGraphState) {
+	widget_changed()
 	mut nodes := []&GraphNode{cap: s.nodes.len}
 	for n in s.nodes {
 		mut c := &GraphNode{
@@ -520,9 +658,11 @@ fn (mut g NodeGraph) restore(s NodeGraphState) {
 // Формат сохранения (версия 1):
 //   {"version":1,
 //    "nodes":[{"id":1,"type":"add","x":10,"y":20,"collapsed":false,
-//              "values":[{"number":0.5,"flag":false,"color":[200,200,200,255],"choice":0}]}],
+//              "values":[{"number":0.5,"flag":false,"color":[200,200,200,255],"choice":0}],
+//              "title":"","data":""}],
 //    "links":[{"id":1,"from":1,"out":0,"to":2,"in":1}]}
-// Типы не сохраняются: их описывает приложение кодом.
+// Типы не сохраняются: их описывает приложение кодом. title и data появились позже: в старых
+// сохранениях их нет, и они читаются пустыми.
 
 struct NodeValueJson {
 	number f64
@@ -538,6 +678,8 @@ struct GraphNodeJson {
 	y         f32
 	collapsed bool
 	values    []NodeValueJson
+	title     string
+	data      string
 }
 
 struct NodeLinkJson {
@@ -567,6 +709,8 @@ pub fn (g &NodeGraph) to_json() string {
 			x:         n.x
 			y:         n.y
 			collapsed: n.collapsed
+			title:     n.title
+			data:      n.data
 			values:    n.values.map(NodeValueJson{
 				number: it.number
 				flag:   it.flag
@@ -592,6 +736,7 @@ pub fn (g &NodeGraph) to_json() string {
 // которых в сохранении нет (тип ноды с тех пор дополнен), - по умолчанию. Ошибка - текст не
 // JSON графа; граф при этом не меняется.
 pub fn (mut g NodeGraph) load_json(text string) ! {
+	widget_changed()
 	doc := json2.decode[NodeGraphJson](text) or { return error('node graph: ${err.msg()}') }
 	if doc.version != 1 {
 		return error('node graph: unsupported version ${doc.version}')
@@ -624,6 +769,8 @@ pub fn (mut g NodeGraph) load_json(text string) ! {
 			y:         jn.y
 			collapsed: jn.collapsed
 			values:    values
+			title:     jn.title
+			data:      jn.data
 		}
 		max_node = if jn.id > max_node { jn.id } else { max_node }
 	}

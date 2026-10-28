@@ -92,17 +92,17 @@ fn main() {
 // Diffuse -> Mix Shader -> Material Output.
 fn build_graph() !&vgui.NodeGraph {
 	mut g := vgui.node_graph()
-	g.define_socket_type('float', vgui.Color{161, 161, 161, 255}, .circle)
-	g.define_socket_type('color', vgui.Color{199, 199, 41, 255}, .circle)
-	g.define_socket_type('vector', vgui.Color{99, 99, 199, 255}, .circle)
-	g.define_socket_type('shader', vgui.Color{99, 199, 99, 255}, .diamond)
+	g.define_socket_type('float', vgui.Color{150, 160, 175, 255}, .circle)
+	g.define_socket_type('color', vgui.Color{232, 170, 60, 255}, .circle)
+	g.define_socket_type('vector', vgui.Color{110, 140, 240, 255}, .circle)
+	g.define_socket_type('shader', vgui.Color{80, 200, 150, 255}, .diamond)
 	g.allow_conversion('float', 'color')
 
-	input := vgui.Color{131, 49, 74, 255}
-	color := vgui.Color{108, 105, 29, 255}
-	conv := vgui.Color{36, 98, 131, 255}
-	shader := vgui.Color{36, 109, 72, 255}
-	output := vgui.Color{99, 42, 42, 255}
+	input := vgui.Color{150, 80, 170, 255}
+	color := vgui.Color{70, 130, 180, 255}
+	conv := vgui.Color{90, 110, 130, 255}
+	shader := vgui.Color{50, 140, 120, 255}
+	output := vgui.Color{170, 70, 80, 255}
 
 	g.define_node(vgui.NodeTypeDef{
 		id:       'value'
@@ -136,7 +136,7 @@ fn build_graph() !&vgui.NodeGraph {
 		id:       'noise'
 		title:    'Noise Texture'
 		category: 'Texture'
-		color:    vgui.Color{121, 70, 30, 255}
+		color:    vgui.Color{190, 110, 60, 255}
 		width:    170
 		inputs:   [
 			vgui.node_socket('Vector', 'vector'),

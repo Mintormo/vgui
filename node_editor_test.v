@@ -41,22 +41,22 @@ fn new_node_ui() !(&TestUi, &NodeEditor, &NeCounter, &UndoStack) {
 // sample_editor_graph - типы float/color/shader (float -> color разрешено), ноды value, mix, out.
 fn sample_editor_graph() &NodeGraph {
 	mut g := node_graph()
-	g.define_socket_type('float', Color{160, 160, 160, 255}, .circle)
-	g.define_socket_type('color', Color{199, 199, 41, 255}, .circle)
-	g.define_socket_type('shader', Color{99, 199, 99, 255}, .diamond)
+	g.define_socket_type('float', Color{150, 160, 175, 255}, .circle)
+	g.define_socket_type('color', Color{232, 170, 60, 255}, .circle)
+	g.define_socket_type('shader', Color{80, 200, 150, 255}, .diamond)
 	g.allow_conversion('float', 'color')
 	g.define_node(NodeTypeDef{
 		id:       'value'
 		title:    'Value'
 		category: 'Input'
-		color:    Color{120, 60, 60, 255}
+		color:    Color{150, 80, 170, 255}
 		outputs:  [node_socket('Value', 'float')]
 	}) or { panic(err) }
 	g.define_node(NodeTypeDef{
 		id:       'mix'
 		title:    'Mix Color'
 		category: 'Color'
-		color:    Color{110, 110, 40, 255}
+		color:    Color{70, 130, 180, 255}
 		inputs:   [
 			node_socket('Factor', 'float', kind: .number, number: 0.5, min: 0, max: 1),
 			node_socket('Color', 'color', kind: .color, color: Color{200, 60, 60, 255}),
@@ -68,7 +68,7 @@ fn sample_editor_graph() &NodeGraph {
 		id:       'out'
 		title:    'Material Output'
 		category: 'Output'
-		color:    Color{60, 100, 60, 255}
+		color:    Color{170, 70, 80, 255}
 		inputs:   [node_socket('Surface', 'shader')]
 	}) or { panic(err) }
 	return g
