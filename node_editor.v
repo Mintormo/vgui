@@ -67,12 +67,13 @@ pub enum NodeEventKind {
 	value_changed
 	collapsed
 	selection_changed
-	graph_restored // отмена/повтор вернули граф к снимку
-	node_resized   // пользователь изменил размер ноды, потянув край или угол
-	node_renamed   // пользователь задал ноде свой заголовок (F2 / двойной щелчок по шапке)
-	frame_added    // фрейм создан (Ctrl+J); NodeEvent.node - id фрейма
-	frame_removed  // фрейм удалён (ноды внутри остаются)
-	frame_changed  // фрейм перемещён, изменён размер или заголовок
+	graph_restored  // отмена/повтор вернули граф к снимку
+	node_resized    // пользователь изменил размер ноды, потянув край или угол
+	node_renamed    // пользователь задал ноде свой заголовок (F2 / двойной щелчок по шапке)
+	frame_added     // фрейм создан (Ctrl+J); NodeEvent.node - id фрейма
+	frame_removed   // фрейм удалён (ноды внутри остаются)
+	frame_changed   // фрейм перемещён, изменён размер или заголовок
+	sockets_changed // у ноды добавлен или удалён свой вход (NodeEvent.slot - его номер)
 }
 
 // NodeEvent - событие редактора: вид, нода и слот (вход), связь (для link_*).
@@ -98,6 +99,9 @@ enum NodeHitKind {
 	// (как холст: рамка выделения, меню добавления)
 	frame_header // шапка фрейма: тянуть - двигать с нодами внутри
 	frame_edge   // край или угол фрейма (slot - маска ne_edge_*)
+	// Свои сокеты (node_sockets.v)
+	grow          // строка «+» внизу ноды - добавить вход
+	socket_remove // кнопка «×» своего входа slot
 }
 
 struct NodeHit {
@@ -380,13 +384,9 @@ fn (mut ne NodeEditor) zoom_at(sx f32, sy f32, z f32) {
 
 // ─── Геометрия нод (в единицах холста) ─────────────────
 
+// type_of - сокеты ноды для вида: тип вместе с её собственными сокетами (NodeGraph.def_of).
 fn (ne &NodeEditor) type_of(n &GraphNode) NodeTypeDef {
-	return ne.graph.types[n.type_id] or {
-		NodeTypeDef{
-			id:    n.type_id
-			title: n.type_id
-		}
-	}
+	return ne.graph.def_of(n)
 }
 
 // node_world_rect - карточка ноды на холсте: размеры - своя ширина/высота или по типу и
@@ -428,7 +428,11 @@ fn (ne &NodeEditor) field_rect(n &GraphNode, slot int) Rect {
 		return Rect{}
 	}
 	y := ne_row_y(n, t.outputs.len + slot)
-	return Rect{n.x + ne_field_inset, y + 2, ne.graph.width_of(n) - ne_field_inset * 2, ne_row_h - 4}
+	mut w := ne.graph.width_of(n) - ne_field_inset * 2
+	if slot >= ne.graph.type_inputs(n) {
+		w -= ne_remove_btn + 2 // у своего входа справа - кнопка «×» (node_sockets.v)
+	}
+	return Rect{n.x + ne_field_inset, y + 2, w, ne_row_h - 4}
 }
 
 fn ne_collapse_rect(n &GraphNode) Rect {
@@ -490,6 +494,15 @@ fn (ne &NodeEditor) hit_test(sx f32, sy f32) NodeHit {
 			return NodeHit{.header, n.id, 0}
 		}
 		t := ne.type_of(n)
+		// Кнопки своих сокетов (node_sockets.v) - раньше полей: «×» стоит в строке входа
+		if ne.grow_rect(n).contains(wx, wy) {
+			return NodeHit{.grow, n.id, 0}
+		}
+		for s in ne.graph.type_inputs(n) .. t.inputs.len {
+			if ne.remove_rect(n, s).contains(wx, wy) {
+				return NodeHit{.socket_remove, n.id, s}
+			}
+		}
 		for s in 0 .. t.inputs.len {
 			if ne.field_rect(n, s).contains(wx, wy) {
 				return NodeHit{.field, n.id, s}
@@ -1035,6 +1048,7 @@ fn (ne &NodeEditor) draw_node(n &GraphNode, mut ctx RenderContext) {
 	}
 	if !n.collapsed {
 		ne.draw_rows(n, t, fpx, mut ctx)
+		ne.draw_socket_buttons(n, mut ctx)
 	}
 	// Сокеты
 	for s in 0 .. t.outputs.len {
@@ -1460,6 +1474,13 @@ fn (mut ne NodeEditor) on_mouse_down(event &GuiEvent, app &App) bool {
 		}
 		.frame_header, .frame_edge {
 			ne.press_frame(hit)
+		}
+		.grow {
+			ne.select_press(hit.node, false)
+			ne.grow_input_of(hit.node)
+		}
+		.socket_remove {
+			ne.remove_input_of(hit.node, hit.slot)
 		}
 		.none {
 			ne.select_frame(0)
@@ -2033,6 +2054,8 @@ pub fn (mut ne NodeEditor) duplicate_selected() {
 		dst.collapsed = src.collapsed
 		dst.width = src.width
 		dst.height = src.height
+		dst.extra_inputs = src.extra_inputs.clone()
+		dst.extra_outputs = src.extra_outputs.clone()
 		dst.title = src.title
 		copy_of[id] = nid
 		ne.emit(.node_added, nid, 0, NodeLink{})

@@ -103,6 +103,10 @@ pub mut:
 	max_width f32
 	inputs    []NodeSocketDef
 	outputs   []NodeSocketDef
+	// grow_input - шаблон входа, который пользователь добавляет ноде строкой «+» внизу карточки
+	// (нода «Объединить» с растущим числом входов; node_sockets.v). typ = '' - строки нет.
+	// В имени {n} заменяется номером входа.
+	grow_input NodeSocketDef
 }
 
 // NodeValue - значение поля одного входа ноды (используется поле по виду NodeField).
@@ -134,6 +138,10 @@ pub mut:
 	// height - своя высота (0 - по содержимому). Меньше содержимого (шапка и строки сокетов) не
 	// бывает: лишнее место - пустое поле внизу карточки. Читать - node_height.
 	height f32
+	// Свои сокеты этой ноды - после сокетов типа (node_sockets.v: add_input / add_output).
+	// Полный список сокетов ноды - def_of. Значения своих входов - в values после входов типа.
+	extra_inputs  []NodeSocketDef
+	extra_outputs []NodeSocketDef
 }
 
 // NodeLink - связь: выход from_slot ноды from_node -> вход to_slot ноды to_node.
@@ -381,8 +389,10 @@ fn (g &NodeGraph) height_of(n &GraphNode) f32 {
 // поле снизу. Константы геометрии (ne_header_h, ne_row_h, ne_pad_bottom) - в node_editor.v:
 // высоту модели и вида считает одна формула.
 fn (g &NodeGraph) content_height(n &GraphNode) f32 {
-	t := g.types[n.type_id] or { return ne_header_h }
-	return ne_header_h + f32(t.outputs.len + t.inputs.len) * ne_row_h + ne_pad_bottom
+	if n.type_id !in g.types {
+		return ne_header_h
+	}
+	return ne_header_h + f32(g.row_count(n)) * ne_row_h + ne_pad_bottom
 }
 
 // set_node_height - высота ноды (0 и меньше - по содержимому). Меньше содержимого не
@@ -468,7 +478,7 @@ pub fn (g &NodeGraph) value(node int, slot int) ?NodeValue {
 pub fn (mut g NodeGraph) set_value(node int, slot int, v NodeValue) bool {
 	widget_changed()
 	mut n := g.node(node) or { return false }
-	t := g.types[n.type_id] or { return false }
+	t := g.def_of(n)
 	if slot < 0 || slot >= n.values.len || slot >= t.inputs.len {
 		return false
 	}
@@ -541,8 +551,12 @@ pub fn (g &NodeGraph) check_link(from_node int, from_slot int, to_node int, to_s
 	}
 	fnode := g.node(from_node) or { return error('no node ${from_node}') }
 	tnode := g.node(to_node) or { return error('no node ${to_node}') }
-	ft := g.types[fnode.type_id] or { return error('unknown node type') }
-	tt := g.types[tnode.type_id] or { return error('unknown node type') }
+	if fnode.type_id !in g.types || tnode.type_id !in g.types {
+		return error('unknown node type')
+	}
+	// Сокеты ноды - тип и её собственные (def_of)
+	ft := g.def_of(fnode)
+	tt := g.def_of(tnode)
 	if from_slot < 0 || from_slot >= ft.outputs.len {
 		return error('no output ${from_slot}')
 	}
@@ -731,7 +745,12 @@ fn (g &NodeGraph) snapshot() NodeGraphState {
 	mut nodes := []GraphNode{cap: g.nodes.len}
 	for n in g.nodes {
 		mut c := *n
+		// Массивы - копией, как и values: снимок не должен делить память с живой нодой, что бы с
+		// её массивами ни делали дальше (сейчас delete в V и так выделяет новую память - это
+		// проверено мутацией, - но на это поведение снимок не полагается)
 		c.values = n.values.clone()
+		c.extra_inputs = n.extra_inputs.clone()
+		c.extra_outputs = n.extra_outputs.clone()
 		nodes << c
 	}
 	return NodeGraphState{
@@ -754,6 +773,8 @@ fn (mut g NodeGraph) restore(s NodeGraphState) {
 			...n
 		}
 		c.values = n.values.clone()
+		c.extra_inputs = n.extra_inputs.clone()
+		c.extra_outputs = n.extra_outputs.clone()
 		nodes << c
 	}
 	g.nodes = nodes
@@ -799,6 +820,9 @@ mut:
 	data      string
 	width     f32
 	height    f32
+	// Свои сокеты ноды (node_sockets.v); в старых сохранениях их нет - пусто
+	extra_inputs  []NodeSocketJson
+	extra_outputs []NodeSocketJson
 }
 
 struct NodeLinkJson {
@@ -836,16 +860,18 @@ pub fn (g &NodeGraph) to_json() string {
 
 fn node_to_json(n &GraphNode) GraphNodeJson {
 	return GraphNodeJson{
-		id:        n.id
-		typ:       n.type_id
-		x:         n.x
-		y:         n.y
-		collapsed: n.collapsed
-		title:     n.title
-		data:      n.data
-		width:     n.width
-		height:    n.height
-		values:    n.values.map(NodeValueJson{
+		id:            n.id
+		typ:           n.type_id
+		x:             n.x
+		y:             n.y
+		collapsed:     n.collapsed
+		title:         n.title
+		data:          n.data
+		width:         n.width
+		height:        n.height
+		extra_inputs:  n.extra_inputs.map(socket_to_json(it))
+		extra_outputs: n.extra_outputs.map(socket_to_json(it))
+		values:        n.values.map(NodeValueJson{
 			number: it.number
 			flag:   it.flag
 			color:  [int(it.color.r), int(it.color.g), int(it.color.b), int(it.color.a)]
@@ -869,7 +895,12 @@ fn link_to_json(l NodeLink) NodeLinkJson {
 // дополнен), - по умолчанию; ширина - в пределах типа, высота - не меньше содержимого.
 fn (g &NodeGraph) node_from_json(jn GraphNodeJson, id int) ?&GraphNode {
 	t := g.types[jn.typ] or { return none }
-	mut values := t.inputs.map(node_default_value(it.field))
+	// Свои сокеты ноды - до значений: значения идут по всем входам, типа и своим
+	extra_in := jn.extra_inputs.map(socket_from_json(it))
+	extra_out := jn.extra_outputs.map(socket_from_json(it))
+	mut inputs := t.inputs.clone()
+	inputs << extra_in
+	mut values := inputs.map(node_default_value(it.field))
 	for i, jv in jn.values {
 		if i >= values.len {
 			break
@@ -882,15 +913,17 @@ fn (g &NodeGraph) node_from_json(jn GraphNodeJson, id int) ?&GraphNode {
 		}
 	}
 	mut n := &GraphNode{
-		id:        id
-		type_id:   jn.typ
-		x:         jn.x
-		y:         jn.y
-		collapsed: jn.collapsed
-		values:    values
-		title:     jn.title
-		data:      jn.data
-		width:     if jn.width > 0 { node_clamp_width(t, jn.width) } else { 0 }
+		id:            id
+		type_id:       jn.typ
+		x:             jn.x
+		y:             jn.y
+		collapsed:     jn.collapsed
+		values:        values
+		title:         jn.title
+		data:          jn.data
+		width:         if jn.width > 0 { node_clamp_width(t, jn.width) } else { 0 }
+		extra_inputs:  extra_in
+		extra_outputs: extra_out
 	}
 	if jn.height > 0 {
 		n.height = max_f32(jn.height, g.content_height(n))

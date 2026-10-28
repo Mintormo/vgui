@@ -42,7 +42,10 @@ pub fn (g &NodeGraph) out_type(node int, slot int) string {
 fn (g &NodeGraph) out_type_depth(node int, slot int, depth int) string {
 	n := g.node(node) or { return '*' }
 	if n.type_id != node_reroute_type {
-		t := g.types[n.type_id] or { return '*' }
+		if n.type_id !in g.types {
+			return '*'
+		}
+		t := g.def_of(n)
 		return if slot >= 0 && slot < t.outputs.len { t.outputs[slot].typ } else { '*' }
 	}
 	if depth > 256 {
@@ -64,7 +67,10 @@ pub fn (g &NodeGraph) in_types(node int, slot int) []string {
 fn (g &NodeGraph) collect_in_types(node int, slot int, depth int, mut out []string) {
 	n := g.node(node) or { return }
 	if n.type_id != node_reroute_type {
-		t := g.types[n.type_id] or { return }
+		if n.type_id !in g.types {
+			return
+		}
+		t := g.def_of(n)
 		if slot >= 0 && slot < t.inputs.len {
 			out << t.inputs[slot].typ
 		}

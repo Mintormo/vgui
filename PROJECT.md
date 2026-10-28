@@ -1294,6 +1294,17 @@ Delete/X, Shift+D, Ctrl+A, H, Home, Shift+A, Esc, Ctrl+C/X/V - буквы чер
 пока тянут связь - вся точка с кольцом подходящий сокет (`reroute_hit`). Попадание по точкам - в
 одном проходе с сокетами (они маленькие и лежат на проводах). Заголовка, полей и размера у точки нет.
 
+**Свои сокеты ноды** (`node_sockets.v`). `GraphNode.extra_inputs`/`extra_outputs` идут после
+сокетов типа, номера слотов сквозные. **Полный список сокетов ноды - `def_of(n)`** (тип + свои): им
+пользуются `check_link`, `set_value`, высота (`row_count`, общий для модели и вида) и весь вид
+(`NodeEditor.type_of` = `def_of`), поэтому свои сокеты ничем не отличаются от сокетов типа. API:
+`add_input`/`add_output` (вход получает значение по умолчанию в `values`), `remove_input`/
+`remove_output` - **только свои** (сокеты типа - false); связи удалённого слота удаляются, у
+следующих номер слота уменьшается. В JSON - `extra_inputs`/`extra_outputs` (вид поля - число с
+проверкой диапазона). Интерфейс: у типа с шаблоном **`grow_input`** внизу карточки строка «+»
+(добавляет вход, `{n}` в имени - номер), у своего неподключённого входа под курсором - «×»; событие
+`sockets_changed`. Дублирование копирует свои сокеты. Снимки клонируют массивы (как `values`).
+
 **Подсказки сокетов** - `tooltip_at` (интерфейс `TipAtPoint`, «Подсказки»): имя и тип; у входа -
 значение поля или `<- нода: выход`, у выхода - число связей. Своё (например, вычисленное значение) -
 колбэк `socket_tooltip(node, slot, out)`, '' - текст по умолчанию.
@@ -1349,8 +1360,8 @@ x, y)`). В системный буфер кладётся **JSON того же 
 
 **События** - один колбэк `on_event(NodeEvent{kind, node, slot, link})`: node_added/removed,
 nodes_moved, link_added/removed (замена связи - removed + added), value_changed, collapsed,
-selection_changed, graph_restored, node_resized, node_renamed, frame_added/removed/changed (новые
-виды - только в конец enum).
+selection_changed, graph_restored, node_resized, node_renamed, frame_added/removed/changed,
+sockets_changed (новые виды - только в конец enum).
 
 **Вид из темы и CSS** («Стили CSS»). Все цвета редактора - поля темы `ne_*` с запасными значениями
 `eff_ne_*()` (`theme.v`; a = 0 / 0 - «не задано»): `ne_bg`, `ne_grid`, `ne_grid_major`, `ne_node_bg`,

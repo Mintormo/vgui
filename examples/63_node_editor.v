@@ -19,6 +19,7 @@ module main
 //     края меняют размер, двойной щелчок по шапке или F2 - переименовать, Delete - удалить;
 //   - reroute-точки: двойной щелчок по проводу ставит точку; центр точки тащит её, кольцо вокруг
 //     тянет новую связь;
+//   - Sum (Converter): строка «+» добавляет вход, «×» у своего входа удаляет его;
 //   - двойной щелчок по шапке или F2 - переименовать ноду;
 //   - клавиши: Shift+A - меню добавления, Delete/X - удалить, Shift+D - дублировать, H - свернуть,
 //     Home - показать всё, Ctrl+C / Ctrl+X / Ctrl+V - буфер обмена (JSON графа: можно вставить и в
@@ -218,6 +219,15 @@ fn build_graph() !&vgui.NodeGraph {
 			vgui.node_socket('Value', 'float', kind: .number, number: 0.5),
 		]
 		outputs:  [vgui.node_socket('Value', 'float')]
+	})!
+	// Sum - входы добавляет пользователь строкой «+» (шаблон grow_input, {n} - номер входа)
+	g.define_node(vgui.NodeTypeDef{
+		id:         'sum'
+		title:      'Sum'
+		category:   'Converter'
+		color:      conv
+		outputs:    [vgui.node_socket('Total', 'float')]
+		grow_input: vgui.node_socket('Value {n}', 'float', kind: .number, number: 1)
 	})!
 	g.define_node(vgui.NodeTypeDef{
 		id:       'matte'

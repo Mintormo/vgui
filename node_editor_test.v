@@ -629,3 +629,32 @@ fn test_node_editor_reroute() {
 	assert ne.tooltip_at(cx, cy + 100) == 'Reroute (float)'
 	t.close()
 }
+
+// Строка «+» добавляет вход по шаблону grow_input ({n} - номер), «×» у своего свободного входа
+// удаляет его; каждое - одна команда отмены, событие sockets_changed.
+fn test_node_editor_grow_inputs() {
+	mut t, mut ne, counter, mut stack := new_node_ui()!
+	ne.graph.define_node(NodeTypeDef{
+		id:         'join'
+		title:      'Join'
+		outputs:    [node_socket('Out', 'float')]
+		grow_input: node_socket('In {n}', 'float')
+	})!
+	j := ne.graph.add_node('join', 40, 200)! // строки: Out, «+» (y 200 + 24 + 22)
+	t.frame()
+	assert ne.hit_test(100, 257).kind == .grow
+	t.click(100, 257)
+	t.click(100, 279) // «+» сдвинулся на строку вниз
+	n := ne.graph.node(j) or { panic('j') }
+	assert n.extra_inputs.len == 2 && n.extra_inputs[1].name == 'In 2'
+	assert counter.count(.sockets_changed) == 2
+	assert stack.undo()
+	assert (ne.graph.node(j) or { panic('j') }).extra_inputs.len == 1
+	// «×» первого своего входа (строка 1: y 246..268), справа у края
+	t.move(100, 257)
+	rr := ne.remove_rect(n, 0)
+	assert rr.w > 0
+	t.click(rr.x + 8, rr.y + 8)
+	assert (ne.graph.node(j) or { panic('j') }).extra_inputs.len == 0
+	t.close()
+}

@@ -414,3 +414,37 @@ fn test_node_graph_reroute() {
 	h.load_json(g.to_json())!
 	assert h.is_reroute(r1) && h.out_type(r2, 0) == 'float'
 }
+
+// Свои сокеты ноды: идут после сокетов типа, участвуют в проверке связей и значениях; удаление
+// сдвигает номера следующих слотов в связях; снимок отмены не портится удалением; JSON хранит их.
+fn test_node_graph_extra_sockets() {
+	mut g := sample_graph()
+	v := g.add_node('value', 0, 0)!
+	m := g.add_node('mix', 300, 0)! // входы типа: 0..2
+	a := g.add_input(m, node_socket('A', 'float', kind: .number, number: 2))!
+	b := g.add_input(m, node_socket('B', 'color'))!
+	assert a == 3 && b == 4
+	assert (g.value(m, a) or { panic('v') }).number == 2
+	assert g.node_height(m) == 24 + 6 * 22 + 6
+	g.connect(v, 0, m, a)!
+	g.connect(v, 0, m, b)! // float -> color
+	snap := g.snapshot()
+	assert !g.remove_input(m, 1), 'вход типа не удаляется'
+	assert g.remove_input(m, a)
+	links := g.links()
+	assert links.len == 1 && links[0].to_slot == 3, 'B сдвинулся на место A'
+	assert g.def_of(g.node(m) or { panic('m') }).inputs[3].name == 'B'
+	g.restore(snap)
+	assert g.def_of(g.node(m) or { panic('m') }).inputs.len == 5, 'снимок цел'
+	assert g.links().len == 2
+	o := g.add_output(m, node_socket('Extra', 'shader'))!
+	assert o == 1
+	out_node := g.add_node('out', 600, 0)!
+	g.connect(m, o, out_node, 0)!
+	mut h := sample_graph()
+	h.load_json(g.to_json())!
+	hm := h.node(m) or { panic('json') }
+	assert hm.extra_inputs.len == 2 && hm.extra_outputs.len == 1
+	assert h.def_of(hm).inputs[3].field.kind == .number
+	assert h.links().len == 3
+}
