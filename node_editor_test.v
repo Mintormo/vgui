@@ -599,3 +599,33 @@ fn test_node_editor_frames() {
 	assert ne.graph.frames().len == 1
 	t.close()
 }
+
+// Reroute-точки в редакторе: двойной щелчок по проводу ставит точку (одна команда); кольцо
+// вокруг точки тянет новую связь, центр - саму точку; провод, отпущенный на точку, входит в неё.
+fn test_node_editor_reroute() {
+	mut t, mut ne, _, mut stack := new_node_ui()!
+	ne.graph.connect(1, 0, 2, 1)! // value (190, 75) -> mix.Color (300, 119)
+	t.frame()
+	// Середина кривой: x 245, y между 75 и 119
+	t.dbl_click(245, 97)
+	nodes := ne.graph.nodes()
+	assert nodes.len == 3
+	r := nodes.last().id
+	assert ne.graph.is_reroute(r)
+	assert ne.graph.links().len == 2
+	assert (ne.graph.source_of(2, 1) or { panic('src') }).from_node == 1
+	assert stack.undo()
+	assert ne.graph.nodes().len == 2 && ne.graph.links().len == 1
+	assert stack.redo()
+	// Центр точки - тащить; кольцо - связь в mix.Factor (300, 97)
+	pt := ne.graph.node(r) or { panic('r') }
+	cx, cy := pt.x + 6, pt.y + 6 // копии: pt - ссылка на ноду, её поля меняются
+	assert ne.hit_test(cx, cy).kind == .body
+	assert ne.hit_test(cx + 9, cy).kind == .socket_out
+	t.drag(cx + 9, cy, 300, 97)
+	assert (ne.graph.link_into(2, 0) or { panic('кольцо') }).from_node == r
+	t.drag(cx, cy, cx, cy + 100)
+	assert (ne.graph.node(r) or { panic('r') }).y == cy - 6 + 100
+	assert ne.tooltip_at(cx, cy + 100) == 'Reroute (float)'
+	t.close()
+}

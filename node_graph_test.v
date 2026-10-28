@@ -379,3 +379,38 @@ fn test_node_graph_frames() {
 	h.load_json('{"version":1,"nodes":[{"id":1,"type":"mix","x":0,"y":0,"collapsed":false,"values":[]}],"links":[]}')!
 	assert h.frames().len == 0
 }
+
+// Reroute-точки: тип выхода - сквозь цепочку точек; связь проверяется по реальным типам (color
+// через точку на shader-вход - нельзя); source_of проходит точки насквозь; в меню типов точки нет.
+fn test_node_graph_reroute() {
+	mut g := sample_graph()
+	v := g.add_node('value', 0, 0)!
+	m := g.add_node('mix', 300, 0)!
+	o := g.add_node('out', 600, 0)!
+	r1 := g.add_reroute(150, 20)
+	r2 := g.add_reroute(200, 20)
+	assert g.is_reroute(r1) && !g.is_reroute(v)
+	assert g.out_type(r1, 0) == '*'
+	g.connect(v, 0, r1, 0)!
+	g.connect(r1, 0, r2, 0)!
+	assert g.out_type(r2, 0) == 'float'
+	g.connect(r2, 0, m, 1)! // float -> color: преобразование разрешено
+	if _ := g.connect(r2, 0, o, 0) {
+		assert false // float -> shader нельзя, хоть у точки тип `*`
+	}
+	src := g.source_of(m, 1) or { panic('нет источника') }
+	assert src.from_node == v && src.from_slot == 0 && src.to_node == m
+	// Вход точки должен подходить всем, кого она питает: mix.Result (color) в цепочку, которая
+	// идёт в color-вход - можно; out-нода питается другой точкой
+	r3 := g.add_reroute(500, 20)
+	g.connect(r3, 0, o, 0)!
+	assert g.in_types(r3, 0) == ['shader']
+	if _ := g.connect(m, 0, r3, 0) {
+		assert false // color -> shader нельзя
+	}
+	assert g.node_types().all(it.id != node_reroute_type)
+	// Сохранение и загрузка
+	mut h := sample_graph()
+	h.load_json(g.to_json())!
+	assert h.is_reroute(r1) && h.out_type(r2, 0) == 'float'
+}

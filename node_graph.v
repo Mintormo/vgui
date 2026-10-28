@@ -168,7 +168,19 @@ mut:
 
 // node_graph - пустой граф без типов.
 pub fn node_graph() &NodeGraph {
-	return &NodeGraph{}
+	mut g := &NodeGraph{}
+	// Встроенный тип reroute-точки (node_reroute.v): в типах есть всегда - его ноды загружаются
+	// из JSON и вставляются из буфера, как любые; в type_order его нет - меню его не показывает
+	g.types[node_reroute_type] = NodeTypeDef{
+		id:        node_reroute_type
+		title:     'Reroute'
+		width:     ne_reroute_size
+		min_width: ne_reroute_size
+		max_width: ne_reroute_size
+		inputs:    [node_socket('', '*')]
+		outputs:   [node_socket('', '*')]
+	}
+	return g
 }
 
 // ─── Описание типов ────────────────────────────────────
@@ -337,6 +349,9 @@ pub fn (g &NodeGraph) node_width(id int) f32 {
 
 // width_of - ширина ноды по её записи (без поиска по id; для отрисовки и попадания).
 fn (g &NodeGraph) width_of(n &GraphNode) f32 {
+	if n.type_id == node_reroute_type {
+		return ne_reroute_size
+	}
 	if n.width > 0 {
 		return n.width
 	}
@@ -353,6 +368,9 @@ pub fn (g &NodeGraph) node_height(id int) f32 {
 
 // height_of - высота ноды по её записи (для отрисовки и попадания).
 fn (g &NodeGraph) height_of(n &GraphNode) f32 {
+	if n.type_id == node_reroute_type {
+		return ne_reroute_size
+	}
 	if n.collapsed {
 		return ne_header_h
 	}
@@ -531,10 +549,13 @@ pub fn (g &NodeGraph) check_link(from_node int, from_slot int, to_node int, to_s
 	if to_slot < 0 || to_slot >= tt.inputs.len {
 		return error('no input ${to_slot}')
 	}
-	from_typ := ft.outputs[from_slot].typ
-	to_typ := tt.inputs[to_slot].typ
-	if !g.types_compatible(from_typ, to_typ) {
-		return error('`${from_typ}` cannot be connected to `${to_typ}`')
+	// Типы - сквозь reroute-точки (node_reroute.v): у точки нет своего типа, выход несёт тип
+	// того, что в неё входит, а вход должен подходить всем, кого точка питает
+	from_typ := g.out_type(from_node, from_slot)
+	for to_typ in g.in_types(to_node, to_slot) {
+		if !g.types_compatible(from_typ, to_typ) {
+			return error('`${from_typ}` cannot be connected to `${to_typ}`')
+		}
 	}
 	if !g.allow_cycles && g.reaches(to_node, from_node) {
 		return error('the link would make a cycle')

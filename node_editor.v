@@ -403,6 +403,11 @@ fn ne_row_y(n &GraphNode, row int) f32 {
 // socket_pos - центр значка сокета (вход или выход slot) в единицах холста. У свёрнутой ноды
 // все сокеты - на середине шапки, по краям.
 fn (ne &NodeEditor) socket_pos(n &GraphNode, out bool, slot int) (f32, f32) {
+	if n.type_id == node_reroute_type {
+		// У reroute-точки вход и выход - в её центре
+		half := ne_reroute_size * 0.5
+		return n.x + half, n.y + half
+	}
 	t := ne.type_of(n)
 	x := if out { n.x + ne.graph.width_of(n) } else { n.x }
 	if n.collapsed {
@@ -444,6 +449,13 @@ fn (ne &NodeEditor) hit_test(sx f32, sy f32) NodeHit {
 	tol := ne_socket_hit_px / ne.zoom
 	for i := ne.graph.nodes.len - 1; i >= 0; i-- {
 		n := ne.graph.nodes[i]
+		if n.type_id == node_reroute_type {
+			// Reroute-точка - вся сокет и ручка сразу, своя разметка зон (node_reroute.v)
+			if h := ne.reroute_hit(n, sx, sy) {
+				return h
+			}
+			continue
+		}
 		t := ne.type_of(n)
 		for s in 0 .. t.outputs.len {
 			px, py := ne.socket_pos(n, true, s)
@@ -460,6 +472,9 @@ fn (ne &NodeEditor) hit_test(sx f32, sy f32) NodeHit {
 	}
 	for i := ne.graph.nodes.len - 1; i >= 0; i-- {
 		n := ne.graph.nodes[i]
+		if n.type_id == node_reroute_type {
+			continue // уже проверена с сокетами
+		}
 		r := ne.node_world_rect(n)
 		edges := ne.edge_mask(r, n.collapsed, wx, wy)
 		if edges != 0 {
@@ -598,6 +613,9 @@ fn ne_cross(a Vec2, b Vec2, p Vec2) f32 {
 // колбэком socket_tooltip. Не над сокетом - '' (общая подсказка виджета, поле tooltip).
 pub fn (ne &NodeEditor) tooltip_at(x f32, y f32) string {
 	h := ne.hit_test(x, y)
+	if h.kind == .body && ne.graph.is_reroute(h.node) {
+		return 'Reroute (${ne.graph.out_type(h.node, 0)})' // центр точки - тоже про неё
+	}
 	if h.kind !in [.socket_in, .socket_out] {
 		return ''
 	}
@@ -609,6 +627,9 @@ pub fn (ne &NodeEditor) tooltip_at(x f32, y f32) string {
 		}
 	}
 	n := ne.graph.node(h.node) or { return '' }
+	if n.type_id == node_reroute_type {
+		return 'Reroute (${ne.graph.out_type(n.id, 0)})'
+	}
 	t := ne.type_of(n)
 	def := if out { t.outputs[h.slot] } else { t.inputs[h.slot] }
 	mut text := '${def.name} (${def.typ})'
@@ -686,8 +707,9 @@ fn (ne &NodeEditor) insert_slots(n &GraphNode, l NodeLink) (int, int) {
 	t := ne.type_of(n)
 	a := ne.graph.node(l.from_node) or { return -1, -1 }
 	b := ne.graph.node(l.to_node) or { return -1, -1 }
-	from := ne.type_of(a).outputs[l.from_slot].typ
-	to := ne.type_of(b).inputs[l.to_slot].typ
+	// Реальные типы концов связи (сквозь reroute-точки); у самой ноды n - её сокеты
+	from := ne.graph.out_type(a.id, l.from_slot)
+	to_types := ne.graph.in_types(b.id, l.to_slot)
 	mut in_slot := -1
 	for i, inp in t.inputs {
 		if ne.graph.types_compatible(from, inp.typ) {
@@ -697,7 +719,7 @@ fn (ne &NodeEditor) insert_slots(n &GraphNode, l NodeLink) (int, int) {
 	}
 	mut out_slot := -1
 	for i, o in t.outputs {
-		if ne.graph.types_compatible(o.typ, to) {
+		if to_types.all(ne.graph.types_compatible(o.typ, it)) {
 			out_slot = i
 			break
 		}
@@ -940,9 +962,8 @@ fn (ne &NodeEditor) draw_links(mut ctx RenderContext) {
 			continue
 		}
 		pts := ne.link_points(l)
-		a := ne.graph.node(l.from_node) or { continue }
-		t := ne.type_of(a)
-		mut c := ne.graph.socket_type(t.outputs[l.from_slot].typ).color
+		// Цвет - тип выхода; у reroute-точки - тип того, что в неё входит
+		mut c := ne.graph.socket_type(ne.graph.out_type(l.from_node, l.from_slot)).color
 		hot := l.from_node in ne.selected || l.to_node in ne.selected
 		c = if hot { c.brighten(0.25) } else { c.with_alpha(210) }
 		mut width := ctx.theme.eff_ne_link_width() + if hot { f32(1) } else { f32(0) }
@@ -981,6 +1002,10 @@ fn (ne &NodeEditor) font_px(ctx &RenderContext) int {
 // draw_node - карточка: тень, тело, шапка цветом типа с заголовком и треугольником
 // сворачивания, строки выходов и входов (с полями значений), значки сокетов, рамка выделения.
 fn (ne &NodeEditor) draw_node(n &GraphNode, mut ctx RenderContext) {
+	if n.type_id == node_reroute_type {
+		ne.draw_reroute(n, mut ctx)
+		return
+	}
 	t := ne.type_of(n)
 	r := ne.screen_rect(ne.node_world_rect(n))
 	if !r.intersects(ne.bounds) {
@@ -1200,7 +1225,7 @@ fn (ne &NodeEditor) draw_gesture(mut ctx RenderContext) {
 			n := ne.graph.node(ne.link_node) or { return }
 			t := ne.type_of(n)
 			typ := if ne.link_from_out {
-				t.outputs[ne.link_slot].typ
+				ne.graph.out_type(n.id, ne.link_slot)
 			} else {
 				t.inputs[ne.link_slot].typ
 			}
@@ -1329,6 +1354,16 @@ fn (mut ne NodeEditor) on_dbl_click(event &GuiEvent, app &App) bool {
 		return false
 	}
 	hit := ne.hit_test(event.mouse_x, event.mouse_y)
+	// Двойной щелчок по проводу (не по ноде) - reroute-точка в этом месте (node_reroute.v).
+	// Первый щелчок по пустому месту начал рамку выделения - её закрываем без последствий
+	if hit.kind == .none {
+		link := ne.link_at(event.mouse_x, event.mouse_y)
+		if link != 0 {
+			ne.drag = .none
+			ne.split_link(link, event.mouse_x, event.mouse_y)
+			return true
+		}
+	}
 	if hit.kind == .frame_header {
 		if ne.drag == .move_frame {
 			ne.drag = .none
@@ -1632,7 +1667,7 @@ fn (ne &NodeEditor) menu_link_slot(t NodeTypeDef) int {
 		if ne.menu.link_slot >= nt.outputs.len {
 			return -1
 		}
-		from := nt.outputs[ne.menu.link_slot].typ
+		from := ne.graph.out_type(n.id, ne.menu.link_slot) // сквозь reroute-точки
 		for i, inp in t.inputs {
 			if ne.graph.types_compatible(from, inp.typ) {
 				return i
@@ -1643,9 +1678,9 @@ fn (ne &NodeEditor) menu_link_slot(t NodeTypeDef) int {
 	if ne.menu.link_slot >= nt.inputs.len {
 		return -1
 	}
-	to := nt.inputs[ne.menu.link_slot].typ
+	to_types := ne.graph.in_types(n.id, ne.menu.link_slot) // сквозь reroute-точки
 	for i, o in t.outputs {
-		if ne.graph.types_compatible(o.typ, to) {
+		if to_types.all(ne.graph.types_compatible(o.typ, it)) {
 			return i
 		}
 	}
@@ -2108,7 +2143,10 @@ fn (mut ne NodeEditor) start_text_edit(node int, slot int, app &App) {
 // шапке): Enter или щелчок мимо - применить, Esc - отменить. Пустой текст или заголовок типа -
 // вернуть заголовок типа (set_node_title(id, '')).
 pub fn (mut ne NodeEditor) rename_node(id int, app &App) {
-	_ := ne.graph.node(id) or { return }
+	n := ne.graph.node(id) or { return }
+	if n.type_id == node_reroute_type {
+		return // у точки нет заголовка
+	}
 	ne.open_edit(id, ne.graph.node_title(id), app)
 	ne.edit_title = true
 	ne.edit_frame = false

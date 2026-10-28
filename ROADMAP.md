@@ -238,7 +238,10 @@ Qt/GTK/WPF интегрированы с UIA (Windows), AT-SPI (Linux), NSAccess
       содержимого, JSON); цвета и размеры — поля темы `ne_*` и селектор CSS `nodes`
 - [x] **NodeEditor: буфер обмена** (28.10.2026) — Ctrl+C/X/V, в буфере JSON графа
       (`copy_json`/`paste_json`), вставка под курсор с новыми id и вето приложения
-- [ ] **NodeEditor: фреймы и reroute-точки**, затем C-ABI и Python
+- [x] **NodeEditor: удобство** (28.10.2026) — переименование (F2), связь в пустоту → меню
+      подходящих нод, вставка ноды в связь, привязка к сетке, подсказки сокетов (`TipAtPoint`)
+- [x] **NodeEditor: фреймы и reroute-точки** (28.10.2026) — `node_frame.v`, `node_reroute.v`
+- [ ] **NodeEditor: C-ABI и Python**
 - [x] **Drag&drop между виджетами и окнами** (27.10.2026) — `dnd.v`: поле
       `dnd` у всех виджетов (источник/цель, данные `kind` + `text`), перенос
       между окнами приложения, ListBox/TreeView — перестановка и вынос строк/
