@@ -292,6 +292,13 @@ fn test_layouted_dock_area() {
 	assert get_widget_bounds(w) == r
 }
 
+fn test_layouted_node_editor() {
+	mut w := Widget(&NodeEditor{})
+	r := Rect{5, 6, 7, 8}
+	set_widget_bounds(mut w, r)
+	assert get_widget_bounds(w) == r
+}
+
 fn test_layouted_separator() {
 	mut w := Widget(&Separator{})
 	r := Rect{5, 6, 7, 8}

@@ -369,6 +369,7 @@ fn test_every_widget_type_has_css_tags() {
 		CssTagged(&DatePicker{}),
 		CssTagged(&Splitter{}),
 		CssTagged(&DockArea{}),
+		CssTagged(&NodeEditor{}),
 		CssTagged(&CodeEditor{}),
 		CssTagged(&MarkdownView{}),
 		CssTagged(&MenuButton{}),

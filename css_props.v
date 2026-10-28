@@ -72,10 +72,11 @@ const css_kind_by_name = {
 	'curve':        kind_curve_editor
 	'shortcut':     kind_shortcut_input
 	'dock':         kind_dock_area
+	'nodes':        kind_node_editor
 }
 
 // css_max_kind — наибольший kind_* (размер массивов fields_by_kind).
-const css_max_kind = kind_dock_area
+const css_max_kind = kind_node_editor
 
 // css_name_by_kind — обратная таблица: kind -> имя типа (пусто - в CSS нет имени).
 const css_name_by_kind = css_build_name_by_kind()

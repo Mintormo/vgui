@@ -65,3 +65,4 @@ pub const kind_icon = 51
 pub const kind_curve_editor = 52
 pub const kind_shortcut_input = 53
 pub const kind_dock_area = 54
+pub const kind_node_editor = 55

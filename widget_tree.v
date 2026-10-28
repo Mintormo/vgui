@@ -327,6 +327,14 @@ pub fn (mut w DockArea) set_bounds(r Rect) {
 	w.bounds = r
 }
 
+pub fn (w &NodeEditor) bounds_of() Rect {
+	return w.bounds
+}
+
+pub fn (mut w NodeEditor) set_bounds(r Rect) {
+	w.bounds = r
+}
+
 pub fn (w &Separator) bounds_of() Rect {
 	return w.bounds
 }

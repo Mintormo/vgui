@@ -879,6 +879,11 @@ pub fn (da &DockArea) measure(ctx &RenderContext) SizeHint {
 	return scrollable_hint(200, 150, 640, 480)
 }
 
+// NodeEditor: холст растягивается во все стороны (граф бесконечный, размер задаёт окно).
+pub fn (ne &NodeEditor) measure(ctx &RenderContext) SizeHint {
+	return scrollable_hint(240, 160, 640, 420)
+}
+
 pub fn (c &Calendar) measure(ctx &RenderContext) SizeHint {
 	return scrollable_hint(220, 200, 280, 260)
 }

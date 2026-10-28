@@ -31,6 +31,8 @@ pub enum FocusKind {
 	// таблица (TableView) - с 27.10.2026: раньше держала свой флаг focused
 	// мимо фокус-учёта, и в фокусе могли быть две таблицы сразу
 	table_view
+	// редактор графа (NodeEditor): клавиши удаления, дублирования, меню добавления
+	node_editor
 }
 
 // FocusManager - учёт фокуса одного окна (RenderContext.focus). Виджеты регистрируют себя сами при рисовании
@@ -297,6 +299,14 @@ pub fn (mut fm FocusManager) focus_canvas(cv &Canvas, group int) {
 	fm.focus_ptr(unsafe { voidptr(cv) }, .canvas, group)
 }
 
+pub fn (mut fm FocusManager) register_node_editor(ne &NodeEditor, group int) {
+	fm.register_ptr(unsafe { voidptr(ne) }, .node_editor, group)
+}
+
+pub fn (mut fm FocusManager) focus_node_editor(ne &NodeEditor, group int) {
+	fm.focus_ptr(unsafe { voidptr(ne) }, .node_editor, group)
+}
+
 // ─── Снять фокус ───
 
 // blur_current снимает фокус с текущего виджета: сбрасывает его focused и зависшие состояния (перетаскивание,
@@ -380,6 +390,12 @@ pub fn (mut fm FocusManager) blur_current() {
 			mut tv := unsafe { &TableView(e.ptr) }
 			tv.focused = false
 		}
+		.node_editor {
+			// Жест мыши обрывается: без фокуса Esc до редактора не дойдёт
+			mut ne := unsafe { &NodeEditor(e.ptr) }
+			ne.focused = false
+			ne.cancel_gesture()
+		}
 	}
 
 	fm.current = -1
@@ -450,6 +466,10 @@ fn (mut fm FocusManager) focus_index(idx int) {
 		.table_view {
 			mut tv := unsafe { &TableView(e.ptr) }
 			tv.focused = true
+		}
+		.node_editor {
+			mut ne := unsafe { &NodeEditor(e.ptr) }
+			ne.focused = true
 		}
 	}
 }
@@ -578,6 +598,10 @@ fn (fm &FocusManager) is_entry_available(e FocusEntry) bool {
 		.table_view {
 			tv := unsafe { &TableView(e.ptr) }
 			return tv.visible && tv.enabled
+		}
+		.node_editor {
+			ne := unsafe { &NodeEditor(e.ptr) }
+			return ne.visible && ne.enabled
 		}
 	}
 }
