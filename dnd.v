@@ -488,6 +488,11 @@ fn dnd_owns_drag(w &Widget, leaf bool) bool {
 	if w is ScrollBox {
 		return leaf
 	}
+	// DockArea: нажатие на вкладку или полосу - его перенос панели / изменение
+	// размера; на содержимое панели - не его жест
+	if w is DockArea {
+		return leaf
+	}
 	if w is ListBox {
 		return w.sb_dragging || w.hsb_dragging || w.col_resizing
 	}

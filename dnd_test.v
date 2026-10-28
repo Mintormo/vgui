@@ -518,6 +518,7 @@ fn test_every_widget_type_has_dnd_field() {
 		HasDnd(&ColorPicker{}),
 		HasDnd(&DatePicker{}),
 		HasDnd(&Splitter{}),
+		HasDnd(&DockArea{}),
 		HasDnd(&CodeEditor{}),
 		HasDnd(&MarkdownView{}),
 		HasDnd(&MenuButton{}),

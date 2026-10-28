@@ -874,6 +874,11 @@ pub fn (sp &Splitter) measure(ctx &RenderContext) SizeHint {
 	return scrollable_hint(160, 100, 480, 320)
 }
 
+// DockArea: растягивается во все стороны, как Splitter (размер задаёт окно, а не панели).
+pub fn (da &DockArea) measure(ctx &RenderContext) SizeHint {
+	return scrollable_hint(200, 150, 640, 480)
+}
+
 pub fn (c &Calendar) measure(ctx &RenderContext) SizeHint {
 	return scrollable_hint(220, 200, 280, 260)
 }

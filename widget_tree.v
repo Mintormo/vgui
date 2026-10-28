@@ -319,6 +319,14 @@ pub fn (mut w Splitter) set_bounds(r Rect) {
 	w.bounds = r
 }
 
+pub fn (w &DockArea) bounds_of() Rect {
+	return w.bounds
+}
+
+pub fn (mut w DockArea) set_bounds(r Rect) {
+	w.bounds = r
+}
+
 pub fn (w &Separator) bounds_of() Rect {
 	return w.bounds
 }
@@ -673,6 +681,19 @@ pub fn (w &Splitter) child_widgets() []&Widget {
 	return out
 }
 
+// DockArea — содержимое всех открытых панелей (во всех группах, на всех вкладках).
+pub fn (w &DockArea) child_widgets() []&Widget {
+	mut out := []&Widget{}
+	for g in w.groups() {
+		for p in g.panels {
+			if !isnil(p.content) {
+				out << p.content
+			}
+		}
+	}
+	return out
+}
+
 pub fn (w &TabBox) child_widgets() []&Widget {
 	mut out := []&Widget{cap: w.tabs.len}
 	for t in w.tabs {
@@ -720,6 +741,18 @@ pub fn (w &TabBox) hit_children() []&Widget {
 		return [w.tabs[w.active].widget]
 	}
 	return []&Widget{}
+}
+
+// DockArea: как у TabBox — только содержимое активной панели каждой группы
+// (ему arrange() выдал bounds в этом кадре).
+pub fn (w &DockArea) hit_children() []&Widget {
+	mut out := []&Widget{}
+	for g in w.groups() {
+		if g.panels.len > 0 && !isnil(g.panels[g.active].content) {
+			out << g.panels[g.active].content
+		}
+	}
+	return out
 }
 
 // Только развёрнутые секции — ориентируется на предикат, которым

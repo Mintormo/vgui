@@ -178,7 +178,7 @@ mode. Масштаб рендера выставляется заново пос
 
 1. Константа `kind_<name>` в `widget_kinds.v` (следующий свободный номер); структура виджета **первым полем**
    `type_tag int = kind_<name>` + строка в `widget_tag_test.v`; вторым - `css CssTags` + строка в `css_test.v`,
-   имя для селекторов - в `css_kind_by_name` (`css_props.v`).
+   имя для селекторов - в `css_kind_by_name` и `css_max_kind` = новый kind (`css_props.v`).
 2. `widget_tree.v`: `bounds_of`/`set_bounds` (+ `child_widgets`/`hit_children` для контейнеров, собственное
    поле `visible bool`) и проверка в `widget_tree_test.v`. Контейнер - ещё `arrange()`.
 3. Поле `enabled bool = true` и неактивный вид через `en := ctx.is_enabled(...)` (сложному содержимому -

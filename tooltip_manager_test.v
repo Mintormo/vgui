@@ -315,6 +315,7 @@ fn test_every_widget_type_has_tooltip_field() {
 		HasTooltip(&ColorPicker{}),
 		HasTooltip(&DatePicker{}),
 		HasTooltip(&Splitter{}),
+		HasTooltip(&DockArea{}),
 		HasTooltip(&CodeEditor{}),
 		HasTooltip(&MarkdownView{}),
 		HasTooltip(&MenuButton{}),
