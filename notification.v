@@ -36,7 +36,9 @@ pub enum NotificationAnim {
 	fade
 }
 
-// Notification — одно toast-уведомление. Само не решает, где стоять: bounds ему
+// Notification — одно toast-уведомление, элемент NotificationManager (показывать
+// только через nm.show / nm.show_*, в контейнеры и окно не класть - PROJECT.md,
+// «Уведомления»). Само не решает, где стоять: bounds ему
 // выдаёт NotificationManager (layout_notifications) каждый кадр. Жизненный цикл:
 // создано (created_at) -> show_anim 0..1 -> (по таймеру duration_ms, кнопке × или
 // dismiss()) dismissing -> dismiss_anim 1..0 -> dismissed = true, on_dismiss;
