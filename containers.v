@@ -947,7 +947,8 @@ pub fn (mut s ScrollBox) clear() {
 // update_eff_content_size - высота (ширина) прокручиваемого содержимого:
 // заданная явно (content_h/content_w), иначе естественный размер стопки
 // детей (сумма их measure() вдоль оси плюс spacing), но не меньше видимой
-// области (меньшее содержимое просто заполняет её, прокрутки нет). Заодно
+// области - bounds без pad (меньшее содержимое просто заполняет её,
+// прокрутки нет; с bounds целиком полоса была всегда). Заодно
 // запоминает размеры детей для arrange() (child_sizes).
 fn (mut s ScrollBox) update_eff_content_size(ctx &RenderContext) {
 	vertical := s.dir == .vertical
@@ -966,13 +967,13 @@ fn (mut s ScrollBox) update_eff_content_size(ctx &RenderContext) {
 		s.eff_content_h = if s.content_h > 0 {
 			s.content_h
 		} else {
-			max_f32(natural, s.bounds.h)
+			max_f32(natural, s.bounds.h - s.pad * 2)
 		}
 	} else {
 		s.eff_content_w = if s.content_w > 0 {
 			s.content_w
 		} else {
-			max_f32(natural, s.bounds.w)
+			max_f32(natural, s.bounds.w - s.pad * 2)
 		}
 	}
 }

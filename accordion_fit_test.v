@@ -146,6 +146,32 @@ fn test_fit_content_in_scroll_box_scrolls_and_clicks_below_fold() {
 	app.cleanup()
 }
 
+// Свёрнутый аккордеон ниже видимой области - полосы прокрутки нет (раньше
+// содержимое растягивалось до bounds без вычета pad и полоса была всегда)
+fn test_fit_content_short_no_scrollbar() {
+	os.setenv('SDL_VIDEODRIVER', 'dummy', true)
+	mut app := create_app()!
+	mut win := create_window(title: 'fit short', width: 300, height: 400)!
+	win.ctx.anim_fixed_dt = anim_nominal_dt
+	app.add_window(win)
+
+	mut a := accordion_multi()
+	a.fit_content = true
+	s0, _ := fit_section(4, 40)
+	a.add_section('A', s0)
+	mut sb := scroll_box(0)
+	sb.add(a)
+	win.add_widget(sb)
+	settle(mut win)
+
+	assert a.total_content_height() < 400
+	assert !sb.has_scrollbar()
+	assert sb.max_scroll() == 0
+
+	win.cleanup()
+	app.cleanup()
+}
+
 // Без fit_content - прежнее поведение: секция занимает всё свободное место
 fn test_default_mode_unchanged() {
 	os.setenv('SDL_VIDEODRIVER', 'dummy', true)

@@ -458,7 +458,9 @@ fn test_vbox_natural_height_without_sizes() {
 	assert sb.eff_content_h == 16 + 24 + 32 + 2 * 6 + 2 * 8
 	sb.bounds = Rect{0, 0, 200, 500}
 	sb.update_eff_content_size(ctx)
-	assert sb.eff_content_h == 500 // меньше видимой области - заполняет её
+	// меньше видимой области - заполняет её (bounds без pad), полосы нет
+	assert sb.eff_content_h == 500 - 2 * sb.pad
+	assert !sb.has_scrollbar()
 }
 
 // ScrollBox с несколькими детьми (аудит 2026-10, раздел 6.4): раньше размер
