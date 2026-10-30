@@ -276,8 +276,8 @@ pub fn (mut da DockArea) show_panel(p &DockPanel) {
 	if da.show_floating(p) {
 		return // плавающая: вкладка активна, окно поднято (dock_float.v)
 	}
-	if near := da.open_panel_by_id(p.restore_near) {
-		da.dock(p, p.restore_side, target: near, size: p.restore_size)
+	if near_panel := da.open_panel_by_id(p.restore_near) {
+		da.dock(p, p.restore_side, target: near_panel, size: p.restore_size)
 	} else {
 		da.dock(p, .center)
 	}

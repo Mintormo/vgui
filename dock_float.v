@@ -121,8 +121,8 @@ pub fn (mut da DockArea) dock_back(p &DockPanel) {
 	}
 	widget_changed()
 	root.take_from_float(p)
-	if near := root.open_panel_by_id(p.restore_near) {
-		root.dock(p, p.restore_side, target: near, size: p.restore_size)
+	if near_panel := root.open_panel_by_id(p.restore_near) {
+		root.dock(p, p.restore_side, target: near_panel, size: p.restore_size)
 	} else {
 		root.dock(p, .center)
 	}
@@ -406,8 +406,8 @@ fn (mut da DockArea) dock_float_panels_back(mut f DockFloat) {
 	}
 	for p in panels {
 		f.area.detach_panel(p)
-		if near := da.open_panel_by_id(p.restore_near) {
-			da.dock(p, p.restore_side, target: near, size: p.restore_size)
+		if near_panel := da.open_panel_by_id(p.restore_near) {
+			da.dock(p, p.restore_side, target: near_panel, size: p.restore_size)
 		} else {
 			da.dock(p, .center)
 		}
