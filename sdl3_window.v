@@ -518,7 +518,25 @@ pub fn (mut w Window) set_icon(path string) {
 	}
 }
 
-// show - показать скрытое окно (hide, сворачивание в трей). Новое окно
+// set_icon_data - иконка окна из байтов картинки (PNG и т.п., например
+// $embed_file - иконка вшита в бинарник); байты нужны только на время
+// вызова. При ошибке декодирования молча ничего не делает.
+pub fn (mut w Window) set_icon_data(data []u8) {
+	if data.len == 0 {
+		return
+	}
+	io := C.SDL_IOFromConstMem(data.data, usize(data.len))
+	if io == unsafe { nil } {
+		return
+	}
+	icon_surface := C.IMG_Load_IO(io, true) // closeio: поток закрывает SDL
+	if unsafe { icon_surface != nil } {
+		C.SDL_SetWindowIcon(w.sdl_window, icon_surface)
+		C.SDL_DestroySurface(icon_surface)
+	}
+}
+
+// show -показать скрытое окно (hide, сворачивание в трей). Новое окно
 // и так видимо - звать show() после create_window не нужно.
 pub fn (mut w Window) show() {
 	w.visible = true
