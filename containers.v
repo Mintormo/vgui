@@ -245,7 +245,10 @@ fn (b &BoxLayout) content_size(ctx &RenderContext) SizeHint {
 			main_expands = true
 		} else {
 			it := b.child_main_item(c, ctx, !is_h)
-			main_pref += it.base
+			// Желаемый размер - зажатый в границы ребёнка, как его и раздаст distribute_main:
+			// `add(w, min: 80)` у виджета с естественной высотой 32 раньше просил у родителя 32,
+			// а при раскладке получал 80 - и вылезал за контейнер на соседей
+			main_pref += clamp_f32(it.base, it.min, it.max)
 			main_min += it.min
 		}
 
