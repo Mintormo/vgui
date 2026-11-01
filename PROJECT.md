@@ -34,6 +34,7 @@ vgui - самостоятельная библиотека, ничего не з
 - Hover после прокрутки колесом
 - CurveEditor (kind 52) — редактор тональной кривой
 - NumberField (kind 56) и Rating (kind 57) — поле с протяжкой и оценка звёздами
+- Chart и Sparkline (kind 59, 58) — диаграммы и график последних значений
 - ListBox: множественный выбор (`multi_select`); MenuBar.set_items
 - Размер окна — логические единицы
 - Сочетания Ctrl+буква (`ctrl_letter`)
@@ -146,7 +147,7 @@ box.add(w, min: 80, max: 200, align: .center) // границы вдоль ос�
 | `add(w)` | `.auto` | естественный (`measure()`); виджет с политикой `expanding` (поле ввода, ползунок, список, холст, распорка) **растёт от него** в свободное место и сжимается до `min` |
 | `add(w, flex: n)` | `.flex` | доля свободного места по весу **от нуля** (как `Expanded` во Flutter) |
 
-`min:`/`max:` — границы вдоль главной оси, сильнее `measure()`; `align:` — `CrossAlign` этого ребёнка. Режима «жёстко N пикселей» **нет намеренно** (`add_fixed`/`add_auto`/`add_ex`, `gap()`, `Px`/`Flex`/`px()`/`flex()` удалены): размер — из содержимого, ограничения — `min`/`max`, расстояния — `spacing`/`padding`. Нужна колонка ровной ширины (подписи формы) — `min:` по самому длинному тексту (`Window.measure_text`). Виджет без `measure()` в режиме `.auto` занимает свободное место (как прежний `add(w, 1)`).
+`min:`/`max:` — границы вдоль главной оси, сильнее `measure()`, **и при измерении бокса тоже**: `content_size` берёт желаемый размер ребёнка зажатым в них (до 01.11.2026 брал как есть, и `add(w, min: 80)` у виджета высотой 32 просил у родителя 32, а получал 80 — вылезал на соседей; тест `box_min_test.v`); `align:` — `CrossAlign` этого ребёнка. Режима «жёстко N пикселей» **нет намеренно** (`add_fixed`/`add_auto`/`add_ex`, `gap()`, `Px`/`Flex`/`px()`/`flex()` удалены): размер — из содержимого, ограничения — `min`/`max`, расстояния — `spacing`/`padding`. Нужна колонка ровной ширины (подписи формы) — `min:` по самому длинному тексту (`Window.measure_text`). Виджет без `measure()` в режиме `.auto` занимает свободное место (как прежний `add(w, 1)`).
 
 Делёж вдоль главной оси выполняет `distribute_main()`: нефлексовые дети сразу получают свой размер (зажатый в `min`/`max`); flex-дети стартуют со своей базы (у `add(w, flex:)` она 0, у растягиваемых по природе авто-детей — естественный размер) и делят остаток по весам; упёршийся в `min`/`max` фиксируется, и его доля переразделяется между остальными (поэтому цикл, а не один проход).
 
@@ -783,6 +784,70 @@ C-ABI: `vgui_curve_editor_*` (create, set/get points, point_count, lut, reset, i
 `vguipy.CurveEditor` (`set_points`/`get_points` списком пар, `lut(n)`, `set_histogram`,
 `add_ghost`...). Тесты: `curve_editor_test.v` (сплайн, мышь), `vguipy/tests/test_curve_editor.py`,
 дымовой рендер. Примеры `51_curve_editor.v` / `.py`.
+
+## Chart и Sparkline (kind 59, 58) — диаграммы и график последних значений
+
+С 01.11.2026, `chart.v`, `sparkline.v`, общее - `chart_common.v`; пример - `examples/65_charts.v`.
+**PlotView** (`plot_view.v`) остаётся графиком «для исследования» (функции, панорама, зум), **Chart** -
+диаграмма «для отчёта»: показывает готовый набор данных целиком, шкалы подбирает сам.
+
+**Sparkline** - последние `capacity` значений каждой серии в кольцевом буфере `ChartRing` (push за
+O(1), старое вытесняется). По X - `capacity` мест на ширину, **последнее значение всегда у правого
+края**: пока буфер не заполнен, линия начинается не с левого края (как в Диспетчере задач). По Y - от
+`min_value` до верха: `max_value > min_value` - фиксированный, иначе «красивое» число над максимумом
+(`chart_nice_range`). **Шкала растёт сразу, а уменьшается плавно** (`smooth_scale`, `Anim`): при плавном
+росте новое большое значение упиралось в потолок, пока шкала догоняла (на старте шкала 0..1 без данных
+ползла к тысячам). `epsilon` - в долях шкалы
+(абсолютный 0.005 у шкалы в мегабайтах тянул бы анимацию лишние секунды). `push(0, v)` у пустого
+Sparkline создаёт первую серию сам. NaN/Inf разрывают линию. Без `show_frame` и `spark_bg` sparkline
+прозрачен - его ставят в строку таблицы и в статус-бар. Наведение - линия и плашка значений, если
+хватает высоты; событий не поглощает (щелчок - строке под ним).
+
+**Chart.** Серия - вид (`ChartKind`: line, area, bar, step, scatter), значения Y и, по желанию, `xs`.
+**Ось X категориальная, пока ни у одной серии нет xs** (X точки = номер, подписи - `categories`, у
+столбцов - полместа с краёв), иначе числовая (столбец шириной в наименьший шаг между точками -
+так рисуется гистограмма). Шаг делений Y хранится в `ChartLayout.y_step` - **тот же, по которому
+округлены границы** (раньше шаг считался заново и верхнее деление оставалось без подписи).
+`stacked` складывает столбцы (положительные вверх, отрицательные вниз, по отдельности) и области.
+`mode = .pie / .donut` - круговая **по первой серии**, цвета секторов - палитра по номеру сектора.
+**Шкала Y - по целевым значениям, не по анимируемым**: иначе во время перехода шкала и ширина подписей
+менялись каждый кадр и область графика дёргалась. Поток с `capacity` сразу занимает ось на все
+`capacity` мест (иначе каждая точка растягивала ось и сжимала линию).
+Разметка кадра (`layout_frame`: заголовок, легенда, подписи осей, область данных) считается в
+`draw()` - нужны шрифты; события пользуются ею же (`c.lay`), они всегда идут после кадра.
+
+**Анимация перехода.** У серии `values` (цель) и `from` (что было на экране в начале перехода),
+общая доля `progress` (`Anim` .tween, 450 мс). `begin_transition()` перед заменой данных переписывает
+`from` текущим видом - новый переход стартует оттуда, где был прерван. Новая серия растёт от нуля,
+`push` анимацию не запускает (поток), `animate = false` - сразу цель. **Разметка (.vui) ставит
+`progress` в 1**: данные из файла не должны «вырастать» при каждом открытии окна.
+
+**Цвет «авто».** Серия без своего цвета - `chart_auto_color` (`Color{0, 0, 0, 0}`). **Не `Color{}`**:
+у `Color` по умолчанию `a = 255`, и `Color{}` - непрозрачный чёрный (на этом попались: все серии
+вышли чёрными, а палитра в тесте темы была верной).
+
+**Тема и CSS.** Поля `chart_*` (фон, рамка, сетка, оси, текст, заголовок, линия наведения, плашка,
+`chart_series_1..6`, `chart_line_width`, `chart_fill_alpha`, `chart_bar_radius`) и `spark_*` (фон,
+толщина, заливка); незаданное поле - из `plot_*` (тема, настроившая PlotView, настраивает и Chart),
+затем из ядра темы (`eff_chart_*`). Палитра серий общая у обоих виджетов, встроенная -
+`chart_default_palette`. CSS: типы `chart` и `sparkline`, свойства - в `css_prop_table`
+(`series-N-color`, `line-width`, `fill-opacity`, `bar-radius`, `tip-background`...).
+
+**Градиент.** Заливка под линией - `RenderContext.fill_triangles_colored(pts, colors)`: цвет на
+вершину, SDL смешивает их внутри треугольника. **Прозрачность - функция только высоты**
+(`chart_gradient_color`: полная у края области данных, ноль у нулевой линии): первая версия красила
+«у линии - цвет, у основания - прозрачный», и у соседних отрезков разной высоты одна высота получала
+разную прозрачность - заливка шла вертикальными полосами по швам треугольников. Линейный по y цвет
+барицентрическая интерполяция воспроизводит точно. Полосы stacked-областей - `chart_band_triangles`. Сектора круга - `chart_ring_segment` (шаги дуги ≤ 0.05 рад) одним
+`fill_triangles`.
+
+**Через мост** колбэк, возвращающий строку (`format`), не передать - у обоих виджетов есть
+`value_suffix` (единицы после значения). Разметка: `sparkline` / `chart` с дочерними
+`series` / `histogram` (таблица в «Разметка интерфейса (.vui)»).
+
+Тесты - `sparkline_test.v` (буфер, шкала, подписи, наведение), `chart_test.v` (шкалы, stacked,
+гистограмма, переход, легенда, щелчок по столбцу и сектору), снапшоты `sparkline.png`,
+`chart_bars.png`, `chart_donut.png`.
 
 ## ListBox: множественный выбор (`multi_select`); MenuBar.set_items
 
@@ -1669,7 +1734,8 @@ ImageBackground, иконки-файлы, картинка в MarkdownView, сп
 
 **Геометрия.** `ctx.draw_polyline(pts []Vec2, c, thickness)` - ломаная одним `SDL_RenderLines` на
 проход (толщина n - n сдвинутых копий по вертикали и по горизонтали; PlotView), `ctx.fill_triangles(pts,
-c)` - набор треугольников одним `SDL_RenderGeometry` (дуги Spinner). Оба сами ставят blend mode; точки
+c)` - набор треугольников одним `SDL_RenderGeometry` (дуги Spinner). `ctx.fill_triangles_colored(pts, colors)` - то же
+с цветом на каждую вершину (градиентная заливка Chart и Sparkline). Оба сами ставят blend mode; точки
 логические, масштаб HiDPI - `SDL_SetRenderScale` окна, как у остальных примитивов.
 
 **Файлы картинок без рендерера - `image_io.v`.** `decode_image_file/bytes` → `RgbaImage{w, h, pixels}`
@@ -2085,6 +2151,8 @@ vbox pad=12 gap=8
 | `code` | начальный текст | `lang=v\|python`, `readonly` | — |
 | `markdown` | да | — | — |
 | `separator`, `spacer`, `icon "имя"` (`size`, `color`), `badge` (`variant`) | | | — |
+| `sparkline` | — | `capacity`, `min`, `max`, `grid`, `frame`, `scale`, `last`, `nofill`, `nodot` | `series "Имя" color= values="1 2 3"` |
+| `chart` | заголовок | `mode=cartesian\|pie\|donut`, `stacked`, `legend=top\|bottom\|right\|none`, `categories="A, B"`, `x_title`, `y_title`, `min`, `max`, `capacity`, `center`, `noanim`, `nogrid` | `series "Имя" kind=line\|area\|bar\|step\|scatter values= xs= color= hidden`, `histogram "Имя" bins= values= color=` |
 
 `#id` у `tab`, `section`, пунктов `combo`, `column`/`item` списка не поддерживается (это не
 самостоятельные объекты) — ошибка с подсказкой дать `#id` содержимому.
@@ -2278,10 +2346,21 @@ menu             { background: #222; }                     /* попап - ко�
 | `split` | `handle-color` (+ `:hover`) |
 | `menubar` | `background` (+ `:hover`, `:pressed`), `color` |
 | `separator`, `breadcrumbs`, `plot`, `markdown` | см. `css_prop_table` |
+| `chart`, `sparkline` | `background`, `border-color`, `grid-color`, `color`, `hover-color`, `tip-background`, `line-width`, `fill-opacity`, `series-1-color` … `series-6-color`; chart — ещё `axis-color`, `title-color`, `tip-color`, `bar-radius` («Chart и Sparkline») |
+| `image`, `dropzone` | `background`, `border-color` |
+| `colorpicker` | `border-color` |
+| `datepicker`, `calendar` | `background`, `border-color`, `:hover background`, `:selected background`, `:selected color`; calendar — `:focus border-color`, `weekend-color` |
+| `badge` | `background` (всех вариантов), `color` |
+| `curve` | `background`, `border-color`, `grid-color`, `minor-grid-color` |
+| `dock` | как у `tabs`: `strip-background`, `tab-background` (+ `:hover`, `:selected`), `color` (+ `:selected`, `:disabled`), `border-color`, `indicator-color`; `:hover splitter-color` |
+| `shortcut` | `background` (+ `:hover`, `:pressed`), `color`, `border-color` |
 | `menu`, `tooltip`, `notification`, `dropdown` | только корневые: `background`, `border-color`, `color`, …; menu — `:hover`, `separator-color`, `shortcut-color`; dropdown — `:hover`/`:selected` |
 
-Имена типов — как в .vui; кроме того `image`, `colorpicker`, `datepicker`, `badge`, `calendar`, `dropzone`,
-`canvas`, `icon`, `curve` (у них только общие свойства). Новое свойство — строка в `css_prop_table` (тест
+Имена типов — как в .vui. Виджеты `image`, `colorpicker`, `datepicker`, `calendar`, `badge`, `dropzone`, `curve`,
+`dock`, `shortcut` (с 01.11.2026) рисуются общими полями темы (`input_bg`, `accent`, `tab_*`, `button_*`...):
+их свойство подменяет такое общее поле **только в поддереве этого виджета** (стиль = подмена темы).
+Только общие свойства — у `canvas` (подпись и кольцо кисти поверх картинки намеренно контрастные, не из
+темы), `icon` (цвет — `color`), `spacer`, а у `stack`/`centered`/`scroll` — заливка. Новое свойство — строка в `css_prop_table` (тест
 проверяет, что поле есть в `Theme`) и строка в этой таблице.
 
 Тесты шрифтов, отступов и размеров — `css_layout_test.v`: разбор и ошибки, начертания, раскладка детей

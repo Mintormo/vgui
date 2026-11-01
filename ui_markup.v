@@ -525,6 +525,8 @@ fn (mut b UiBuilder) build_widget(mut n UiNode) !&Widget {
 		'combo' { return b.build_combo(mut n) }
 		'list' { return b.build_list(mut n) }
 		'tree' { return b.build_tree(mut n) }
+		'sparkline' { return b.build_sparkline(mut n) }
+		'chart' { return b.build_chart(mut n) }
 		else { return b.build_leaf(mut n) }
 	}
 }
@@ -841,6 +843,145 @@ fn (mut b UiBuilder) build_combo(mut n UiNode) !&Widget {
 		cb.set_selected(selected)
 	}
 	return cb
+}
+
+// ── графики (sparkline.v, chart.v) ──
+
+// prop_numbers - список чисел свойства key: через пробел или запятую ("12 19 15" или "1,2,3").
+// Нет свойства - пустой список; не число в списке - ошибка с местом.
+fn (b &UiBuilder) prop_numbers(mut n UiNode, key string) ![]f32 {
+	raw := b.prop_str(mut n, key, '')
+	mut out := []f32{}
+	for part in raw.replace(',', ' ').split(' ') {
+		if part.len == 0 {
+			continue
+		}
+		if !ui_is_number(part) {
+			return b.fail(n, '${key}: ${part} - не число')
+		}
+		out << part.f32()
+	}
+	return out
+}
+
+// prop_labels - список подписей свойства key через запятую (подпись может содержать пробелы:
+// categories="Янв 2026, Фев 2026"); пробелы по краям подписи отбрасываются.
+fn (b &UiBuilder) prop_labels(mut n UiNode, key string) []string {
+	raw := b.prop_str(mut n, key, '')
+	if raw.len == 0 {
+		return []string{}
+	}
+	return raw.split(',').map(it.trim_space())
+}
+
+// build_sparkline - `sparkline capacity= min= max= grid frame scale last nofill nodot`, внутри -
+// `series "Имя" color=#rrggbb values="1 2 3"`. Без series - одна безымянная серия (значения -
+// push(0, v) из кода).
+fn (mut b UiBuilder) build_sparkline(mut n UiNode) !&Widget {
+	mut s := sparkline(
+		capacity:  b.prop_int(mut n, 'capacity', 60)!
+		min_value: b.prop_num(mut n, 'min', 0)!
+		max_value: b.prop_num(mut n, 'max', 0)!
+		fill:      !b.prop_flag(mut n, 'nofill')!
+	)
+	s.show_grid = b.prop_flag(mut n, 'grid')!
+	s.show_frame = b.prop_flag(mut n, 'frame')!
+	s.show_scale = b.prop_flag(mut n, 'scale')!
+	s.show_last = b.prop_flag(mut n, 'last')!
+	s.show_dot = !b.prop_flag(mut n, 'nodot')!
+	for mut c in n.children {
+		b.expect(c, 'sparkline', ['series'])!
+		b.no_children(c)!
+		if c.id.len > 0 {
+			return b.fail(c, '#id у series не поддерживается - дайте #id самому sparkline')
+		}
+		color, has_color := b.prop_color(mut c, 'color')!
+		idx := s.add_series(b.text(c)!, if has_color { color } else { chart_auto_color })
+		vals := b.prop_numbers(mut c, 'values')!
+		if vals.len > 0 {
+			s.set_values(idx, vals)
+		}
+		b.finish(c)!
+	}
+	return s
+}
+
+// build_chart - `chart "Заголовок" mode=cartesian|pie|donut stacked legend=top|bottom|right|none
+// categories="A, B" x_title= y_title= min= max= capacity= noanim nogrid`, внутри - серии
+// `series "Имя" kind=line|area|bar|step|scatter values="..." xs="..." color=#rrggbb hidden` и
+// `histogram "Имя" bins=20 values="..." color=`.
+fn (mut b UiBuilder) build_chart(mut n UiNode) !&Widget {
+	mode := match b.prop_choice(mut n, 'mode', ['cartesian', 'pie', 'donut'], 'cartesian')! {
+		'pie' { ChartMode.pie }
+		'donut' { ChartMode.donut }
+		else { ChartMode.cartesian }
+	}
+	mut c := chart(
+		mode:       mode
+		title:      b.text(n)!
+		categories: b.prop_labels(mut n, 'categories')
+		stacked:    b.prop_flag(mut n, 'stacked')!
+	)
+	c.animate = !b.prop_flag(mut n, 'noanim')!
+	c.show_grid = !b.prop_flag(mut n, 'nogrid')!
+	c.x_title = b.prop_str(mut n, 'x_title', '')
+	c.y_title = b.prop_str(mut n, 'y_title', '')
+	c.capacity = b.prop_int(mut n, 'capacity', 0)!
+	c.center_text = b.prop_str(mut n, 'center', '')
+	legend := b.prop_choice(mut n, 'legend', ['top', 'bottom', 'right', 'none'], 'top')!
+	c.show_legend = legend != 'none'
+	c.legend_pos = match legend {
+		'bottom' { ChartLegendPos.bottom }
+		'right' { ChartLegendPos.right }
+		else { ChartLegendPos.top }
+	}
+	lo := b.prop_num(mut n, 'min', 0)!
+	hi := b.prop_num(mut n, 'max', 0)!
+	if hi > lo {
+		c.set_y_range(lo, hi)
+	}
+	for mut ch in n.children {
+		b.expect(ch, 'chart', ['series', 'histogram'])!
+		b.no_children(ch)!
+		if ch.id.len > 0 {
+			return b.fail(ch, '#id у ${ch.typ} не поддерживается - дайте #id самой диаграмме')
+		}
+		name := b.text(ch)!
+		vals := b.prop_numbers(mut ch, 'values')!
+		mut idx := 0
+		if ch.typ == 'histogram' {
+			idx = c.add_histogram(name, vals, b.prop_int(mut ch, 'bins', 10)!)
+		} else {
+			kind := match b.prop_choice(mut ch, 'kind', ['line', 'area', 'bar', 'step', 'scatter'],
+				'line')! {
+				'area' { ChartKind.area }
+				'bar' { ChartKind.bar }
+				'step' { ChartKind.step }
+				'scatter' { ChartKind.scatter }
+				else { ChartKind.line }
+			}
+			xs := b.prop_numbers(mut ch, 'xs')!
+			if xs.len > 0 {
+				if xs.len != vals.len {
+					return b.fail(ch, 'xs и values разной длины (${xs.len} и ${vals.len})')
+				}
+				idx = c.add_xy_series(name, kind, xs, vals)
+			} else {
+				idx = c.add_series(name, kind, vals)
+			}
+			if b.prop_flag(mut ch, 'hidden')! {
+				c.set_series_visible(idx, false)
+			}
+		}
+		color, has_color := b.prop_color(mut ch, 'color')!
+		if has_color {
+			c.set_series_color(idx, color)
+		}
+		b.finish(ch)!
+	}
+	// данные из разметки показываются сразу, без анимации «вырастания» при открытии окна
+	c.progress.snap(1)
+	return c
 }
 
 fn (mut b UiBuilder) build_list(mut n UiNode) !&Widget {

@@ -308,6 +308,15 @@ fn test_layouted_number_field_and_rating() {
 	assert get_widget_bounds(a) == r && get_widget_bounds(b) == r
 }
 
+fn test_layouted_sparkline_and_chart() {
+	mut a := Widget(&Sparkline{})
+	mut b := Widget(&Chart{})
+	r := Rect{5, 6, 7, 8}
+	set_widget_bounds(mut a, r)
+	set_widget_bounds(mut b, r)
+	assert get_widget_bounds(a) == r && get_widget_bounds(b) == r
+}
+
 fn test_layouted_separator() {
 	mut w := Widget(&Separator{})
 	r := Rect{5, 6, 7, 8}

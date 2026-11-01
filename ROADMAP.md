@@ -255,6 +255,9 @@ Qt/GTK/WPF интегрированы с UIA (Windows), AT-SPI (Linux), NSAccess
       `vgui_dnd_*`, `vguipy.dnd`
 - [x] **NumberField и Rating** (28.10.2026) — числовое поле с протяжкой (как в Blender) и оценка
       звёздами; заменили свои решения vraw (`numedit.v`, `fill_star`)
+- [x] **Chart и Sparkline** (01.11.2026) — диаграммы (линии, области, столбцы рядом и стопкой,
+      ступени, точки, гистограмма, круговая и кольцевая) и график последних значений для
+      мониторов; тема и CSS, разметка .vui, C-ABI и Python. PROJECT.md, «Chart и Sparkline»
 - [ ] **DnD наружу, в другие приложения** — в SDL 3.5 API нет, нужен нативный
       код под каждую ОС (X11 XDND, Wayland data-device, OLE, NSDraggingSource)
 - [x] **Иконки в списках, меню, деревьях** (13.10.2026) — общий `ItemIcon`

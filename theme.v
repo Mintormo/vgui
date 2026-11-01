@@ -304,6 +304,33 @@ pub mut:
 	rating_off   Color = Color{0, 0, 0, 0} // пустая звезда (a=0 - border)
 	rating_hover Color = Color{0, 0, 0, 0} // предпросмотр под курсором
 
+	// ── Chart и Sparkline ─────────────────────────────
+	// Общие цвета графиков (chart.v, sparkline.v). a=0 / 0 - запасное значение (eff_chart_* ниже):
+	// сначала поле plot_* (так Chart по умолчанию выглядит как PlotView), затем общий цвет темы.
+	chart_bg       Color = Color{0, 0, 0, 0} // фон Chart (a=0 - plot_bg, затем input_bg)
+	chart_border   Color = Color{0, 0, 0, 0} // рамка Chart и Sparkline (a=0 - plot_border, затем border)
+	chart_grid     Color = Color{0, 0, 0, 0} // линии сетки (a=0 - plot_grid_major, затем border)
+	chart_axis     Color = Color{0, 0, 0, 0} // линия оси X/Y (a=0 - plot_axis, затем text_secondary)
+	chart_text     Color = Color{0, 0, 0, 0} // подписи делений и легенда (a=0 - plot_label, затем text_secondary)
+	chart_title    Color = Color{0, 0, 0, 0} // заголовок графика (a=0 - text_primary)
+	chart_hover    Color = Color{0, 0, 0, 0} // линия под курсором (a=0 - text_secondary полупрозрачный)
+	chart_tip_bg   Color = Color{0, 0, 0, 0} // плашка значений под курсором (a=0 - eff_tooltip_bg)
+	chart_tip_text Color = Color{0, 0, 0, 0} // текст плашки (a=0 - eff_tooltip_text)
+	// Палитра серий: серия без своего цвета (a=0) берёт chart_series_<1 + номер % 6>; поле с a=0 -
+	// цвет встроенной палитры chart_default_palette (chart_common.v). Общая для Chart и Sparkline.
+	chart_series_1 Color = Color{0, 0, 0, 0}
+	chart_series_2 Color = Color{0, 0, 0, 0}
+	chart_series_3 Color = Color{0, 0, 0, 0}
+	chart_series_4 Color = Color{0, 0, 0, 0}
+	chart_series_5 Color = Color{0, 0, 0, 0}
+	chart_series_6 Color = Color{0, 0, 0, 0}
+	chart_line_width f32 // толщина линий серий Chart (0 - 2)
+	chart_fill_alpha f32 // непрозрачность заливки под линией area (0..1; 0 - 0.25)
+	chart_bar_radius f32 // скругление столбцов (0 - 2; отрицательное - без скругления)
+	spark_bg         Color = Color{0, 0, 0, 0} // фон Sparkline (a=0 - прозрачный)
+	spark_line_width f32 // толщина линии Sparkline (0 - 1.5)
+	spark_fill_alpha f32 // непрозрачность заливки Sparkline (0..1; 0 - 0.3)
+
 	// ── NodeEditor ────────────────────────────────────
 	// a=0 / 0 - запасное значение из общей темы (eff_ne_* ниже). Цвет шапки ноды задаёт её тип
 	// (NodeTypeDef.color); ne_header_bg - для типов без своего цвета (color с альфой 0).
@@ -1051,6 +1078,108 @@ pub fn (t &Theme) eff_rating_off() Color {
 @[inline]
 pub fn (t &Theme) eff_rating_hover() Color {
 	return if t.rating_hover.a > 0 { t.rating_hover } else { t.eff_rating_on().with_alpha(170) }
+}
+
+// ── Chart и Sparkline ──
+// eff_chart_* - действующий цвет: своё поле chart_* (a > 0), иначе соответствующее plot_*
+// (тема, настроившая PlotView, сразу настраивает и Chart), иначе общий цвет ядра темы.
+pub fn (t &Theme) eff_chart_bg() Color {
+	if t.chart_bg.a > 0 {
+		return t.chart_bg
+	}
+	return if t.plot_bg.a > 0 { t.plot_bg } else { t.input_bg }
+}
+
+pub fn (t &Theme) eff_chart_border() Color {
+	if t.chart_border.a > 0 {
+		return t.chart_border
+	}
+	return if t.plot_border.a > 0 { t.plot_border } else { t.border }
+}
+
+pub fn (t &Theme) eff_chart_grid() Color {
+	if t.chart_grid.a > 0 {
+		return t.chart_grid
+	}
+	// Сетка - фон, а не данные: цвет рамок вполовину прозрачности, чтобы линии серий читались
+	return if t.plot_grid_major.a > 0 { t.plot_grid_major } else { t.border.with_alpha(110) }
+}
+
+pub fn (t &Theme) eff_chart_axis() Color {
+	if t.chart_axis.a > 0 {
+		return t.chart_axis
+	}
+	return if t.plot_axis.a > 0 { t.plot_axis } else { t.text_secondary }
+}
+
+pub fn (t &Theme) eff_chart_text() Color {
+	if t.chart_text.a > 0 {
+		return t.chart_text
+	}
+	return if t.plot_label.a > 0 { t.plot_label } else { t.text_secondary }
+}
+
+pub fn (t &Theme) eff_chart_title() Color {
+	return if t.chart_title.a > 0 { t.chart_title } else { t.text_primary }
+}
+
+pub fn (t &Theme) eff_chart_hover() Color {
+	return if t.chart_hover.a > 0 { t.chart_hover } else { t.text_secondary.with_alpha(140) }
+}
+
+pub fn (t &Theme) eff_chart_tip_bg() Color {
+	return if t.chart_tip_bg.a > 0 { t.chart_tip_bg } else { t.eff_tooltip_bg() }
+}
+
+pub fn (t &Theme) eff_chart_tip_text() Color {
+	return if t.chart_tip_text.a > 0 { t.chart_tip_text } else { t.eff_tooltip_text() }
+}
+
+// eff_chart_series - цвет серии номер i без своего цвета: поле chart_series_<1 + i % 6> темы, а
+// если оно не задано (a=0) - цвет встроенной палитры с тем же номером. Отрицательный i - как 0.
+pub fn (t &Theme) eff_chart_series(i int) Color {
+	slot := if i < 0 { 0 } else { i % chart_palette_size }
+	custom := match slot {
+		0 { t.chart_series_1 }
+		1 { t.chart_series_2 }
+		2 { t.chart_series_3 }
+		3 { t.chart_series_4 }
+		4 { t.chart_series_5 }
+		else { t.chart_series_6 }
+	}
+	return if custom.a > 0 { custom } else { chart_default_palette[slot] }
+}
+
+pub fn (t &Theme) eff_chart_line_width() f32 {
+	return if t.chart_line_width > 0 { t.chart_line_width } else { 2 }
+}
+
+// eff_chart_fill_alpha - непрозрачность заливки area в байтах альфы (0..255).
+pub fn (t &Theme) eff_chart_fill_alpha() u8 {
+	a := if t.chart_fill_alpha > 0 { clamp_f32(t.chart_fill_alpha, 0, 1) } else { f32(0.25) }
+	return u8(a * 255)
+}
+
+pub fn (t &Theme) eff_chart_bar_radius() f32 {
+	if t.chart_bar_radius < 0 {
+		return 0
+	}
+	return if t.chart_bar_radius > 0 { t.chart_bar_radius } else { 2 }
+}
+
+// eff_spark_bg - фон Sparkline; a=0 - прозрачный (sparkline чаще всего стоит в строке таблицы или
+// в статус-баре и должен сливаться с фоном), рисовать его тогда не нужно.
+pub fn (t &Theme) eff_spark_bg() Color {
+	return t.spark_bg
+}
+
+pub fn (t &Theme) eff_spark_line_width() f32 {
+	return if t.spark_line_width > 0 { t.spark_line_width } else { 1.5 }
+}
+
+pub fn (t &Theme) eff_spark_fill_alpha() u8 {
+	a := if t.spark_fill_alpha > 0 { clamp_f32(t.spark_fill_alpha, 0, 1) } else { f32(0.3) }
+	return u8(a * 255)
 }
 
 // ── NodeEditor ──

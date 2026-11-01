@@ -372,6 +372,8 @@ fn test_every_widget_type_has_css_tags() {
 		CssTagged(&NodeEditor{}),
 		CssTagged(&NumberField{}),
 		CssTagged(&Rating{}),
+		CssTagged(&Sparkline{}),
+		CssTagged(&Chart{}),
 		CssTagged(&CodeEditor{}),
 		CssTagged(&MarkdownView{}),
 		CssTagged(&MenuButton{}),
@@ -402,4 +404,53 @@ fn test_every_widget_type_has_css_tags() {
 		CssTagged(&ShortcutInput{}),
 	]
 	assert tagged.len == css_max_kind
+}
+
+// Свойства графиков и виджетов на общих полях темы (01.11.2026): правило разбирается без ошибок
+// и пишет в ожидаемое поле темы именно этого типа (подмена - только в его поддереве).
+fn test_chart_and_common_widget_props() {
+	ss := parse_stylesheet('
+		chart { series-1-color: #ff0000; bar-radius: 4; fill-opacity: 0.5; }
+		sparkline { line-width: 3; series-2-color: #00ff00; }
+		calendar:selected { background: #010203; }
+		badge { background: #040506; }
+		dock:selected { tab-background: #070809; }
+		shortcut { border-color: #0a0b0c; }
+		curve { grid-color: #0d0e0f; }
+		image { background: #101112; }
+		dropzone { border-color: #131415; }
+		colorpicker { border-color: #161718; }
+		datepicker:hover { background: #191a1b; }
+	', 't.css')!
+	assert kind_fields(ss, kind_chart) == [['chart_series_1'], ['chart_bar_radius'], ['chart_fill_alpha']]
+	assert kind_fields(ss, kind_sparkline) == [['spark_line_width'], ['chart_series_2']]
+	assert kind_fields(ss, kind_calendar) == [['accent']]
+	assert 'button_bg' in kind_fields(ss, kind_badge)[0]
+	assert kind_fields(ss, kind_dock_area) == [['tab_active_bg']]
+	assert kind_fields(ss, kind_shortcut_input) == [['button_border']]
+	assert kind_fields(ss, kind_curve_editor) == [['plot_grid_major']]
+	assert kind_fields(ss, kind_image_view) == [['input_bg']]
+	assert kind_fields(ss, kind_drop_zone) == [['border']]
+	assert kind_fields(ss, kind_color_picker) == [['input_border', 'border']]
+	assert kind_fields(ss, kind_date_picker) == [['button_hover']]
+	// палитра серий темы: поле chart_series_1 сильнее встроенной палитры
+	mut t := light_theme()
+	t.chart_series_1 = Color{255, 0, 0, 255}
+	assert t.eff_chart_series(0) == Color{255, 0, 0, 255}
+	assert t.eff_chart_series(6) == Color{255, 0, 0, 255}, 'палитра по кругу из 6 цветов'
+	assert t.eff_chart_series(1) == chart_default_palette[1]
+}
+
+// kind_fields - поля темы, в которые пишут объявления таблицы для виджета типа kind (по правилам
+// в порядке каскада). Правила сортируются по специфичности, поэтому искать по номеру правила нельзя.
+fn kind_fields(ss &Stylesheet, kind int) [][]string {
+	mut out := [][]string{}
+	for r in ss.rules {
+		for d in r.decls {
+			if kind < d.fields_by_kind.len && d.fields_by_kind[kind].len > 0 {
+				out << d.fields_by_kind[kind]
+			}
+		}
+	}
+	return out
 }

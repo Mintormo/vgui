@@ -996,3 +996,33 @@ pub fn (p &CpPreview) measure(ctx &RenderContext) SizeHint {
 pub fn (a &DpArea) measure(ctx &RenderContext) SizeHint {
 	return scrollable_hint(220, 200, 280, 250)
 }
+
+// Sparkline: по умолчанию 120×32, может и расти, и сжиматься (до 24×12) - его ставят и в строку
+// таблицы, и в панель на всю ширину. Высота не растёт сама (v_policy .fixed): в вертикальном
+// ряду sparkline не должен забирать свободное место; нужно больше - flex: или CSS height.
+pub fn (s &Sparkline) measure(ctx &RenderContext) SizeHint {
+	if !s.visible {
+		return SizeHint{}
+	}
+	return SizeHint{
+		w:        120
+		h:        32
+		min_w:    24
+		min_h:    12
+		v_policy: .fixed
+	}
+}
+
+// Chart: по умолчанию 360×220 (читается легенда и подписи), минимум 120×90; растёт по обеим
+// осям - диаграмме, как и PlotView, обычно отдают всё свободное место.
+pub fn (c &Chart) measure(ctx &RenderContext) SizeHint {
+	if !c.visible {
+		return SizeHint{}
+	}
+	return SizeHint{
+		w:     360
+		h:     220
+		min_w: 120
+		min_h: 90
+	}
+}

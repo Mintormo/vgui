@@ -117,6 +117,63 @@ fn test_strings_comments_and_translation() {
 	assert ui2.get[Label]('ok')!.text == tr('btn.ok')
 }
 
+// Графики из разметки: серии, категории, гистограмма, режимы; ошибки в списках чисел.
+fn test_charts_from_markup() {
+	ui := ui_parse('vbox
+  sparkline #net capacity=30 max=100 grid frame last
+    series "Down" color=#3399ff values="1 2 3"
+    series "Up"
+  chart "Продажи" #sales stacked legend=bottom categories="Q1, Q2, Q3" y_title=шт
+    series "A" kind=bar values="1, 2, 3"
+    series "Plan" kind=line values="2 2 2" color=#ff0000 hidden
+  chart #hist legend=none
+    histogram "H" bins=4 values="0 1 1 2 3 4 4 4"
+  chart "Диск" #disk mode=donut center="512 GB" categories="Sys, Free"
+    series "D" values="1 3"
+  chart #xy
+    series "S" kind=scatter xs="0 1 2" values="5 6 7"
+', 't')!
+	net := ui.get[Sparkline]('net')!
+	assert net.capacity() == 30 && net.max_value == 100 && net.show_grid && net.show_frame
+	assert net.series_count() == 2 && net.values(0) == [f32(1), 2, 3]
+	assert net.series[0].color == Color{0x33, 0x99, 0xff, 255}
+	assert net.series[1].color.a == 0, 'без color - палитра темы'
+	sales := ui.get[Chart]('sales')!
+	assert sales.title == 'Продажи' && sales.stacked && sales.legend_pos == .bottom
+	assert sales.categories == ['Q1', 'Q2', 'Q3'] && sales.y_title == 'шт'
+	assert sales.series[0].kind == .bar && sales.values(0) == [f32(1), 2, 3]
+	assert !sales.series_visible(1) && sales.series[1].color == Color{255, 0, 0, 255}
+	hist := ui.get[Chart]('hist')!
+	assert !hist.show_legend && hist.numeric_x() && hist.values(0) == [f32(1), 2, 1, 4]
+	disk := ui.get[Chart]('disk')!
+	assert disk.mode == .donut && disk.center_text == '512 GB'
+	xy := ui.get[Chart]('xy')!
+	assert xy.series[0].xs == [f32(0), 1, 2]
+	bad := {
+		'chart
+  series "a" values="1 x"
+':          't:2: values: x - не число'
+		'chart
+  series "a" xs="1" values="1 2"
+':   't:2: xs и values разной длины'
+		'chart
+  label "a"
+':                        't:2: внутри chart допустимо только series, histogram'
+		'chart mode=radar
+':                          't:1: mode=radar: допустимо'
+		'sparkline
+  series "a" kind=bar
+':          't:2: свойство kind неприменимо к series'
+	}
+	for src, want in bad {
+		ui_parse(src, 't') or {
+			assert err.msg().starts_with(want), '${src.replace('\n', '|')} -> ${err.msg()}'
+			continue
+		}
+		assert false, 'ошибка не замечена: ${src.replace('\n', '|')}'
+	}
+}
+
 // Ошибки - с именем источника и номером строки.
 fn test_errors_are_loud() {
 	cases := {

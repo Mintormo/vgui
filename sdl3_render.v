@@ -619,3 +619,32 @@ pub fn (mut ctx RenderContext) fill_triangles(pts []Vec2, c Color) {
 	C.SDL_SetRenderDrawBlendMode(ctx.renderer, sdl_blendmode_blend)
 	C.SDL_RenderGeometry(ctx.renderer, unsafe { nil }, verts.data, verts.len, unsafe { nil }, 0)
 }
+
+// fill_triangles_colored - как fill_triangles, но у каждой вершины свой цвет: colors[i] - цвет
+// вершины pts[i], внутри треугольника SDL плавно смешивает цвета вершин. Так рисуется градиентная
+// заливка под линией графика (Chart, Sparkline: у линии - цвет серии, к основанию - прозрачнее).
+// Берётся min(pts.len, colors.len), обрезанное до кратного трём; меньше трёх - ничего.
+pub fn (mut ctx RenderContext) fill_triangles_colored(pts []Vec2, colors []Color) {
+	total := min_int(pts.len, colors.len)
+	n := total - total % 3
+	if n == 0 {
+		return
+	}
+	z := C.SDL_FPoint{0, 0}
+	mut verts := []C.SDL_Vertex{len: n}
+	for i in 0 .. n {
+		c := colors[i]
+		verts[i] = C.SDL_Vertex{
+			position:  C.SDL_FPoint{pts[i].x, pts[i].y}
+			color:     C.SDL_FColor{
+				r: f32(c.r) / 255.0
+				g: f32(c.g) / 255.0
+				b: f32(c.b) / 255.0
+				a: f32(c.a) / 255.0
+			}
+			tex_coord: z
+		}
+	}
+	C.SDL_SetRenderDrawBlendMode(ctx.renderer, sdl_blendmode_blend)
+	C.SDL_RenderGeometry(ctx.renderer, unsafe { nil }, verts.data, verts.len, unsafe { nil }, 0)
+}
