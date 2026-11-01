@@ -77,10 +77,11 @@ const css_kind_by_name = {
 	'rating':       kind_rating
 	'sparkline':    kind_sparkline
 	'chart':        kind_chart
+	'stepper':      kind_stepper
 }
 
 // css_max_kind — наибольший kind_* (размер массивов fields_by_kind).
-const css_max_kind = kind_chart
+const css_max_kind = kind_stepper
 
 // css_name_by_kind — обратная таблица: kind -> имя типа (пусто - в CSS нет имени).
 const css_name_by_kind = css_build_name_by_kind()
@@ -122,8 +123,8 @@ const css_size_fields = ['@width', '@height', '@min-width', '@max-width', '@min-
 // css_layout_fields — поля, от которых зависит раскладка: объявление с ними
 // применяют и measure/arrange/события (CssDecl.layout), а не только draw.
 const css_layout_fields = ['font_size', 'font_bold', 'font_italic', 'font_mono', css_padding_field,
-	css_gap_field, css_margin_field, '@width', '@height', '@min-width', '@max-width', '@min-height',
-	'@max-height']
+	css_gap_field, css_margin_field, 'step_circle_size', '@width', '@height', '@min-width', '@max-width',
+	'@min-height', '@max-height']
 
 // css_font_keywords — допустимые слова свойств font-weight/-style/-family:
 // поле Theme -> слово -> включить начертание (true) или снять заданное выше (false).
@@ -435,6 +436,17 @@ const css_prop_table = {
 	'sparkline:/series-4-color':         ['chart_series_4']
 	'sparkline:/series-5-color':         ['chart_series_5']
 	'sparkline:/series-6-color':         ['chart_series_6']
+	'stepper:/color':                    ['step_title']
+	'stepper:selected/color':            ['step_title_current']
+	'stepper:hover/color':               ['step_hover']
+	'stepper:/note-color':               ['step_note']
+	'stepper:selected/background':       ['step_active']
+	'stepper:/done-color':               ['step_done']
+	'stepper:/pending-color':            ['step_pending']
+	'stepper:/icon-color':               ['step_icon']
+	'stepper:/line-color':               ['step_line']
+	'stepper:/done-line-color':          ['step_line_done']
+	'stepper:/circle-size':              ['step_circle_size']
 	'nodes:/frame-background':           ['ne_frame_bg']
 	'nodes:/frame-color':                ['ne_frame_text']
 	'nodes:/border-radius':              ['ne_node_radius']

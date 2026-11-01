@@ -318,18 +318,32 @@ pub mut:
 	chart_tip_text Color = Color{0, 0, 0, 0} // текст плашки (a=0 - eff_tooltip_text)
 	// Палитра серий: серия без своего цвета (a=0) берёт chart_series_<1 + номер % 6>; поле с a=0 -
 	// цвет встроенной палитры chart_default_palette (chart_common.v). Общая для Chart и Sparkline.
-	chart_series_1 Color = Color{0, 0, 0, 0}
-	chart_series_2 Color = Color{0, 0, 0, 0}
-	chart_series_3 Color = Color{0, 0, 0, 0}
-	chart_series_4 Color = Color{0, 0, 0, 0}
-	chart_series_5 Color = Color{0, 0, 0, 0}
-	chart_series_6 Color = Color{0, 0, 0, 0}
+	chart_series_1   Color = Color{0, 0, 0, 0}
+	chart_series_2   Color = Color{0, 0, 0, 0}
+	chart_series_3   Color = Color{0, 0, 0, 0}
+	chart_series_4   Color = Color{0, 0, 0, 0}
+	chart_series_5   Color = Color{0, 0, 0, 0}
+	chart_series_6   Color = Color{0, 0, 0, 0}
 	chart_line_width f32 // толщина линий серий Chart (0 - 2)
 	chart_fill_alpha f32 // непрозрачность заливки под линией area (0..1; 0 - 0.25)
 	chart_bar_radius f32 // скругление столбцов (0 - 2; отрицательное - без скругления)
 	spark_bg         Color = Color{0, 0, 0, 0} // фон Sparkline (a=0 - прозрачный)
 	spark_line_width f32 // толщина линии Sparkline (0 - 1.5)
 	spark_fill_alpha f32 // непрозрачность заливки Sparkline (0..1; 0 - 0.3)
+
+	// ── Stepper ───────────────────────────────────────
+	// Индикатор шагов (stepper.v). a=0 / 0 - запасное значение (eff_step_* ниже).
+	step_active        Color = Color{0, 0, 0, 0} // кружок и ореол текущего шага (a=0 - accent)
+	step_done          Color = Color{0, 0, 0, 0} // кружок сделанного шага (a=0 - step_active)
+	step_pending       Color = Color{0, 0, 0, 0} // кольцо несделанного шага (a=0 - border)
+	step_icon          Color = Color{0, 0, 0, 0} // знак на залитом кружке (a=0 - accent_text)
+	step_title         Color = Color{0, 0, 0, 0} // название сделанного шага (a=0 - text_primary)
+	step_title_current Color = Color{0, 0, 0, 0} // название текущего шага (a=0 - step_title)
+	step_note          Color = Color{0, 0, 0, 0} // подпись, номер и название несделанного (a=0 - text_secondary)
+	step_hover         Color = Color{0, 0, 0, 0} // наведение на кликабельный шаг (a=0 - accent)
+	step_line          Color = Color{0, 0, 0, 0} // линия между шагами (a=0 - border)
+	step_line_done     Color = Color{0, 0, 0, 0} // линия после сделанного шага (a=0 - step_done)
+	step_circle_size   f32 // диаметр кружка (0 - 24); свой у виджета - Stepper.circle_size
 
 	// ── NodeEditor ────────────────────────────────────
 	// a=0 / 0 - запасное значение из общей темы (eff_ne_* ниже). Цвет шапки ноды задаёт её тип
@@ -1180,6 +1194,65 @@ pub fn (t &Theme) eff_spark_line_width() f32 {
 pub fn (t &Theme) eff_spark_fill_alpha() u8 {
 	a := if t.spark_fill_alpha > 0 { clamp_f32(t.spark_fill_alpha, 0, 1) } else { f32(0.3) }
 	return u8(a * 255)
+}
+
+// ── Stepper ──
+// eff_step_* - цвета индикатора шагов: своё поле темы (a > 0) или общий цвет темы. Цепочки:
+// done -> active -> accent, line_done -> done, title_current -> title -> text_primary.
+@[inline]
+pub fn (t &Theme) eff_step_active() Color {
+	return if t.step_active.a > 0 { t.step_active } else { t.accent }
+}
+
+@[inline]
+pub fn (t &Theme) eff_step_done() Color {
+	return if t.step_done.a > 0 { t.step_done } else { t.eff_step_active() }
+}
+
+@[inline]
+pub fn (t &Theme) eff_step_pending() Color {
+	return if t.step_pending.a > 0 { t.step_pending } else { t.border }
+}
+
+@[inline]
+pub fn (t &Theme) eff_step_icon() Color {
+	return if t.step_icon.a > 0 { t.step_icon } else { t.accent_text }
+}
+
+@[inline]
+pub fn (t &Theme) eff_step_title() Color {
+	return if t.step_title.a > 0 { t.step_title } else { t.text_primary }
+}
+
+@[inline]
+pub fn (t &Theme) eff_step_title_current() Color {
+	return if t.step_title_current.a > 0 { t.step_title_current } else { t.eff_step_title() }
+}
+
+@[inline]
+pub fn (t &Theme) eff_step_note() Color {
+	return if t.step_note.a > 0 { t.step_note } else { t.text_secondary }
+}
+
+@[inline]
+pub fn (t &Theme) eff_step_hover() Color {
+	return if t.step_hover.a > 0 { t.step_hover } else { t.accent }
+}
+
+@[inline]
+pub fn (t &Theme) eff_step_line() Color {
+	return if t.step_line.a > 0 { t.step_line } else { t.border }
+}
+
+@[inline]
+pub fn (t &Theme) eff_step_line_done() Color {
+	return if t.step_line_done.a > 0 { t.step_line_done } else { t.eff_step_done() }
+}
+
+// eff_step_circle_size - диаметр кружка шага: поле темы или 24.
+@[inline]
+pub fn (t &Theme) eff_step_circle_size() f32 {
+	return if t.step_circle_size > 0 { t.step_circle_size } else { 24 }
 }
 
 // ── NodeEditor ──

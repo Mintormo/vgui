@@ -374,6 +374,7 @@ fn test_every_widget_type_has_css_tags() {
 		CssTagged(&Rating{}),
 		CssTagged(&Sparkline{}),
 		CssTagged(&Chart{}),
+		CssTagged(&Stepper{}),
 		CssTagged(&CodeEditor{}),
 		CssTagged(&MarkdownView{}),
 		CssTagged(&MenuButton{}),
@@ -422,7 +423,8 @@ fn test_chart_and_common_widget_props() {
 		colorpicker { border-color: #161718; }
 		datepicker:hover { background: #191a1b; }
 	', 't.css')!
-	assert kind_fields(ss, kind_chart) == [['chart_series_1'], ['chart_bar_radius'], ['chart_fill_alpha']]
+	assert kind_fields(ss, kind_chart) == [['chart_series_1'], ['chart_bar_radius'],
+		['chart_fill_alpha']]
 	assert kind_fields(ss, kind_sparkline) == [['spark_line_width'], ['chart_series_2']]
 	assert kind_fields(ss, kind_calendar) == [['accent']]
 	assert 'button_bg' in kind_fields(ss, kind_badge)[0]

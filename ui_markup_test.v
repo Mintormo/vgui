@@ -152,18 +152,59 @@ fn test_charts_from_markup() {
 	bad := {
 		'chart
   series "a" values="1 x"
-':          't:2: values: x - не число'
+':        't:2: values: x - не число'
 		'chart
   series "a" xs="1" values="1 2"
-':   't:2: xs и values разной длины'
+': 't:2: xs и values разной длины'
 		'chart
   label "a"
-':                        't:2: внутри chart допустимо только series, histogram'
+':                      't:2: внутри chart допустимо только series, histogram'
 		'chart mode=radar
-':                          't:1: mode=radar: допустимо'
+':                       't:1: mode=radar: допустимо'
 		'sparkline
   series "a" kind=bar
-':          't:2: свойство kind неприменимо к series'
+':        't:2: свойство kind неприменимо к series'
+	}
+	for src, want in bad {
+		ui_parse(src, 't') or {
+			assert err.msg().starts_with(want), '${src.replace('\n', '|')} -> ${err.msg()}'
+			continue
+		}
+		assert false, 'ошибка не замечена: ${src.replace('\n', '|')}'
+	}
+}
+
+// Индикатор шагов из разметки: шаги с подписями, состояниями, необязательный шаг, текущий;
+// ошибки - неизвестное состояние, чужой элемент внутри, current за границами.
+fn test_stepper_from_markup() {
+	ui := ui_parse('vbox
+  stepper #wiz current=1 size=30
+    step "Подготовка" state=done note="12 кадров"
+    step "Сборка" state=warning
+    step "Ретушь" optional icon=brush
+    step "Экспорт" state=locked
+  stepper #side vertical
+    step "A"
+', 't')!
+	wiz := ui.get[Stepper]('wiz')!
+	assert wiz.count() == 4 && wiz.get_current() == 1 && wiz.circle_size == 30
+	assert wiz.steps[0].title == 'Подготовка' && wiz.steps[0].note == '12 кадров'
+	assert wiz.state_of(0) == .done && wiz.state_of(1) == .warning && wiz.state_of(3) == .locked
+	assert wiz.steps[2].optional && wiz.steps[2].icon == 'brush' && wiz.state_of(2) == .pending
+	assert ui.get[Stepper]('side')!.vertical
+	bad := {
+		'stepper
+  step "a" state=stale
+': 't:2: state=stale: допустимо'
+		'stepper
+  label "a"
+':            't:2: внутри stepper допустимо только step'
+		'stepper current=2
+  step "a"
+':   't:1: current=2: шагов 1'
+		'stepper
+  step "a" #s
+':          't:2: #id у step не поддерживается'
 	}
 	for src, want in bad {
 		ui_parse(src, 't') or {

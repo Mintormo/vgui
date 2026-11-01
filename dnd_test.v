@@ -524,6 +524,7 @@ fn test_every_widget_type_has_dnd_field() {
 		HasDnd(&Rating{}),
 		HasDnd(&Sparkline{}),
 		HasDnd(&Chart{}),
+		HasDnd(&Stepper{}),
 		HasDnd(&CodeEditor{}),
 		HasDnd(&MarkdownView{}),
 		HasDnd(&MenuButton{}),

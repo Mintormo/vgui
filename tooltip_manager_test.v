@@ -321,6 +321,7 @@ fn test_every_widget_type_has_tooltip_field() {
 		HasTooltip(&Rating{}),
 		HasTooltip(&Sparkline{}),
 		HasTooltip(&Chart{}),
+		HasTooltip(&Stepper{}),
 		HasTooltip(&CodeEditor{}),
 		HasTooltip(&MarkdownView{}),
 		HasTooltip(&MenuButton{}),

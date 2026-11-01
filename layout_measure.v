@@ -1026,3 +1026,31 @@ pub fn (c &Chart) measure(ctx &RenderContext) SizeHint {
 		min_h: 90
 	}
 }
+
+// Stepper: горизонтально - шаги с текстом и двойными наименьшими линиями между ними, высота -
+// блок шага (fixed: в вертикальном ряду индикатор не забирает свободное место); сжимается до
+// одних кружков (текст усекается в layout). Вертикально - столбик, ширина под самый длинный
+// текст, высота фиксирована. Подробности - natural_size в stepper.v.
+pub fn (s &Stepper) measure(ctx &RenderContext) SizeHint {
+	if !s.visible {
+		return SizeHint{}
+	}
+	w, h, min_w := s.natural_size(ctx)
+	if s.vertical {
+		return SizeHint{
+			w:        w
+			h:        h
+			min_w:    min_w
+			min_h:    h
+			v_policy: .fixed
+		}
+	}
+	return SizeHint{
+		w:        w
+		h:        h
+		min_w:    min_w
+		min_h:    h
+		max_h:    h
+		v_policy: .fixed
+	}
+}

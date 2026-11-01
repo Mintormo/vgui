@@ -527,6 +527,7 @@ fn (mut b UiBuilder) build_widget(mut n UiNode) !&Widget {
 		'tree' { return b.build_tree(mut n) }
 		'sparkline' { return b.build_sparkline(mut n) }
 		'chart' { return b.build_chart(mut n) }
+		'stepper' { return b.build_stepper(mut n) }
 		else { return b.build_leaf(mut n) }
 	}
 }
@@ -843,6 +844,49 @@ fn (mut b UiBuilder) build_combo(mut n UiNode) !&Widget {
 		cb.set_selected(selected)
 	}
 	return cb
+}
+
+// ── индикатор шагов (stepper.v) ──
+
+// build_stepper - `stepper current= vertical size=`, внутри - шаги
+// `step "Название" note="подпись" state=pending|done|warning|error|locked optional icon=имя`.
+// #id у шага не поддерживается: шаги адресуются индексом (stepper.set_state(i, ...)).
+fn (mut b UiBuilder) build_stepper(mut n UiNode) !&Widget {
+	mut s := stepper(vertical: b.prop_flag(mut n, 'vertical')!)
+	s.circle_size = b.prop_num(mut n, 'size', 0)!
+	current := b.prop_int(mut n, 'current', 0)!
+	for mut c in n.children {
+		b.expect(c, 'stepper', ['step'])!
+		b.no_children(c)!
+		if c.id.len > 0 {
+			return b.fail(c, '#id у step не поддерживается - шаги адресуются индексом')
+		}
+		state_name := b.prop_choice(mut c, 'state', ['pending', 'done', 'warning', 'error', 'locked'],
+			'pending')!
+		s.add_step(b.text(c)!,
+			note:     b.prop_str(mut c, 'note', '')
+			state:    ui_step_state(state_name)
+			optional: b.prop_flag(mut c, 'optional')!
+			icon:     b.prop_str(mut c, 'icon', '')
+		)
+		b.finish(c)!
+	}
+	if current < 0 || (s.steps.len > 0 && current >= s.steps.len) {
+		return b.fail(n, 'current=${current}: шагов ${s.steps.len}')
+	}
+	s.set_current(current)
+	return s
+}
+
+// ui_step_state - имя состояния шага из разметки -> StepState (имя уже проверено prop_choice).
+fn ui_step_state(name string) StepState {
+	return match name {
+		'done' { StepState.done }
+		'warning' { StepState.warning }
+		'error' { StepState.error }
+		'locked' { StepState.locked }
+		else { StepState.pending }
+	}
 }
 
 // ── графики (sparkline.v, chart.v) ──

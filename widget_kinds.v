@@ -70,3 +70,4 @@ pub const kind_number_field = 56
 pub const kind_rating = 57
 pub const kind_sparkline = 58
 pub const kind_chart = 59
+pub const kind_stepper = 60

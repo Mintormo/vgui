@@ -35,6 +35,7 @@ vgui - самостоятельная библиотека, ничего не з
 - CurveEditor (kind 52) — редактор тональной кривой
 - NumberField (kind 56) и Rating (kind 57) — поле с протяжкой и оценка звёздами
 - Chart и Sparkline (kind 59, 58) — диаграммы и график последних значений
+- Stepper (kind 60) — индикатор шагов пошагового процесса
 - ListBox: множественный выбор (`multi_select`); MenuBar.set_items
 - Размер окна — логические единицы
 - Сочетания Ctrl+буква (`ctrl_letter`)
@@ -784,6 +785,44 @@ C-ABI: `vgui_curve_editor_*` (create, set/get points, point_count, lut, reset, i
 `vguipy.CurveEditor` (`set_points`/`get_points` списком пар, `lut(n)`, `set_histogram`,
 `add_ghost`...). Тесты: `curve_editor_test.v` (сплайн, мышь), `vguipy/tests/test_curve_editor.py`,
 дымовой рендер. Примеры `51_curve_editor.v` / `.py`.
+
+## Stepper (kind 60) — индикатор шагов пошагового процесса
+
+С 01.11.2026, `stepper.v`; пример - `examples/66_stepper.v`. Ряд (или столбик, `vertical`) кружков с
+номерами, соединённых линиями; у шага - название, подпись `note` и состояние. Сделан для мастеров
+вида «Подготовка → Сборка → Ретушь → Экспорт» (fstack), как Stepper в Material/Ant Design.
+
+**Состояние шага и «текущий» - независимы.** `current` - где пользователь (ореол из двух колец,
+жирное название; несделанный текущий залит `step_active`), `StepItem.state` - что с шагом:
+`pending` (кольцо с номером), `done` (галочка), `warning` («!» на `warning` - например, устарел после
+правок на предыдущем шаге), `error` (крестик), `locked` (замок, приглушён, **щелчок не принимается**).
+Так текущий шаг может быть и устаревшим, и сделанным. `optional` - приписка `tr('step.optional')`
+(«необязательно») в подписи; `icon` - значок Lucide вместо номера у `pending`.
+
+Щелчок по шагу (кружку или тексту - зона `StepSlot.hit`) делает его текущим и зовёт `on_change(i)`; по
+текущему и `locked` - нет. **`set_current` колбэк не зовёт** (как Rating: виджет зеркалит модель
+приложения). Клавиатурного фокуса нет намеренно (как у Breadcrumbs) - у мастера свои «Далее/Назад».
+
+**Раскладка** (`layout` каждый кадр в `draw`, `measure` - в layout_measure.v через `natural_size`).
+Горизонтально шаги прижаты к краям, остаток поровну делят линии (не короче `connector_min`). Не
+влезает - **урезаются сначала самые длинные тексты** до общего потолка (`step_text_cap`, «уровень
+воды»), короткие остаются целиком: равные доли ширины резали бы короткое «Сборка» рядом с длинной
+подписью соседа. Текст уже `step_min_text_w` прячется, в пределе - одни кружки (`min_w` measure).
+Кружок центрирован по строке заголовка, подпись - под ним (`metrics`, общая для measure и layout);
+названия меряются **жирным** - ширина не прыгает при смене текущего. По высоте `v_policy: .fixed`.
+
+**Тема и CSS.** Поля `step_*` (`eff_step_*`): `active` (текущий, ореол; → accent), `done` (→ active),
+`pending` (кольцо; → border), `icon` (знак на заливке; → accent_text), `title` (→ text_primary),
+`title_current` (→ title), `note` (подпись, номер и название несделанного; → text_secondary),
+`hover` (→ accent), `line` (→ border), `line_done` (→ done), `circle_size` (0 → 24; у виджета свой
+`circle_size` важнее). warning/error - общие `warning`/`error_color`. CSS `stepper`: `color`,
+`:selected color` / `background`, `:hover color`, `note-color`, `done-color`, `pending-color`,
+`icon-color`, `line-color`, `done-line-color`, `circle-size` (в `css_layout_fields` - влияет на
+measure). Разметка: `stepper current= vertical size=` с `step "Название" note= state= optional icon=`.
+
+Тесты - `stepper_test.v` (щелчки и наведение настоящим путём событий, раскладка, урезание, measure,
+снапшоты `stepper.png` (тёмная, en - приписка переводится) и `stepper_vertical.png`), разметка -
+`ui_markup_test.v`.
 
 ## Chart и Sparkline (kind 59, 58) — диаграммы и график последних значений
 
@@ -2153,6 +2192,7 @@ vbox pad=12 gap=8
 | `separator`, `spacer`, `icon "имя"` (`size`, `color`), `badge` (`variant`) | | | — |
 | `sparkline` | — | `capacity`, `min`, `max`, `grid`, `frame`, `scale`, `last`, `nofill`, `nodot` | `series "Имя" color= values="1 2 3"` |
 | `chart` | заголовок | `mode=cartesian\|pie\|donut`, `stacked`, `legend=top\|bottom\|right\|none`, `categories="A, B"`, `x_title`, `y_title`, `min`, `max`, `capacity`, `center`, `noanim`, `nogrid` | `series "Имя" kind=line\|area\|bar\|step\|scatter values= xs= color= hidden`, `histogram "Имя" bins= values= color=` |
+| `stepper` | — | `current`, `vertical`, `size` (диаметр кружка) | `step "Название" note= state=pending\|done\|warning\|error\|locked optional icon=` |
 
 `#id` у `tab`, `section`, пунктов `combo`, `column`/`item` списка не поддерживается (это не
 самостоятельные объекты) — ошибка с подсказкой дать `#id` содержимому.
@@ -2347,6 +2387,7 @@ menu             { background: #222; }                     /* попап - ко�
 | `menubar` | `background` (+ `:hover`, `:pressed`), `color` |
 | `separator`, `breadcrumbs`, `plot`, `markdown` | см. `css_prop_table` |
 | `chart`, `sparkline` | `background`, `border-color`, `grid-color`, `color`, `hover-color`, `tip-background`, `line-width`, `fill-opacity`, `series-1-color` … `series-6-color`; chart — ещё `axis-color`, `title-color`, `tip-color`, `bar-radius` («Chart и Sparkline») |
+| `stepper` | `color`, `:selected` `color`/`background`, `:hover` `color`, `note-color`, `done-color`, `pending-color`, `icon-color`, `line-color`, `done-line-color`, `circle-size` («Stepper») |
 | `image`, `dropzone` | `background`, `border-color` |
 | `colorpicker` | `border-color` |
 | `datepicker`, `calendar` | `background`, `border-color`, `:hover background`, `:selected background`, `:selected color`; calendar — `:focus border-color`, `weekend-color` |

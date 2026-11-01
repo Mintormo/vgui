@@ -317,6 +317,13 @@ fn test_layouted_sparkline_and_chart() {
 	assert get_widget_bounds(a) == r && get_widget_bounds(b) == r
 }
 
+fn test_layouted_stepper() {
+	mut w := Widget(&Stepper{})
+	r := Rect{5, 6, 7, 8}
+	set_widget_bounds(mut w, r)
+	assert get_widget_bounds(w) == r
+}
+
 fn test_layouted_separator() {
 	mut w := Widget(&Separator{})
 	r := Rect{5, 6, 7, 8}

@@ -359,6 +359,14 @@ pub fn (mut w Chart) set_bounds(r Rect) {
 	w.bounds = r
 }
 
+pub fn (w &Stepper) bounds_of() Rect {
+	return w.bounds
+}
+
+pub fn (mut w Stepper) set_bounds(r Rect) {
+	w.bounds = r
+}
+
 pub fn (w &NodeEditor) bounds_of() Rect {
 	return w.bounds
 }

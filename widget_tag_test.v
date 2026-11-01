@@ -48,6 +48,7 @@ fn tag_cases() []TagCase {
 		TagCase{voidptr(&Rating{}), kind_rating, 'Rating'},
 		TagCase{voidptr(&Sparkline{}), kind_sparkline, 'Sparkline'},
 		TagCase{voidptr(&Chart{}), kind_chart, 'Chart'},
+		TagCase{voidptr(&Stepper{}), kind_stepper, 'Stepper'},
 		TagCase{voidptr(&CodeEditor{}), kind_code_editor, 'CodeEditor'},
 		TagCase{voidptr(&MarkdownView{}), kind_markdown_view, 'MarkdownView'},
 		TagCase{voidptr(&MenuButton{}), kind_menu_button, 'MenuButton'},
@@ -81,7 +82,7 @@ fn tag_cases() []TagCase {
 
 fn test_every_widget_carries_its_tag() {
 	cases := tag_cases()
-	assert cases.len == 59
+	assert cases.len == 60
 	for c in cases {
 		got := widget_type_tag(c.ptr)
 		assert got == c.kind, '${c.name}: тег ${got}, ожидался ${c.kind}'
