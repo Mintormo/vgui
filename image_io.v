@@ -38,7 +38,7 @@ pub fn decode_image_bytes(data []u8) ?RgbaImage {
 	if data.len == 0 {
 		return none
 	}
-	io := C.SDL_IOFromConstMem(data.data, usize(data.len))
+	io := C.SDL_IOFromConstMem(data.data, uint(data.len))
 	if io == unsafe { nil } {
 		return none
 	}

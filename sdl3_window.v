@@ -525,7 +525,7 @@ pub fn (mut w Window) set_icon_data(data []u8) {
 	if data.len == 0 {
 		return
 	}
-	io := C.SDL_IOFromConstMem(data.data, usize(data.len))
+	io := C.SDL_IOFromConstMem(data.data, uint(data.len))
 	if io == unsafe { nil } {
 		return
 	}

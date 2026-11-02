@@ -280,7 +280,7 @@ pub fn load_tray_icon_data(data []u8) voidptr {
 	if data.len == 0 {
 		return unsafe { nil }
 	}
-	io := C.SDL_IOFromConstMem(data.data, usize(data.len))
+	io := C.SDL_IOFromConstMem(data.data, uint(data.len))
 	if io == unsafe { nil } {
 		return unsafe { nil }
 	}

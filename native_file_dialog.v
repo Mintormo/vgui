@@ -67,8 +67,8 @@ fn native_fd_register() (u64, &NativeFdRequest) {
 // C-массива в []string (массив оканчивается nil) и ставит done; номер фильтра
 // (третий аргумент) не нужен. SDL зовёт его из цикла событий, т.е. из того же главного потока
 // в момент process_events() в native_fd_wait.
-fn native_fd_trampoline(userdata voidptr, filelist &&char, _ int) {
-	id := u64(usize(userdata))
+fn native_fd_trampoline(userdata voidptr, filelist &&char, _ i32) {
+	id := u64(uint(userdata))
 	req := g_native_fd_requests[id] or { return }
 	mut r := unsafe { req }
 	if unsafe { filelist != nil } {
@@ -189,7 +189,7 @@ pub fn native_fd_run(parent &Window, mut app App, cfg NativeFileDialogConfig) []
 	}
 
 	id, req := native_fd_register()
-	userdata := voidptr(usize(id))
+	userdata := voidptr(uint(id))
 
 	fs := build_filter_set(cfg.filter_names, cfg.filter_patterns)
 	filters_ptr := if fs.filters.len > 0 {

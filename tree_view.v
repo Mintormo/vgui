@@ -496,7 +496,7 @@ fn (tv &TreeView) tree_fingerprint() u64 {
 
 fn tv_fingerprint_node(node &TreeNode, seed u64) u64 {
 	mut h := seed
-	h = (h ^ u64(usize(voidptr(node)))) * 1099511628211
+	h = (h ^ u64(uint(voidptr(node)))) * 1099511628211
 	h = (h ^ node.text.hash()) * 1099511628211
 	h = (h ^ u64(node.children.len) ^ (if node.expanded { u64(1) << 63 } else { 0 }) ^ (if node.icon.is_set() {
 		u64(1) << 62

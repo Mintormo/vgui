@@ -156,7 +156,7 @@ fn test_tab_skips_unregistered_widget() {
 
 fn test_same_pointer_different_kind_replaces_entry() {
 	mut fm := FocusManager{}
-	ptr := unsafe { voidptr(usize(0xDEAD0000)) }
+	ptr := unsafe { voidptr(uint(0xDEAD0000)) }
 	fm.register_ptr(ptr, .text_input, 0)
 	assert fm.entries.len == 1
 	assert fm.entries[0].kind == .text_input
@@ -170,7 +170,7 @@ fn test_same_pointer_different_kind_replaces_entry() {
 
 fn test_same_pointer_same_kind_is_idempotent() {
 	mut fm := FocusManager{}
-	ptr := unsafe { voidptr(usize(0xBEEF0000)) }
+	ptr := unsafe { voidptr(uint(0xBEEF0000)) }
 	fm.register_ptr(ptr, .button, 0)
 	fm.register_ptr(ptr, .button, 0)
 	fm.register_ptr(ptr, .button, 0)
@@ -186,7 +186,7 @@ fn test_same_pointer_same_kind_is_idempotent() {
 fn test_register_unregister_cycle_leaves_nothing() {
 	mut fm := FocusManager{}
 	for i in 0 .. 50000 {
-		p := unsafe { voidptr(usize(0x100000) + usize(i * 64)) }
+		p := unsafe { voidptr(uint(0x100000) + uint(i * 64)) }
 		fm.register_ptr(p, .button, 0)
 		fm.unregister(p)
 	}

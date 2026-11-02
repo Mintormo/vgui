@@ -146,15 +146,15 @@ pub const sdl_hittest_resize_left = 9
 
 // SDL3_ttf: открытие шрифтов из файла или из памяти (через SDL_IOFromConstMem), рендер текста
 // в surface, измерение, стиль и хинтинг. В SDL3_ttf размеры шрифта - f32, а длина строки -
-// usize (0 означает "до нулевого байта").
+// uint (0 означает "до нулевого байта").
 fn C.TTF_Init() bool
 fn C.TTF_Quit()
 fn C.TTF_OpenFont(file &char, ptsize f32) voidptr
 fn C.TTF_OpenFontIO(src voidptr, closeio bool, ptsize f32) voidptr
-fn C.SDL_IOFromConstMem(mem voidptr, size usize) voidptr
+fn C.SDL_IOFromConstMem(mem voidptr, size uint) voidptr
 fn C.TTF_CloseFont(font voidptr)
-fn C.TTF_RenderText_Blended(font voidptr, text &char, length usize, fg C.SDL_Color) voidptr
-fn C.TTF_GetStringSize(font voidptr, text &char, length usize, w &int, h &int) bool
+fn C.TTF_RenderText_Blended(font voidptr, text &char, length uint, fg C.SDL_Color) voidptr
+fn C.TTF_GetStringSize(font voidptr, text &char, length uint, w &int, h &int) bool
 fn C.TTF_SetFontStyle(font voidptr, style int)
 fn C.TTF_GetFontHeight(font voidptr) int
 fn C.TTF_SetFontHinting(font voidptr, hinting int)

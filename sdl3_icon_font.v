@@ -43,7 +43,7 @@ fn get_icon_font(ctx &RenderContext, logical_size int) voidptr {
 	}
 
 	data, blob_size := embedded_icon_font()
-	io := C.SDL_IOFromConstMem(data, usize(blob_size))
+	io := C.SDL_IOFromConstMem(data, uint(blob_size))
 	if unsafe { io == nil } {
 		return unsafe { nil }
 	}

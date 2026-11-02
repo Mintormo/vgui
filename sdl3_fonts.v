@@ -239,7 +239,7 @@ pub fn (ctx &RenderContext) get_font_immut(style FontStyle, size int) voidptr {
 fn open_font_for_role(is_mono bool, path string, data []u8, size int) voidptr {
 	mut font := unsafe { voidptr(nil) }
 	if data.len > 0 {
-		io := C.SDL_IOFromConstMem(data.data, usize(data.len))
+		io := C.SDL_IOFromConstMem(data.data, uint(data.len))
 		if unsafe { io == nil } {
 			return unsafe { nil }
 		}
@@ -248,7 +248,7 @@ fn open_font_for_role(is_mono bool, path string, data []u8, size int) voidptr {
 		font = C.TTF_OpenFont(path.str, f32(size))
 	} else {
 		def_data, blob_size := if is_mono { embedded_mono_font() } else { embedded_regular_font() }
-		io := C.SDL_IOFromConstMem(def_data, usize(blob_size))
+		io := C.SDL_IOFromConstMem(def_data, uint(blob_size))
 		if unsafe { io == nil } {
 			return unsafe { nil }
 		}
@@ -393,7 +393,7 @@ fn (mut ctx RenderContext) cached_text_texture(text string, font voidptr, font_s
 		a: c.a
 	}
 	// SDL3_ttf: TTF_RenderText_Blended takes length (0 = auto from null-terminator)
-	surface := C.TTF_RenderText_Blended(font, text.str, usize(0), sdl_color)
+	surface := C.TTF_RenderText_Blended(font, text.str, uint(0), sdl_color)
 	if unsafe { surface == nil } {
 		return unsafe { nil }, 0, 0
 	}
@@ -411,7 +411,7 @@ fn (mut ctx RenderContext) cached_text_texture(text string, font voidptr, font_s
 	// SDL3_ttf: TTF_GetStringSize for text measurement
 	mut tw := 0
 	mut th := 0
-	C.TTF_GetStringSize(font, text.str, usize(0), &tw, &th)
+	C.TTF_GetStringSize(font, text.str, uint(0), &tw, &th)
 
 	if ctx.text_cache.len >= ctx.cache_max {
 		ctx.evict_text_cache_lru()
@@ -480,7 +480,7 @@ pub fn (ctx &RenderContext) measure_text_with_font(text string, font voidptr) Ve
 	}
 	mut tw := 0
 	mut th := 0
-	C.TTF_GetStringSize(font, text.str, usize(0), &tw, &th)
+	C.TTF_GetStringSize(font, text.str, uint(0), &tw, &th)
 	combined := ctx.dpi_scale * ctx.ui_scale
 	if combined > 1.0 {
 		return Vec2{f32(tw) / combined, f32(th) / combined}
@@ -540,7 +540,7 @@ pub fn (mut ctx RenderContext) draw_text_rotated_center(text string, cx f32, cy 
 
 	mut tw := 0
 	mut th := 0
-	C.TTF_GetStringSize(font, text.str, usize(0), &tw, &th)
+	C.TTF_GetStringSize(font, text.str, uint(0), &tw, &th)
 
 	// Сторона квадратной подложки: у повёрнутого текста при любом угле габарит не превышает max(w, h)
 	// по каждой оси.
@@ -552,7 +552,7 @@ pub fn (mut ctx RenderContext) draw_text_rotated_center(text string, cx f32, cy 
 		return
 	}
 
-	text_surface := C.TTF_RenderText_Blended(font, text.str, usize(0), sdl_color)
+	text_surface := C.TTF_RenderText_Blended(font, text.str, uint(0), sdl_color)
 	if unsafe { text_surface == nil } {
 		C.SDL_DestroySurface(padded)
 		return
