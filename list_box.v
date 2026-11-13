@@ -128,6 +128,12 @@ pub mut:
 	scroll_speed f32              = 30
 	on_select    fn (int, string) = unsafe { nil }
 	on_dbl_click fn (int, string) = unsafe { nil }
+	// on_scroll(scroll_x, scroll_y) - прокрутку изменил ВВОД (колесо, полосы,
+	// клавиши, переход курсора за край видимой части): зовётся из
+	// handle_event, после события. Программная смена (присваивание scroll_x/
+	// scroll_y, clear, set_selected) и смена размера списка его не зовут -
+	// как on_resize у Splitter; виджеты в обработчике менять можно.
+	on_scroll fn (f32, f32) = unsafe { nil }
 	// Called first for key_down while the list is focused; return true to
 	// consume the event (lets apps bind e.g. Ctrl+Up/Down before built-ins).
 	on_key_down fn (&GuiEvent) bool = unsafe { nil }
@@ -1876,6 +1882,14 @@ pub fn (mut lb ListBox) handle_event(event &GuiEvent, app &App) bool {
 		return false
 	}
 	lb.sync_model()
+	// Прокрутку меняют многие ветки ниже - сравнение одно, на выходе
+	old_sx := lb.scroll_x
+	old_sy := lb.scroll_y
+	defer {
+		if (lb.scroll_x != old_sx || lb.scroll_y != old_sy) && lb.on_scroll != unsafe { nil } {
+			lb.on_scroll(lb.scroll_x, lb.scroll_y)
+		}
+	}
 
 	// ── Column resize drag in progress ──
 	if lb.col_resizing {
